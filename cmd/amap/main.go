@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,7 +117,7 @@ func printHelp() {
 
 核心功能命令:
   serve [--project <path>]                    启动 stdio MCP 服务
-  dashboard [--project <path>] [--port <N>]   在本地 8585 端口启动源码星空可视化控制台
+  dashboard [--project <path>] [--host <addr>] [--port <N>]   启动源码星空可视化控制台
   index [--project <path>] [--scip <path>]    构建/更新当前项目代码地图索引
   install                                     一键安装 MCP 到 Claude Code / Cursor
 
@@ -166,13 +167,14 @@ func serveCmd() {
 func dashboardCmd() {
 	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
 	projectPath := fs.String("project", ".", "项目根目录绝对路径")
+	host := fs.String("host", "0.0.0.0", "Web服务监听地址")
 	port := fs.Int("port", 8585, "Web服务端口号")
 	foreground := fs.Bool("foreground", false, "以前台模式运行 Dashboard")
 	_ = fs.Parse(os.Args[2:])
 
 	absProj, _ := filepath.Abs(*projectPath)
 	if !*foreground {
-		startDashboardBackground(absProj, *port)
+		startDashboardBackground(absProj, *host, *port)
 		return
 	}
 
@@ -183,14 +185,14 @@ func dashboardCmd() {
 	}
 	defer db.Close()
 
-	err = astramap.StartStandaloneServer(db, absProj, *port)
+	err = astramap.StartStandaloneServer(db, absProj, *host, *port)
 	if err != nil {
 		logError("Web服务器启动失败: %v", err)
 		os.Exit(1)
 	}
 }
 
-func startDashboardBackground(projectRoot string, port int) {
+func startDashboardBackground(projectRoot, host string, port int) {
 	exe, err := os.Executable()
 	if err != nil {
 		logError("无法定位当前二进制: %v", err)
@@ -209,7 +211,7 @@ func startDashboardBackground(projectRoot string, port int) {
 	}
 	defer logFile.Close()
 
-	args := []string{"dashboard", "--project", projectRoot, "--port", fmt.Sprintf("%d", port), "--foreground"}
+	args := []string{"dashboard", "--project", projectRoot, "--host", host, "--port", fmt.Sprintf("%d", port), "--foreground"}
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -223,13 +225,38 @@ func startDashboardBackground(projectRoot string, port int) {
 		logWarn("Dashboard 进程已启动，但释放进程句柄失败: %v", err)
 	}
 
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	fmt.Printf("AstraMap Dashboard started in background\n")
-	fmt.Printf("URL: http://%s\n", addr)
-	fmt.Printf("IP: 127.0.0.1\n")
+	fmt.Printf("Host: %s\n", host)
 	fmt.Printf("Port: %d\n", port)
+	fmt.Printf("Local: http://localhost:%d\n", port)
+	for _, ip := range localIPv4Addrs() {
+		fmt.Printf("LAN: http://%s:%d\n", ip, port)
+	}
 	fmt.Printf("PID: %d\n", cmd.Process.Pid)
 	fmt.Printf("Log: %s\n", logPath)
+}
+
+func localIPv4Addrs() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var ips []string
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP == nil || ipNet.IP.IsLoopback() {
+			continue
+		}
+		ip := ipNet.IP.To4()
+		if ip == nil {
+			continue
+		}
+		ips = append(ips, ip.String())
+		if len(ips) >= 3 {
+			break
+		}
+	}
+	return ips
 }
 
 // ===== SCIP 自动检测与生成 =====

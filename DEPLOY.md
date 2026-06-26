@@ -555,19 +555,22 @@ AstraMap 内置 D3.js 可视化控制台，提供交互式代码图谱浏览。
 ### 5.1 启动 Dashboard
 
 ```bash
-# 默认端口 8585，后台运行并打印 URL、IP、端口、PID、日志路径
+# 默认监听 0.0.0.0:8585，后台运行并打印本机/内网访问地址、PID、日志路径
 amap dashboard --project /path/to/your/project
 
 # 自定义端口
 amap dashboard --project /path/to/your/project --port 9090
 
+# 仅本机访问
+amap dashboard --project /path/to/your/project --host 127.0.0.1 --port 8585
+
 # 前台运行，适合调试或 systemd
-amap dashboard --project /path/to/your/project --port 8585 --foreground
+amap dashboard --project /path/to/your/project --host 0.0.0.0 --port 8585 --foreground
 ```
 
-启动后访问命令输出中的 `http://127.0.0.1:<port>`。后台日志写入 `<project>/.astramap/dashboard.log`。
+启动后访问命令输出中的 `Local` 或 `LAN` 地址。后台日志写入 `<project>/.astramap/dashboard.log`。
 
-**注意**：Dashboard 仅绑定 `127.0.0.1`，不接受外部网络连接。
+**注意**：默认绑定 `0.0.0.0` 以支持内网访问；如只允许本机访问，请显式传入 `--host 127.0.0.1`。
 
 ### 5.2 Dashboard 功能
 
@@ -740,7 +743,7 @@ After=network.target
 Type=simple
 User=developer
 WorkingDirectory=/home/developer/projects/your-project
-ExecStart=/usr/local/bin/amap dashboard --project /home/developer/projects/your-project --port 8585 --foreground
+ExecStart=/usr/local/bin/amap dashboard --project /home/developer/projects/your-project --host 0.0.0.0 --port 8585 --foreground
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -1236,7 +1239,7 @@ approval_mode = "approve"
 ```
 核心服务:
   amap serve [--project <path>]                    MCP stdio 服务
-  amap dashboard [--project <path>] [--port <N>] [--foreground]  Web 可视化控制台
+  amap dashboard [--project <path>] [--host <addr>] [--port <N>] [--foreground]  Web 可视化控制台
   amap index [--project <path>] [--scip|--scip-file <path>|--treesitter-only]  构建/更新索引
   amap install                                     一键注册 MCP + 规则文件到 Claude Code / VS Code / Cursor / Codex / Windsurf / Cline / 项目 .mcp.json
 

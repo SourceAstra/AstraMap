@@ -20,7 +20,7 @@ import (
 var WebStatic embed.FS
 
 // StartStandaloneServer starts a decoupled HTTP server serving both mock-free APIs and AstraMap standalone Web UI.
-func StartStandaloneServer(db *sqlx.DB, projectRoot string, port int) error {
+func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) error {
 	mux := http.NewServeMux()
 
 	// 1. JSON APIs matching standalone index.html calls (mock-free, no auth)
@@ -372,7 +372,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot string, port int) error {
 	}
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
 
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	addr := fmt.Sprintf("%s:%d", host, port)
 	fmt.Fprintf(os.Stderr, "[INFO] Standalone AstraMap Dashboard is running at http://%s\n", addr)
 	return http.ListenAndServe(addr, mux)
 }
