@@ -100,7 +100,7 @@
                 <div class="und-layout">
                     <div class="und-tree-panel">
                         <div class="und-tree-header">
-                            <div class="und-tree-title">函数入口</div>
+                            <div class="und-tree-title">相关函数</div>
                             <input id="und-function-search" class="und-function-search" placeholder="搜索函数..." autocomplete="off">
                         </div>
                         <div id="und-function-tree" class="und-function-tree"></div>
@@ -108,19 +108,19 @@
                     <div class="und-graph-panel">
                         <div class="und-graph-toolbar">
                             <div class="und-toolbar-left">
-                                <span class="und-toolbar-title">🧠 追踪拓扑</span>
+                                <span class="und-toolbar-title">🧠 相关调用链</span>
                                 <span class="und-root-label" id="und-root-label"></span>
                             </div>
                             <div class="und-toolbar-right">
                                 <label class="und-depth-label">深度
                                     <select id="und-depth-select" class="und-select">
-                                        <option value="1" selected>1</option>
+                                        <option value="1">1</option>
                                         <option value="2">2</option>
                                         <option value="3">3</option>
                                         <option value="4">4</option>
                                         <option value="5">5</option>
                                         <option value="6">6</option>
-                                        <option value="8">8</option>
+                                        <option value="8" selected>8</option>
                                     </select>
                                 </label>
                                 <label class="und-depth-label" style="margin-right:8px;">透视目录
@@ -129,10 +129,10 @@
                                     </select>
                                 </label>
                                 <button id="und-btn-group" class="und-btn" title="切换目录与层级分组布局">📂 目录分组</button>
-                                <button id="und-btn-impact" class="und-btn" title="流光影响分析">⚡ 影响分析</button>
-                                <button id="und-btn-blast" class="und-btn" title="爆炸半径影响范围分析">💣 影响范围</button>
+                                <button id="und-btn-impact" class="und-btn" title="查看与当前函数相关的调用影响">⚡ 相关影响</button>
+                                <button id="und-btn-blast" class="und-btn" title="查看与当前函数相关的覆盖范围">💣 相关范围</button>
                                 <button id="und-btn-fit" class="und-btn" title="适应画布">⊞ 适应</button>
-                                <button id="und-btn-detail" class="und-btn" title="显示系统/外部函数关系">📋 详细关系</button>
+                                <button id="und-btn-detail" class="und-btn" title="显示更完整的相关调用关系">📋 详细关系</button>
                             </div>
                         </div>
                         <canvas id="und-canvas"></canvas>
@@ -161,8 +161,8 @@
                 </div>
                 <div class="und-empty-state" id="und-empty">
                     <div style="font-size:48px">🧠</div>
-                    <h3>深度追踪视图</h3>
-                    <p>从左侧函数树选择入口，或在探索视界右键函数进入依赖分析</p>
+                    <h3>相关调用视图</h3>
+                    <p>从左侧函数树选择入口，查看与当前函数相关的祖先链和子孙链</p>
                 </div>
             `;
 

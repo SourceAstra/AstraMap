@@ -192,7 +192,9 @@ func ReadSourceRange(projectRoot, filePath string, startLine, endLine int) (stri
 	return strings.Join(matched, "\n"), scanner.Err()
 }
 
-// QueryTraceCTE returns the direct caller/callee star centered on startNodeID.
+// QueryTraceCTE returns the call closure centered on startNodeID.
+// Traversal expands both callers and callees transitively up to maxDepth,
+// then keeps only edges whose endpoints are both inside the closure.
 func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNode, []*AstraMapEdge, error) {
 	var startID string
 	err := db.Get(&startID, "SELECT id FROM astramap_nodes WHERE id = ? LIMIT 1", startNodeID)
@@ -204,22 +206,46 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 	}
 	const maxNodes = 180
 	const maxEdges = 500
-	visited := map[string]bool{startID: true}
-
-	var edges []*AstraMapEdge
-	if err := db.Select(&edges, `
-		SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
-		FROM astramap_edges
-		WHERE kind = 'calls' AND (source = ? OR target = ?)
-		LIMIT ?
-	`, startID, startID, maxEdges); err != nil {
-		return nil, nil, err
+	if maxDepth <= 0 {
+		maxDepth = 3
 	}
 
-	for _, e := range edges {
-		for _, id := range []string{e.Source, e.Target} {
-			if len(visited) < maxNodes {
-				visited[id] = true
+	visited := map[string]int{startID: 0}
+	queue := []string{startID}
+
+	for len(queue) > 0 && len(visited) < maxNodes {
+		curr := queue[0]
+		queue = queue[1:]
+
+		currDepth := visited[curr]
+		if currDepth >= maxDepth {
+			continue
+		}
+
+		var nextEdges []*AstraMapEdge
+		if err := db.Select(&nextEdges, `
+			SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
+			FROM astramap_edges
+			WHERE kind = 'calls' AND (source = ? OR target = ?)
+			ORDER BY id
+			LIMIT ?
+		`, curr, curr, maxEdges); err != nil {
+			return nil, nil, err
+		}
+
+		for _, e := range nextEdges {
+			nextID := ""
+			if e.Source == curr {
+				nextID = e.Target
+			} else if e.Target == curr {
+				nextID = e.Source
+			}
+			if nextID == "" {
+				continue
+			}
+			if _, ok := visited[nextID]; !ok && len(visited) < maxNodes {
+				visited[nextID] = currDepth + 1
+				queue = append(queue, nextID)
 			}
 		}
 	}
@@ -245,5 +271,34 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 		return nil, nil, err
 	}
 
-	return nodes, edges, nil
+	allowed := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		allowed[n.ID] = true
+	}
+
+	queryEdges, argsEdges, err := sqlx.In(`
+		SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
+		FROM astramap_edges
+		WHERE kind = 'calls' AND source IN (?) AND target IN (?)
+		ORDER BY id
+		LIMIT ?
+	`, nodeIDs, nodeIDs, maxEdges)
+	if err != nil {
+		return nil, nil, err
+	}
+	queryEdges = db.Rebind(queryEdges)
+
+	var edges []*AstraMapEdge
+	if err := db.Select(&edges, queryEdges, argsEdges...); err != nil {
+		return nil, nil, err
+	}
+
+	filteredEdges := make([]*AstraMapEdge, 0, len(edges))
+	for _, e := range edges {
+		if allowed[e.Source] && allowed[e.Target] {
+			filteredEdges = append(filteredEdges, e)
+		}
+	}
+
+	return nodes, filteredEdges, nil
 }
