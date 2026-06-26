@@ -1137,7 +1137,54 @@ rm ~/bin/amap
 | `args` | `${workspaceFolder}` 为 Cursor 内置变量 |
 | `isOn` | `true` 启用，`false` 禁用 |
 
-### A.3 CLI 命令速查
+### A.3 Codex MCP 配置
+
+Codex 使用 `~/.codex/config.toml`（TOML 格式）注册 MCP 服务器，不读取项目 `.mcp.json`。
+
+**推荐方式**（CLI 自动注册）：
+
+```bash
+codex mcp add astramap -- /absolute/path/to/amap serve --project .
+```
+
+**手动编辑** `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.astramap]
+command = "/absolute/path/to/amap"
+args = ["serve", "--project", "."]
+
+[mcp_servers.astramap.tools.astramap_search]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_explore]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_node]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_callers]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_callees]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_impact]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_status]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_verdict]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_trace]
+approval_mode = "approve"
+[mcp_servers.astramap.tools.astramap_files]
+approval_mode = "approve"
+```
+
+| 字段 | 说明 |
+|------|------|
+| `command` | `amap` 二进制绝对路径 |
+| `args` | `"."` 表示使用 Codex 当前工作目录 |
+| `approval_mode` | `"approve"` 免确认自动执行；省略则每次调用需人工确认 |
+
+> **注意**：`amap install` 已自动执行 `codex mcp add` 并写入全部 `approval_mode`，通常无需手动编辑。
+
+### A.4 CLI 命令速查
 
 ```
 核心服务:
