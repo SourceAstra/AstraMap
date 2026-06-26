@@ -1,8 +1,11 @@
 package astramap
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -88,6 +91,7 @@ type AstraMapVerdict struct {
 // ImportScipIndexToAstraMap 解析 SCIP 索引并全量同步到 SQLite 的 AstraMap 表中
 func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error {
 	logInfo("ImportScipIndexToAstraMap: 开始导入 SCIP 索引: %s", scipPath)
+	logInfo("ImportScipIndexToAstraMap: 正在载入中，请稍后......")
 	data, err := os.ReadFile(scipPath)
 	if err != nil {
 		return fmt.Errorf("读取 SCIP 索引文件失败: %w", err)
@@ -288,6 +292,7 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			})
 		}
 	}
+	logInfo("ImportScipIndexToAstraMap: 正在写入索引，请稍后......")
 
 	// 3. 执行数据库批量写入 (Transaction)
 	tx, err := db.Beginx()
@@ -404,15 +409,19 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		return true, nil
 	}
 
-	nodes, edges, contentHash, err := ParseFileIncremental(projectRoot, relPath)
+	contentHash, err := hashFile(absPath)
 	if err != nil {
 		return false, err
 	}
-
 	var existingHash string
 	_ = db.Get(&existingHash, "SELECT content_hash FROM astramap_files WHERE path = ?", relPath)
 	if existingHash == contentHash {
 		return false, nil
+	}
+
+	nodes, edges, _, err := ParseFileIncremental(projectRoot, relPath)
+	if err != nil {
+		return false, err
 	}
 
 	tx, err := db.Beginx()
@@ -479,10 +488,21 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		return false, err
 	}
 
-	_ = ResolveGoInterfaces(db)
-	_ = ResolveWebRoutes(db, projectRoot)
-
 	return true, nil
+}
+
+func hashFile(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // SyncAllFilesAstraMap 扫描项目目录，增量同步所有脏文件
@@ -493,14 +513,16 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string) error {
 		".c": true, ".cpp": true, ".cc": true, ".cxx": true, ".h": true, ".hpp": true, ".java": true,
 	}
 
+	scanned := 0
 	updated := 0
+	lastProgress := time.Now()
 	err := filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		if info.IsDir() {
 			name := info.Name()
-			if name == ".git" || name == "node_modules" || name == "build" || name == "dist" || name == "vendor" {
+			if shouldSkipIndexDir(name) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -511,6 +533,13 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string) error {
 			return nil
 		}
 
+		scanned++
+		relPath, _ := filepath.Rel(projectRoot, path)
+		if scanned%100 == 0 || time.Since(lastProgress) > 2*time.Second {
+			logInfo("SyncAllFilesAstraMap: Tree-sitter 扫描进度 scanned=%d updated=%d current=%s", scanned, updated, relPath)
+			lastProgress = time.Now()
+		}
+
 		changed, err := SyncFileAstraMap(db, projectRoot, path)
 		if err == nil && changed {
 			updated++
@@ -519,12 +548,25 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string) error {
 	})
 
 	// 触发跨文件调用解析
+	logInfo("SyncAllFilesAstraMap: 文件扫描完成 scanned=%d updated=%d，开始解析全局关系", scanned, updated)
+	_ = ResolveGoInterfaces(db)
+	_ = ResolveWebRoutes(db, projectRoot)
 	if err2 := ResolveCrossFileCalls(db, projectRoot); err2 != nil {
 		logError("ResolveCrossFileCalls failed: %v", err2)
 	}
 
-	logInfo("SyncAllFilesAstraMap: 增量扫描就绪，更新了 %d 个文件", updated)
+	logInfo("SyncAllFilesAstraMap: 增量扫描就绪，扫描了 %d 个文件，更新了 %d 个文件", scanned, updated)
 	return err
+}
+
+func shouldSkipIndexDir(name string) bool {
+	switch name {
+	case ".git", ".astramap", ".understand-anything", ".cache", ".idea", ".vscode",
+		"node_modules", "build", "dist", "vendor", "target", "out", "tmp", "temp":
+		return true
+	default:
+		return strings.HasPrefix(name, ".trash")
+	}
 }
 
 // ===== Heuristic Resolvers (启发式粘合解析器) =====

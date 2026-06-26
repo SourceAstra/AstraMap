@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -166,9 +167,15 @@ func dashboardCmd() {
 	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
 	projectPath := fs.String("project", ".", "项目根目录绝对路径")
 	port := fs.Int("port", 8585, "Web服务端口号")
+	foreground := fs.Bool("foreground", false, "以前台模式运行 Dashboard")
 	_ = fs.Parse(os.Args[2:])
 
 	absProj, _ := filepath.Abs(*projectPath)
+	if !*foreground {
+		startDashboardBackground(absProj, *port)
+		return
+	}
+
 	db, err := getAstraMapDB(absProj)
 	if err != nil {
 		logError("无法连接到代码地图数据库: %v", err)
@@ -183,6 +190,48 @@ func dashboardCmd() {
 	}
 }
 
+func startDashboardBackground(projectRoot string, port int) {
+	exe, err := os.Executable()
+	if err != nil {
+		logError("无法定位当前二进制: %v", err)
+		os.Exit(1)
+	}
+
+	logPath := filepath.Join(projectRoot, ".astramap", "dashboard.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		logError("无法创建日志目录: %v", err)
+		os.Exit(1)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		logError("无法打开 Dashboard 日志: %v", err)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+
+	args := []string{"dashboard", "--project", projectRoot, "--port", fmt.Sprintf("%d", port), "--foreground"}
+	cmd := exec.Command(exe, args...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil
+
+	if err := cmd.Start(); err != nil {
+		logError("Dashboard 后台启动失败: %v", err)
+		os.Exit(1)
+	}
+	if err := cmd.Process.Release(); err != nil {
+		logWarn("Dashboard 进程已启动，但释放进程句柄失败: %v", err)
+	}
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	fmt.Printf("AstraMap Dashboard started in background\n")
+	fmt.Printf("URL: http://%s\n", addr)
+	fmt.Printf("IP: 127.0.0.1\n")
+	fmt.Printf("Port: %d\n", port)
+	fmt.Printf("PID: %d\n", cmd.Process.Pid)
+	fmt.Printf("Log: %s\n", logPath)
+}
+
 // ===== SCIP 自动检测与生成 =====
 
 func detectProjectLanguages(projectRoot string) []string {
@@ -194,19 +243,74 @@ func detectProjectLanguages(projectRoot string) []string {
 		langs = append(langs, "typescript")
 	} else if _, err := os.Stat(filepath.Join(projectRoot, "package.json")); err == nil {
 		langs = append(langs, "typescript")
+	} else if projectHasExtensions(projectRoot, ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs") {
+		langs = append(langs, "typescript")
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, "pyproject.toml")); err == nil {
 		langs = append(langs, "python")
 	} else if _, err := os.Stat(filepath.Join(projectRoot, "setup.py")); err == nil {
 		langs = append(langs, "python")
+	} else if _, err := os.Stat(filepath.Join(projectRoot, "requirements.txt")); err == nil {
+		langs = append(langs, "python")
+	} else if projectHasExtensions(projectRoot, ".py") {
+		langs = append(langs, "python")
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, "pom.xml")); err == nil {
 		langs = append(langs, "java")
+	} else if hasAnyProjectFile(projectRoot, "build.gradle", "build.gradle.kts", "gradlew") {
+		langs = append(langs, "java")
+	} else if projectHasExtensions(projectRoot, ".java") {
+		langs = append(langs, "java")
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, "CMakeLists.txt")); err == nil {
+	if isCppProject(projectRoot) {
 		langs = append(langs, "cpp")
 	}
 	return langs
+}
+
+func isCppProject(projectRoot string) bool {
+	for _, marker := range []string{"compile_commands.json", "CMakeLists.txt", "Makefile", "makefile"} {
+		if _, err := os.Stat(filepath.Join(projectRoot, marker)); err == nil {
+			if marker != "Makefile" && marker != "makefile" {
+				return true
+			}
+			if projectHasExtensions(projectRoot, ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx") {
+				return true
+			}
+		}
+	}
+	return projectHasExtensions(projectRoot, ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx")
+}
+
+func projectHasExtensions(projectRoot string, exts ...string) bool {
+	wanted := make(map[string]bool, len(exts))
+	for _, ext := range exts {
+		wanted[ext] = true
+	}
+
+	found := false
+	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if info.IsDir() {
+			switch info.Name() {
+			case ".git", ".astramap", ".understand-anything", ".cache", ".idea", ".vscode",
+				"node_modules", "build", "dist", "vendor", "target", "out", "tmp", "temp":
+				return filepath.SkipDir
+			default:
+				if strings.HasPrefix(info.Name(), ".trash") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		if wanted[strings.ToLower(filepath.Ext(path))] {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 func scipToolName(lang string) string {
@@ -235,19 +339,149 @@ func findScipTool(lang string) (string, bool) {
 	return "", false
 }
 
-func printScipInstallHint(lang string) {
+func languageDisplayName(lang string) string {
 	switch lang {
 	case "go":
-		fmt.Println("  安装: go install github.com/sourcegraph/scip-go/cmd/scip-go@latest")
+		return "Go"
 	case "typescript":
-		fmt.Println("  安装: npm install -g @sourcegraph/scip-typescript")
+		return "TypeScript/JavaScript"
 	case "python":
-		fmt.Println("  安装: pip install scip-python")
+		return "Python"
 	case "java":
-		fmt.Println("  安装: 参见 https://github.com/sourcegraph/scip-java")
+		return "Java"
 	case "cpp":
-		fmt.Println("  安装: 参见 https://github.com/sourcegraph/scip-clang")
+		return "C/C++"
+	default:
+		return lang
 	}
+}
+
+func scipInstallHint(lang string) string {
+	switch lang {
+	case "go":
+		return "go install github.com/sourcegraph/scip-go/cmd/scip-go@latest"
+	case "typescript":
+		return "npm install -g @sourcegraph/scip-typescript"
+	case "python":
+		return "pip install scip-python"
+	case "java":
+		return "参见 https://github.com/sourcegraph/scip-java"
+	case "cpp":
+		return "参见 https://github.com/sourcegraph/scip-clang"
+	default:
+		return ""
+	}
+}
+
+func printToolStatus(label string, commands []string, installHint string) bool {
+	if path := firstAvailableTool(commands...); path != "" {
+		fmt.Printf("  ✓ %s: %s\n", label, path)
+		return true
+	}
+	fmt.Printf("  ⚠ 未找到 %s: %s\n", label, strings.Join(commands, " / "))
+	if installHint != "" {
+		fmt.Printf("    安装: %s\n", installHint)
+	}
+	return false
+}
+
+func printScipToolStatus(lang string) {
+	name := scipToolName(lang)
+	if path, ok := findScipTool(lang); ok {
+		fmt.Printf("  ✓ %s: %s\n", name, path)
+		return
+	}
+	fmt.Printf("  ⚠ 未找到 %s\n", name)
+	if hint := scipInstallHint(lang); hint != "" {
+		fmt.Printf("    安装: %s\n", hint)
+	}
+}
+
+func printLanguageToolchainHints(lang, projectRoot string) {
+	fmt.Printf("检测到 %s 项目，检查工具链...\n", languageDisplayName(lang))
+	printScipToolStatus(lang)
+
+	switch lang {
+	case "go":
+		printToolStatus("Go 编译工具", []string{"go"}, "https://go.dev/doc/install")
+	case "typescript":
+		printToolStatus("Node.js", []string{"node"}, "Ubuntu/Debian: sudo apt install nodejs npm | macOS: brew install node")
+		printToolStatus("包管理器", []string{"pnpm", "yarn", "npm"}, "Ubuntu/Debian: sudo apt install npm | macOS: brew install node")
+		if hasAnyProjectFile(projectRoot, "tsconfig.json") {
+			printToolStatus("TypeScript 编译器", []string{"tsc"}, "npm install -g typescript")
+		}
+	case "python":
+		printToolStatus("Python 解释器", []string{"python3", "python"}, "Ubuntu/Debian: sudo apt install python3 python3-pip | macOS: brew install python")
+		printToolStatus("pip", []string{"pip3", "pip"}, "Ubuntu/Debian: sudo apt install python3-pip | macOS: python3 -m ensurepip")
+	case "java":
+		printToolStatus("Java 运行时", []string{"java"}, "Ubuntu/Debian: sudo apt install default-jdk | macOS: brew install openjdk")
+		printToolStatus("Java 编译器", []string{"javac"}, "Ubuntu/Debian: sudo apt install default-jdk | macOS: brew install openjdk")
+		if hasAnyProjectFile(projectRoot, "pom.xml") {
+			printToolStatus("Maven", []string{"mvn"}, "Ubuntu/Debian: sudo apt install maven | macOS: brew install maven")
+		}
+		if projectHasExtensions(projectRoot, ".gradle") || hasAnyProjectFile(projectRoot, "build.gradle", "build.gradle.kts", "gradlew") {
+			if hasAnyProjectFile(projectRoot, "gradlew") {
+				fmt.Printf("  ✓ Gradle Wrapper: %s\n", filepath.Join(projectRoot, "gradlew"))
+			} else {
+				printToolStatus("Gradle", []string{"gradle"}, "Ubuntu/Debian: sudo apt install gradle | macOS: brew install gradle")
+			}
+		}
+	case "cpp":
+		printCppToolchainHints(projectRoot)
+	}
+}
+
+func printCppToolchainHints(projectRoot string) {
+	compdbPath := filepath.Join(projectRoot, "compile_commands.json")
+	if _, err := os.Stat(compdbPath); err == nil {
+		fmt.Printf("  ✓ compile_commands.json: %s\n", compdbPath)
+	} else {
+		fmt.Println("  ⚠ 未发现 compile_commands.json；scip-clang 高精度索引需要该文件")
+		if _, err := exec.LookPath("bear"); err == nil {
+			fmt.Println("  ✓ bear 已安装，将自动执行: bear -- make")
+		} else {
+			fmt.Println("  ⚠ bear 未安装，无法自动捕获 Makefile 编译命令")
+			fmt.Println("    安装: Ubuntu/Debian: sudo apt install bear | macOS: brew install bear")
+		}
+		if _, err := exec.LookPath("cmake"); err == nil {
+			fmt.Println("  ✓ cmake 已安装，可生成: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+		} else if _, err := os.Stat(filepath.Join(projectRoot, "CMakeLists.txt")); err == nil {
+			fmt.Println("  ⚠ 检测到 CMakeLists.txt 但未找到 cmake")
+			fmt.Println("    安装: Ubuntu/Debian: sudo apt install cmake | macOS: brew install cmake")
+		}
+	}
+
+	if _, err := exec.LookPath("make"); err == nil {
+		fmt.Println("  ✓ make 已安装")
+	} else if hasAnyProjectFile(projectRoot, "Makefile", "makefile") {
+		fmt.Println("  ⚠ 检测到 Makefile 但未找到 make")
+		fmt.Println("    安装: Ubuntu/Debian: sudo apt install make | macOS: xcode-select --install")
+	}
+
+	if compiler := firstAvailableTool("cc", "clang", "gcc"); compiler != "" {
+		fmt.Printf("  ✓ C/C++ 编译器可用: %s\n", compiler)
+	} else {
+		fmt.Println("  ⚠ 未找到 C/C++ 编译器: cc / clang / gcc")
+		fmt.Println("    安装: Ubuntu/Debian: sudo apt install build-essential clang | macOS: xcode-select --install")
+	}
+}
+
+func hasAnyProjectFile(projectRoot string, names ...string) bool {
+	for _, name := range names {
+		if _, err := os.Stat(filepath.Join(projectRoot, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func firstAvailableTool(names ...string) string {
+	for _, name := range names {
+		if p, err := exec.LookPath(name); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func runScipGeneration(toolPath, lang, projectRoot string) (string, error) {
@@ -261,16 +495,133 @@ func runScipGeneration(toolPath, lang, projectRoot string) (string, error) {
 		cmd = exec.Command(toolPath, "index", "--project", projectRoot, "--output", scipPath)
 	case "python":
 		cmd = exec.Command(toolPath, "index", "--project", projectRoot, "--output", scipPath)
+	case "cpp":
+		compdbPath := filepath.Join(projectRoot, "compile_commands.json")
+		if _, err := os.Stat(compdbPath); err != nil {
+			if err := ensureCompileCommands(projectRoot, compdbPath); err != nil {
+				return "", err
+			}
+		}
+		if err := fixCompileCommandsJson(compdbPath, projectRoot); err != nil {
+			logWarn("修复 compile_commands.json 路径失败: %v", err)
+		}
+		if ok, count, reason := validateCompileCommandsJson(compdbPath); !ok {
+			return "", fmt.Errorf("compile_commands.json 无效: %s (entries=%d)", reason, count)
+		}
+		cmd = exec.Command(toolPath, "--compdb-path", compdbPath, "--index-output-path", scipPath, "--no-progress-report")
 	default:
 		return "", fmt.Errorf("不支持的语言: %s", lang)
 	}
 	cmd.Dir = projectRoot
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("SCIP 生成失败 (%s): %w", lang, err)
+		return "", fmt.Errorf("SCIP 生成失败 (%s): %w\n%s", lang, err, strings.TrimSpace(output.String()))
 	}
 	return scipPath, nil
+}
+
+func ensureCompileCommands(projectRoot, compdbPath string) error {
+	if _, err := exec.LookPath("bear"); err != nil {
+		return fmt.Errorf("C/C++ SCIP 需要 compile_commands.json；未找到 bear，无法自动生成\n安装: Ubuntu/Debian: sudo apt install bear | macOS: brew install bear")
+	}
+	if _, err := exec.LookPath("make"); err != nil {
+		return fmt.Errorf("C/C++ SCIP 需要 compile_commands.json；未找到 make，无法执行 bear -- make\n安装: Ubuntu/Debian: sudo apt install make | macOS: xcode-select --install")
+	}
+	if !hasAnyProjectFile(projectRoot, "Makefile", "makefile") {
+		return fmt.Errorf("C/C++ SCIP 需要 compile_commands.json；当前项目没有 Makefile，无法执行 bear -- make")
+	}
+
+	fmt.Println("未发现 compile_commands.json，正在执行 bear -- make 生成编译数据库...")
+	cmd := exec.Command("bear", "--", "make")
+	cmd.Dir = projectRoot
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("bear -- make 执行失败: %w\n%s", err, strings.TrimSpace(output.String()))
+	}
+	if _, err := os.Stat(compdbPath); err != nil {
+		return fmt.Errorf("bear -- make 已执行，但未生成 compile_commands.json\n%s", strings.TrimSpace(output.String()))
+	}
+	fmt.Println("compile_commands.json 生成完成")
+	return nil
+}
+
+func validateCompileCommandsJson(compdbPath string) (bool, int, string) {
+	data, err := os.ReadFile(compdbPath)
+	if err != nil {
+		return false, 0, "无法读取文件"
+	}
+	if len(data) < 4 {
+		return false, 0, "文件为空或格式无效"
+	}
+
+	var entries []map[string]interface{}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return false, 0, "JSON 解析失败: " + err.Error()
+	}
+	if len(entries) == 0 {
+		return false, 0, "没有编译单元"
+	}
+
+	for _, entry := range entries {
+		dir, hasDir := entry["directory"].(string)
+		if !hasDir {
+			return false, len(entries), "缺少 directory 字段"
+		}
+		filePath, ok := entry["file"].(string)
+		if !ok {
+			return false, len(entries), "缺少 file 字段"
+		}
+		if _, hasCmd := entry["command"]; !hasCmd {
+			if _, hasArgs := entry["arguments"]; !hasArgs {
+				return false, len(entries), "缺少 command 或 arguments 字段"
+			}
+		}
+		resolvedPath := filePath
+		if !filepath.IsAbs(filePath) {
+			resolvedPath = filepath.Join(dir, filePath)
+		}
+		if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
+			return false, len(entries), fmt.Sprintf("源文件不存在: %s", resolvedPath)
+		}
+	}
+	return true, len(entries), ""
+}
+
+func fixCompileCommandsJson(compdbPath, projectRoot string) error {
+	data, err := os.ReadFile(compdbPath)
+	if err != nil {
+		return err
+	}
+
+	var entries []map[string]interface{}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return err
+	}
+
+	modified := false
+	for i, entry := range entries {
+		if dir, ok := entry["directory"].(string); ok && !filepath.IsAbs(dir) {
+			entries[i]["directory"] = filepath.Join(projectRoot, dir)
+			modified = true
+		}
+		if file, ok := entry["file"].(string); ok && !filepath.IsAbs(file) {
+			dir, _ := entries[i]["directory"].(string)
+			entries[i]["file"] = filepath.Clean(filepath.Join(dir, file))
+			modified = true
+		}
+	}
+	if !modified {
+		return nil
+	}
+	newData, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(compdbPath, newData, 0644)
 }
 
 // autoGenerateScip 检测项目语言，查找 SCIP 工具，生成索引文件。
@@ -282,10 +633,10 @@ func autoGenerateScip(projectRoot string) (bool, string) {
 		return false, ""
 	}
 	for _, lang := range langs {
+		printLanguageToolchainHints(lang, projectRoot)
 		toolPath, found := findScipTool(lang)
 		if !found {
 			fmt.Printf("检测到 %s 项目，但未找到 %s，跳过 SCIP\n", lang, scipToolName(lang))
-			printScipInstallHint(lang)
 			continue
 		}
 		fmt.Printf("检测到 %s 项目，正在生成 SCIP 索引 (%s)...\n", lang, toolPath)
@@ -336,10 +687,7 @@ func indexCmd() {
 			logError("SCIP 导入失败: %v", err)
 			os.Exit(1)
 		}
-		fmt.Println("SCIP 索引导入完成，正在用 Tree-sitter 补充...")
-		if err := astramap.SyncAllFilesAstraMap(db, absProj); err != nil {
-			logWarn("Tree-sitter 补充失败: %v", err)
-		}
+		fmt.Println("SCIP 索引导入完成")
 		// 清理自动生成的临时文件
 		if *scip || *scipFile == "" {
 			os.Remove(resolvedScipPath)
@@ -434,7 +782,7 @@ func installCmd() {
 
 	// 4. 提示用户构建索引
 	fmt.Println("\n下一步：构建代码地图索引")
-	fmt.Println("  amap index                    # 自动检测语言，SCIP 优先 + Tree-sitter 补充")
+	fmt.Println("  amap index                    # 自动检测语言，SCIP 优先；无 SCIP 时 Tree-sitter 回退")
 	fmt.Println("  amap index --scip             # 强制自动生成 SCIP 索引（高精度）")
 	fmt.Println("  amap index --treesitter-only  # 仅 Tree-sitter 快速扫描")
 }

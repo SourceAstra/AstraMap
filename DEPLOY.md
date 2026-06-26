@@ -60,20 +60,44 @@ git clone <repository-url> astramap
 cd astramap
 ```
 
-### 2.2 编译二进制
+### 2.2 发布构建：Linux 静态二进制
 
 ```bash
-# 标准编译（输出到 ./amap）
-go build -o amap ./cmd/amap
+# 发布构建机执行；客户机器不需要 Go、musl、glibc 升级或任何构建工具
+./build.sh
 
 # 验证构建结果
 ./amap
 # 应输出帮助信息，列出所有子命令
 ```
 
-编译产物为单个 ELF 可执行文件（Linux 约 26 MB），内嵌 Web Dashboard 静态资源（`//go:embed web/*`），**无外部运行时依赖**。
+该命令使用 CGO + musl 静态链接，Tree-sitter 和 SQLite 能力完整保留。产物为单个 Linux ELF 可执行文件，内嵌 Web Dashboard 静态资源（`//go:embed web/*`），客户侧无 glibc 版本依赖。
 
-### 2.3 交叉编译
+构建后脚本会自动执行：
+
+```bash
+file amap
+ldd amap
+```
+
+期望结果包含 `statically linked` 和 `not a dynamic executable`。
+
+如发布构建机缺少 `musl-gcc`，只在构建机安装：
+
+```bash
+sudo apt-get install musl-tools
+```
+
+客户机器只需要下载并运行 `amap`。
+
+### 2.3 本地开发构建
+
+```bash
+# 仅用于开发机快速调试，产物可能依赖开发机 libc，不作为客户发布包
+make build
+```
+
+### 2.4 交叉编译
 
 ```bash
 # macOS ARM64 (Apple Silicon)
@@ -89,7 +113,7 @@ GOOS=linux GOARCH=arm64 go build -o amap-linux-arm64 ./cmd/amap
 GOOS=windows GOARCH=amd64 go build -o amap.exe ./cmd/amap
 ```
 
-### 2.4 安装到系统路径
+### 2.5 安装到系统路径
 
 ```bash
 # 方式一：手动复制
@@ -114,10 +138,10 @@ amap
 
 ### 3.1 一键索引（推荐）
 
-`amap index` 自动检测项目语言，优先使用 SCIP 高精度索引，再用 Tree-sitter 补充：
+`amap index` 自动检测项目语言，优先使用 SCIP 高精度索引；无法使用 SCIP 时回退到 Tree-sitter：
 
 ```bash
-# 在项目根目录执行（自动检测语言 → SCIP 生成 → 导入 → Tree-sitter 补充）
+# 在项目根目录执行（自动检测语言 → SCIP 生成 → 导入；无 SCIP 时 Tree-sitter 回退）
 amap index
 
 # 或指定项目路径
@@ -128,7 +152,7 @@ amap index --project /path/to/your/project
 
 1. 扫描项目根目录的标志性文件（`go.mod`、`tsconfig.json`、`pyproject.toml` 等）
 2. 在 `$PATH` / `$GOPATH/bin` 中查找对应的 SCIP 工具
-3. 找到 → 自动生成 SCIP 索引 → 导入 → Tree-sitter 补充
+3. 找到 → 自动生成 SCIP 索引 → 导入
 4. 未找到 → 打印安装提示，回退到纯 Tree-sitter
 
 **输出示例**（Go 项目，已安装 `scip-go`）：
@@ -136,7 +160,7 @@ amap index --project /path/to/your/project
 ```
 检测到 go 项目，正在生成 SCIP 索引 (/home/you/go/bin/scip-go)...
 正在导入 SCIP 索引: /path/to/project/.astramap/index.scip
-SCIP 索引导入完成，正在用 Tree-sitter 补充...
+SCIP 索引导入完成
 索引构建完成！
 ```
 
@@ -154,13 +178,13 @@ SCIP 索引导入完成，正在用 Tree-sitter 补充...
 
 | 标志 | 说明 |
 |------|------|
-| （无标志） | 自动检测语言，SCIP 优先 + Tree-sitter 补充 |
+| （无标志） | 自动检测语言，SCIP 优先；无 SCIP 时 Tree-sitter 回退 |
 | `--scip` | 强制自动生成 SCIP 索引（高精度模式） |
 | `--scip-file <path>` | 导入已有的 SCIP 索引文件 |
 | `--treesitter-only` | 跳过 SCIP，仅使用 Tree-sitter 快速扫描 |
 
 ```bash
-# 默认模式：自动检测，有 SCIP 工具就走双轨
+# 默认模式：自动检测，有 SCIP 工具就走 SCIP
 amap index
 
 # 强制 SCIP 自动生成（即使默认模式已自动检测，此标志显式要求）
@@ -173,31 +197,51 @@ amap index --scip-file /path/to/index.scip
 amap index --treesitter-only
 ```
 
-### 3.3 SCIP 工具安装
+### 3.3 工具链检测与安装
 
-各语言的 SCIP 索引工具需单独安装。安装后 `amap index` 自动发现并使用：
+`amap index` 会根据项目语言检查索引器、运行时、构建工具和编译数据库生成工具。缺失时 CLI 会打印对应安装建议，并在无法使用 SCIP 时回退到 Tree-sitter。
 
-| 语言 | 工具 | 安装命令 | 检测标志文件 |
+| 语言 | 高精度索引器 | 额外检测工具 | 检测标志文件 |
 |------|------|---------|------------|
-| Go | `scip-go` | `go install github.com/sourcegraph/scip-go/cmd/scip-go@latest` | `go.mod` |
-| TypeScript | `scip-typescript` | `npm install -g @sourcegraph/scip-typescript` | `tsconfig.json` / `package.json` |
-| Python | `scip-python` | `pip install scip-python` | `pyproject.toml` / `setup.py` |
-| Java | `scip-java` | 参见 [scip-java 文档](https://github.com/sourcegraph/scip-java) | `pom.xml` |
-| C/C++ | `scip-clang` | 参见 [scip-clang 文档](https://github.com/sourcegraph/scip-clang) | `CMakeLists.txt` |
+| Go | `scip-go` | `go` | `go.mod` |
+| TypeScript / JavaScript | `scip-typescript` | `node` / `npm` / `pnpm` / `yarn` / `tsc` | `tsconfig.json` / `package.json` / `.ts` `.js` |
+| Python | `scip-python` | `python3` / `python` / `pip3` / `pip` | `pyproject.toml` / `setup.py` / `requirements.txt` / `.py` |
+| Java | `scip-java` | `java` / `javac` / `mvn` / `gradle` / `gradlew` | `pom.xml` / `build.gradle` / `build.gradle.kts` / `.java` |
+| C/C++ | `scip-clang` | `compile_commands.json` / `bear` / `cmake` / `make` / `cc` / `clang` / `gcc` | `compile_commands.json` / `CMakeLists.txt` / `Makefile` / `.c` `.h` `.cpp` |
+
+常用安装命令：
+
+```bash
+# Go
+go install github.com/sourcegraph/scip-go/cmd/scip-go@latest
+
+# TypeScript / JavaScript
+npm install -g @sourcegraph/scip-typescript typescript
+
+# Python
+pip install scip-python
+
+# C/C++ 编译数据库生成
+sudo apt install bear cmake make build-essential clang
+```
 
 **SCIP 特点**：
 - 语义级精度（区分同名函数重载、泛型实例化）
 - 边的 `provenance` 字段标记为 `scip`
-- SCIP 边优先级高于 Tree-sitter 边（冲突时 SCIP 覆盖）
+- SCIP 精度高于 Tree-sitter，成功导入 SCIP 后不会再用 Tree-sitter 覆盖同一批文件
+- SCIP 生成过程默认静默进度输出；失败时打印工具诊断信息
 
-### 3.4 双轨融合规则
+**C/C++ 注意**：`scip-clang` 需要 `compile_commands.json`。如果该文件不存在且项目有 `Makefile`，`amap index` 会在检测到 `bear` 和 `make` 后自动执行 `bear -- make` 生成编译数据库，再调用 `scip-clang`。检测到 C/C++ 项目时，CLI 会检查 `scip-clang`、`compile_commands.json`、`bear`、`cmake`、`make` 以及 `cc/clang/gcc`，缺失时打印对应安装或生成提示。
 
-当 SCIP 和 Tree-sitter 同时索引同一项目时：
+### 3.4 SCIP 与 Tree-sitter 选择规则
 
-- 先导入 SCIP 高精度数据，再运行 Tree-sitter 补充
-- 同源冲突时，SCIP 边优先于 Tree-sitter 边
-- Tree-sitter 补充 SCIP 未覆盖的文件和符号
+索引入口按确定性优先级选择解析器：
+
+- 显式 `--scip-file`：直接导入给定 SCIP 文件
+- 可自动生成 SCIP：生成并导入 SCIP
+- 无法使用 SCIP 或显式 `--treesitter-only`：使用 Tree-sitter 增量扫描
 - 所有边通过 `provenance` 字段区分来源：`scip` / `tree-sitter` / `heuristic`
+- 成功导入 SCIP 后不会再全量运行 Tree-sitter，避免重复扫描和低精度覆盖高精度节点
 - 自动生成的临时 SCIP 文件（`.astramap/index.scip`）在导入后自动清理
 
 ### 3.5 增量更新
@@ -298,7 +342,7 @@ amap install --show-config
 安装完成！7/7 工具注册成功。
 
 下一步：构建代码地图索引
-  amap index                    # 自动检测语言，SCIP 优先 + Tree-sitter 补充
+  amap index                    # 自动检测语言，SCIP 优先；无 SCIP 时 Tree-sitter 回退
   amap index --scip             # 强制自动生成 SCIP 索引（高精度）
   amap index --treesitter-only  # 仅 Tree-sitter 快速扫描
 ```
@@ -511,14 +555,17 @@ AstraMap 内置 D3.js 可视化控制台，提供交互式代码图谱浏览。
 ### 5.1 启动 Dashboard
 
 ```bash
-# 默认端口 8585
+# 默认端口 8585，后台运行并打印 URL、IP、端口、PID、日志路径
 amap dashboard --project /path/to/your/project
 
 # 自定义端口
 amap dashboard --project /path/to/your/project --port 9090
+
+# 前台运行，适合调试或 systemd
+amap dashboard --project /path/to/your/project --port 8585 --foreground
 ```
 
-启动后访问 `http://127.0.0.1:8585`（或自定义端口）。
+启动后访问命令输出中的 `http://127.0.0.1:<port>`。后台日志写入 `<project>/.astramap/dashboard.log`。
 
 **注意**：Dashboard 仅绑定 `127.0.0.1`，不接受外部网络连接。
 
@@ -693,7 +740,7 @@ After=network.target
 Type=simple
 User=developer
 WorkingDirectory=/home/developer/projects/your-project
-ExecStart=/usr/local/bin/amap dashboard --project /home/developer/projects/your-project --port 8585
+ExecStart=/usr/local/bin/amap dashboard --project /home/developer/projects/your-project --port 8585 --foreground
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -765,7 +812,7 @@ jobs:
 
       - name: Build Index
         run: amap index --project .
-        # 自动检测语言，SCIP 优先 + Tree-sitter 补充
+        # 自动检测语言，SCIP 优先；无 SCIP 时 Tree-sitter 回退
         # 如需强制 SCIP: amap index --scip --project .
         # 如仅需 Tree-sitter: amap index --treesitter-only --project .
 
@@ -1189,7 +1236,7 @@ approval_mode = "approve"
 ```
 核心服务:
   amap serve [--project <path>]                    MCP stdio 服务
-  amap dashboard [--project <path>] [--port <N>]   Web 可视化控制台
+  amap dashboard [--project <path>] [--port <N>] [--foreground]  Web 可视化控制台
   amap index [--project <path>] [--scip|--scip-file <path>|--treesitter-only]  构建/更新索引
   amap install                                     一键注册 MCP + 规则文件到 Claude Code / VS Code / Cursor / Codex / Windsurf / Cline / 项目 .mcp.json
 

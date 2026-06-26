@@ -2,26 +2,40 @@
 set -euo pipefail
 
 VERSION="${1:-v0.1}"
-IMAGE="${2:-astramap}"
-BINARY="amap"
+BINARY="${BINARY:-amap}"
+GOOS="${GOOS:-linux}"
+GOARCH="${GOARCH:-amd64}"
+CC="${CC:-musl-gcc}"
 
-echo "=== AstraMap Build Script ==="
+echo "=== AstraMap static release build ==="
 echo "Version: ${VERSION}"
-echo "Image:   ${IMAGE}"
+echo "Target:  ${GOOS}/${GOARCH}"
+echo "Output:  ${BINARY}"
 
-# Build binary
-echo "[1/3] Compiling ${BINARY}..."
-go build -ldflags="-s -w -X main.version=${VERSION}" -o "${BINARY}" ./cmd/amap
-echo "  -> $(ls -lh ${BINARY} | awk '{print $5}') $(pwd)/${BINARY}"
+if ! command -v "${CC}" >/dev/null 2>&1; then
+	echo "missing ${CC}: install musl-tools on the release builder, not on customer machines" >&2
+	exit 1
+fi
 
-# Build Docker image
-echo "[2/3] Building Docker image ${IMAGE}:${VERSION}..."
-docker build -t "${IMAGE}:${VERSION}" -t "${IMAGE}:latest" .
-echo "  -> ${IMAGE}:${VERSION}"
-echo "  -> ${IMAGE}:latest"
+CGO_ENABLED=1 \
+GOOS="${GOOS}" \
+GOARCH="${GOARCH}" \
+CC="${CC}" \
+go build \
+	-tags "netgo osusergo" \
+	-ldflags "-linkmode external -extldflags \"-static\" -s -w -X main.version=${VERSION}" \
+	-o "${BINARY}" \
+	./cmd/amap
 
-# Show usage
-echo "[3/3] Done. Usage:"
-echo "  Dashboard:  docker run -p 8585:8585 -v /path/to/project:/project:ro ${IMAGE}"
-echo "  Index:      docker run --rm -v /path/to/project:/project ${IMAGE} index --project /project"
-echo "  MCP:        docker run --rm -i -v /path/to/project:/project ${IMAGE} serve --project /project"
+FILE_OUTPUT="$(file "${BINARY}")"
+printf '%s\n' "${FILE_OUTPUT}"
+LDD_OUTPUT="$(ldd "${BINARY}" 2>&1 || true)"
+
+if printf '%s\n' "${FILE_OUTPUT}" | grep -q "statically linked" &&
+	! printf '%s\n' "${LDD_OUTPUT}" | grep -Eq "=>|ld-linux|libc\\.so"; then
+	echo "static link verified: ${BINARY} has no glibc runtime dependency"
+else
+	echo "static link verification failed: ${BINARY} is dynamically linked" >&2
+	printf '%s\n' "${LDD_OUTPUT}" >&2
+	exit 1
+fi
