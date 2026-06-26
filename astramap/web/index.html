@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AstraMap - 源码星空独立控制台</title>
+    <script src="d3.min.js"></script>
+    <link rel="stylesheet" href="index.css">
+    <link rel="stylesheet" href="explore.css">
+    <link rel="stylesheet" href="trace.css">
+    <style>
+        :root {
+            --bg-color-1: #0f172a;
+            --bg-color-2: #030712;
+            --bg-gradient: linear-gradient(135deg, var(--bg-color-1) 0%, var(--bg-color-2) 100%);
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --panel-blur: blur(10px);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --accent-primary: #6366f1;
+            --color-function: #38bdf8;
+            --color-method: #fbbf24;
+            --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-color-2);
+            background-image: var(--bg-gradient);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+        }
+        header {
+            position: fixed; top: 0; left: 0; right: 0; height: 56px;
+            background: var(--panel-bg);
+            backdrop-filter: var(--panel-blur);
+            border-bottom: 1px solid var(--panel-border);
+            display: flex; align-items: center; padding: 0 20px; gap: 16px; z-index: 1000;
+            box-shadow: var(--shadow-sm);
+        }
+        header h1 {
+            font-size: 18px; font-weight: 800;
+            background: linear-gradient(to right, #a855f7, #38bdf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 1px;
+        }
+        .search-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        #search-box {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 8px 16px; border-radius: 20px; width: 280px; font-size: 14px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+        #search-box:focus {
+            width: 340px;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+        }
+        #sr {
+            position: absolute; top: 46px; left: 0; width: 340px; 
+            max-height: 400px; background: #1e293b; 
+            border: 1px solid var(--panel-border); border-radius: 12px;
+            overflow-y: auto; display: none; z-index: 2000;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+        }
+        .sri {
+            padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05);
+            transition: background 0.2s;
+        }
+        .sri:hover { background: rgba(255, 255, 255, 0.05); }
+        .sri .nm { color: var(--color-function); font-weight: 600; font-size: 14px; }
+        .sri .lc { color: var(--text-muted); margin-top: 4px; font-size: 12px; font-family: monospace; }
+        
+        /* 导航 Tab */
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255,255,255,0.1);
+        }
+        .tab-btn.active {
+            color: #fff;
+            background: var(--accent-primary);
+        }
+        
+        /* 核心内容视口 */
+        .view-panel {
+            position: absolute;
+            top: 56px;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            width: 100%;
+            height: calc(100vh - 56px);
+            display: none;
+        }
+        .view-panel.active {
+            display: block;
+        }
+        #view-explore {
+            background: radial-gradient(circle at center, #0f172a 0%, #030712 100%);
+        }
+        #view-trace {
+            background: #030712;
+        }
+        #global-breadcrumb-bar {
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            height: 36px;
+            background: rgba(15, 23, 42, 0.85);
+            border-bottom: 1px solid var(--panel-border);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            font-size: 13px;
+            color: var(--text-muted);
+            z-index: 900;
+        }
+        .breadcrumb-item {
+            cursor: pointer;
+            margin-right: 8px;
+        }
+        .breadcrumb-item:hover {
+            color: #fff;
+        }
+    </style>
+</head>
+<body class="view-explore">
+    <header>
+        <h1>AstraMap 源码星空</h1>
+        <div style="width: 24px;"></div>
+        <button id="btn-explore" class="tab-btn active">探索视界</button>
+        <button id="btn-trace" class="tab-btn">依赖分析</button>
+        <div style="flex:1"></div>
+        <div class="search-container">
+            <input type="text" id="search-box" placeholder="搜索函数/方法符号..." autocomplete="off">
+            <div id="sr"></div>
+        </div>
+    </header>
+
+    <div id="global-breadcrumb-bar" style="display:none;">
+        <div id="explore-breadcrumb"></div>
+    </div>
+
+    <!-- 探索画布 -->
+    <div id="view-explore" class="view-panel active">
+        <div id="explore-canvas-container" style="width:100%; height:100%;"></div>
+    </div>
+
+    <!-- 追踪分析画布 -->
+    <div id="view-trace" class="view-panel"></div>
+
+    <script>
+        // ===== 补齐 SourceAstra 独立运行所需的 Mocks 全局变量，防止 JS 加载或交互报错 =====
+        window.G_CURRENT_VIEW = 'explore';
+        window.G_GRAPH_MODE = 'full';
+        window.G_FILE_TO_MODULE = {};
+        window.G_MODULES = [];
+        
+        window.i18n = {
+            locale: 'zh',
+            translations: { zh: {} }
+        };
+        
+        window.isSourceDeclarationFile = function(f) { return false; };
+
+        window.SourceAstra = window.SourceAstra || {};
+        window.SourceAstra.traceInitialized = false;
+        window.SourceAstra.apiPrefix = '/api/astramap/';
+        window.saConsumeSSEStream = window.saConsumeSSEStream || async function(response, onEvent) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const frames = buffer.split('\n\n');
+                buffer = frames.pop() || '';
+                frames.forEach(frame => {
+                    let event = 'message';
+                    let data = '';
+                    frame.split('\n').forEach(line => {
+                        if (line.startsWith('event:')) event = line.slice(6).trim();
+                        if (line.startsWith('data:')) data += line.slice(5).trimStart();
+                    });
+                    if (data) onEvent(event, data);
+                });
+            }
+        };
+
+        function openTraceForSymbol(symbolId, symbolName) {
+            const sym = (window.G_DATA && window.G_DATA.symbols && window.G_DATA.symbols[symbolId])
+                || { id: symbolId, name: symbolName || symbolId, type: 'function' };
+            window.G_SELECTED = sym;
+            activeTab = 'trace';
+            window.G_CURRENT_VIEW = 'trace';
+            btnTrace.classList.add('active');
+            btnExplore.classList.remove('active');
+            viewTrace.classList.add('active');
+            viewExplore.classList.remove('active');
+            document.body.className = 'view-trace';
+            if (window.SourceAstra && typeof window.SourceAstra.initUnderstand === 'function') {
+                window.SourceAstra.initUnderstand(sym);
+            }
+        }
+
+        window.SourceAstra.openTraceForSymbol = openTraceForSymbol;
+        window.SourceAstra.showContextMenu = function(x, y, key, name, docCtx) {
+            const old = document.getElementById('astramap-context-menu');
+            if (old) old.remove();
+            const sym = window.G_DATA && window.G_DATA.symbols && window.G_DATA.symbols[key];
+            const isFunction = sym && (sym.type === 'function' || sym.kind === 'function' || sym.kind === 'method');
+            const menu = document.createElement('div');
+            menu.id = 'astramap-context-menu';
+            menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:4000;min-width:176px;padding:6px;background:#111827;border:1px solid rgba(148,163,184,.28);border-radius:8px;box-shadow:0 18px 40px rgba(0,0,0,.36);color:#e5e7eb;font-size:13px;`;
+            const addItem = (label, enabled, action) => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.textContent = label;
+                item.disabled = !enabled;
+                item.style.cssText = `width:100%;border:0;background:${enabled ? 'transparent' : 'rgba(148,163,184,.08)'};color:${enabled ? '#e5e7eb' : '#64748b'};padding:9px 10px;border-radius:6px;text-align:left;cursor:${enabled ? 'pointer' : 'not-allowed'};`;
+                item.onmouseenter = () => { if (enabled) item.style.background = 'rgba(56,189,248,.16)'; };
+                item.onmouseleave = () => { if (enabled) item.style.background = 'transparent'; };
+                item.onclick = () => {
+                    if (!enabled) return;
+                    menu.remove();
+                    action();
+                };
+                menu.appendChild(item);
+            };
+            addItem(isFunction ? '进入依赖分析' : '仅函数可进入依赖分析', isFunction, () => {
+                openTraceForSymbol(key, name);
+            });
+
+            const targets = docCtx && Array.isArray(docCtx.docTargets) ? docCtx.docTargets : [];
+            targets.forEach(target => {
+                const label = target.docType === 'file'
+                    ? '生成文件理解文档'
+                    : target.docKey === '__project__'
+                        ? '生成项目理解文档'
+                        : '生成目录理解文档';
+                addItem(label, !!(target.docType && target.docKey), () => {
+                    if (window.SourceAstra && typeof window.SourceAstra.openDocForExplore === 'function') {
+                        window.SourceAstra.openDocForExplore(target.docType, target.docKey, { autoGenerate: true });
+                    }
+                });
+            });
+            if (targets.length === 0 && key === '__project__') {
+                addItem('生成项目理解文档', true, () => {
+                    if (window.SourceAstra && typeof window.SourceAstra.openDocForExplore === 'function') {
+                        window.SourceAstra.openDocForExplore('project', '__project__', { autoGenerate: true });
+                    }
+                });
+            }
+            if (!isFunction && targets.length === 0 && key !== '__project__') {
+                addItem('无可用操作', false, () => {});
+            }
+            document.body.appendChild(menu);
+            const close = (event) => {
+                if (!menu.contains(event.target)) {
+                    menu.remove();
+                    document.removeEventListener('mousedown', close);
+                }
+            };
+            setTimeout(() => document.addEventListener('mousedown', close), 0);
+        };
+
+        // 懒加载 marked 库 Mock，供 explore.js 中的文档预览机制在运行时调用
+        window._lazyLibs = {
+            marked: { loaded: false, src: 'marked.min.js', css: null }
+        };
+        window.loadLib = async function(name) {
+            const lib = window._lazyLibs[name];
+            if (!lib || lib.loaded) return;
+            lib.loaded = true;
+            if (lib.css) {
+                const link = document.createElement('link');
+                link.rel = 'stylesheet'; link.href = lib.css;
+                document.head.appendChild(link);
+            }
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = lib.src; s.onload = resolve; s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        };
+
+        // 统一覆盖全局 fetch 的 Authorization 请求头，避免原 Auth 检测阻挡
+        const originalFetch = window.fetch;
+        window.fetch = function(input, init) {
+            init = init || {};
+            init.headers = init.headers || {};
+            return originalFetch(input, init);
+        };
+    </script>
+
+    <script src="explore.js"></script>
+    <script src="trace.js"></script>
+    <script>
+        // 搜索逻辑桥接
+        const searchBox = document.getElementById('search-box');
+        const sr = document.getElementById('sr');
+        searchBox.addEventListener('input', async (e) => {
+            const q = e.target.value.trim();
+            if (!q) { sr.style.display = 'none'; return; }
+            try {
+                const res = await fetch(`/api/astramap/search?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+                if (data && data.length > 0) {
+                    sr.innerHTML = data.map(item => `
+                        <div class="sri" data-id="${item.id}" data-name="${item.name}" data-filepath="${item.filePath}">
+                            <div class="nm">${item.name} <span style="font-size:10px; color:#64748b;">${item.kind}</span></div>
+                            <div class="lc">${item.filePath}:${item.startLine}</div>
+                        </div>
+                    `).join('');
+                    sr.style.display = 'block';
+                } else {
+                    sr.style.display = 'none';
+                }
+            } catch(err) {
+                console.error(err);
+            }
+        });
+
+        // 绑定搜索元素点击事件
+        sr.addEventListener('click', (e) => {
+            const sri = e.target.closest('.sri');
+            if (!sri) return;
+            const symId = sri.getAttribute('data-id');
+            const symName = sri.getAttribute('data-name');
+            searchBox.value = symName;
+            sr.style.display = 'none';
+
+            // 触发当前视图探索渲染
+            if (activeTab === 'explore') {
+                if (window._exploreView) {
+                    window._exploreView._drawTrace(symId);
+                }
+            } else if (activeTab === 'trace') {
+                openTraceForSymbol(symId, symName);
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.search-container')) {
+                sr.style.display = 'none';
+            }
+        });
+
+        // Tab 切换逻辑
+        let activeTab = 'explore';
+        const btnExplore = document.getElementById('btn-explore');
+        const btnTrace = document.getElementById('btn-trace');
+        const viewExplore = document.getElementById('view-explore');
+        const viewTrace = document.getElementById('view-trace');
+
+        btnExplore.addEventListener('click', () => {
+            activeTab = 'explore';
+            window.G_CURRENT_VIEW = 'explore';
+            btnExplore.classList.add('active');
+            btnTrace.classList.remove('active');
+            viewExplore.classList.add('active');
+            viewTrace.classList.remove('active');
+            document.body.className = 'view-explore';
+
+            if (window.SourceAstra && typeof window.SourceAstra.initExplore === 'function') {
+                window.SourceAstra.initExplore();
+                window.SourceAstra.exploreLoad();
+            }
+            if (window.SourceAstra && window.SourceAstra.traceInitialized && typeof window.SourceAstra.refreshFunctionTree === 'function') {
+                window.SourceAstra.refreshFunctionTree();
+            }
+        });
+
+        btnTrace.addEventListener('click', () => {
+            activeTab = 'trace';
+            window.G_CURRENT_VIEW = 'trace';
+            btnTrace.classList.add('active');
+            btnExplore.classList.remove('active');
+            viewTrace.classList.add('active');
+            viewExplore.classList.remove('active');
+            document.body.className = 'view-trace';
+            
+            // 初始化 Trace 视图
+            if (window.SourceAstra && typeof window.SourceAstra.initUnderstand === 'function') {
+                window.SourceAstra.initUnderstand();
+            }
+        });
+
+        // 挂载页面组件实例并拉取初始化数据
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch('/api/astramap/status');
+                const stats = await res.json();
+                
+                // 拉取全量扁平的节点与关联关系数据以装载 G_DATA (对应 explore.js / trace.js 的预期格式)
+                const resNodes = await fetch('/api/astramap/explore?q=&maxFiles=10000');
+                const exploreResult = await resNodes.json();
+                
+                // 将 Explore 扁平化数据转化为 explore.js 所兼容的 symbols 字典与 edges 链表
+                const symMap = {};
+                const nameMap = {};
+                (exploreResult.Files || []).forEach(f => {
+                    (f.Symbols || []).forEach(s => {
+                        const sym = {
+                            id: s.id,
+                            kind: s.kind,
+                            type: s.kind, // trace.js 里需要兼容 type
+                            name: s.name,
+                            qualifiedName: s.qualifiedName,
+                            file: s.filePath,
+                            filePath: s.filePath,
+                            line: s.startLine,
+                            startLine: s.startLine,
+                            endLine: s.endLine,
+                            startColumn: s.startColumn,
+                            endColumn: s.endColumn,
+                            signature: s.signature,
+                            docstring: s.docstring,
+                            isExported: s.isExported
+                        };
+                        symMap[s.id] = sym;
+                        nameMap[s.name] = s.id;
+                    });
+                });
+
+                const edges = [];
+                (exploreResult.Relationships || []).forEach(rel => {
+                    // 解析 "A → B" 的关系并转化为边的拓扑，使用 explore.js 预期的 from / to 字段
+                    const parts = rel.split(' → ');
+                    if (parts.length === 2) {
+                        edges.push({
+                            from: parts[0],
+                            to: parts[1]
+                        });
+                    }
+                });
+
+                window.G_DATA = {
+                    symbols: symMap,
+                    nameMap: nameMap,
+                    edges: edges,
+                    links: edges,
+                    files: (exploreResult.Files || []).map(f => ({ file_path: f.FilePath }))
+                };
+            } catch(e) {
+                console.error("加载 AstraMap 初始化数据失败: ", e);
+                window.G_DATA = { symbols: {}, nameMap: {}, edges: [], links: [], files: [] };
+            }
+
+            if (window.SourceAstra && typeof window.SourceAstra.initExplore === 'function') {
+                window.SourceAstra.initExplore();
+                window.SourceAstra.exploreLoad();
+            }
+        });
+    </script>
+</body>
+</html>
