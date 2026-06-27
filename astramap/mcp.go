@@ -152,7 +152,7 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 			},
 			{
 				Name:        "astramap_explore",
-				Description: "探索区域性代码流，根据给定的业务词汇、一组符号或自然语言任务描述返回相关的源码上下文及拓扑调用关系。AI 代理应首选该命令以快速压缩 Token 并构建逻辑上下文。触发场景：用户描述业务流程或问「X 和 Y 是怎么关联的」时首选此工具。",
+				Description: "探索区域性代码流，根据给定的业务词汇、一组符号或自然语言任务描述返回相关的源码上下文及拓扑调用关系。客户端应首选该命令以快速压缩上下文并构建逻辑入口。触发场景：用户描述业务流程或问「X 和 Y 是怎么关联的」时首选此工具。",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
@@ -164,7 +164,7 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 			},
 			{
 				Name:        "astramap_node",
-				Description: "符号实体详情还原。获取单个符号对应的底层代码实现、文档注释及依赖；在有重载歧义时会在单个 Turn 中合并返回全部候选体以避免 AI 反复调用。触发场景：用户问「X 的源码是什么」「X 的签名和文档」时使用。",
+				Description: "符号实体详情还原。获取单个符号对应的底层代码实现、文档注释及依赖；在有重载歧义时会在单个 Turn 中合并返回全部候选体以避免反复查询。触发场景：用户问「X 的源码是什么」「X 的签名和文档」时使用。",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
@@ -364,26 +364,50 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 
 	case "astramap_callers":
 		symbol, _ := argsMap["symbol"].(string)
-		callers, err2 := GetCallers(db, symbol)
-		err = err2
+		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
+		if resolveErr != nil || len(ids) == 0 {
+			content = fmt.Sprintf("### Callers of %s:\n\nSymbol not found.\n", symbol)
+			break
+		}
+		var allCallers []*AstraMapEdge
+		for _, id := range ids {
+			callers, err2 := GetCallers(db, id)
+			if err2 != nil {
+				err = err2
+				break
+			}
+			allCallers = append(allCallers, callers...)
+		}
 		if err == nil {
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("### Callers of %s:\n\n", symbol))
-			for _, c := range callers {
-				sb.WriteString(fmt.Sprintf("- %s (Line %d)\n", c.Source, c.Line))
+			for _, c := range allCallers {
+				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n", c.Source, c.Target, c.Line))
 			}
 			content = sb.String()
 		}
 
 	case "astramap_callees":
 		symbol, _ := argsMap["symbol"].(string)
-		callees, err2 := GetCallees(db, symbol)
-		err = err2
+		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
+		if resolveErr != nil || len(ids) == 0 {
+			content = fmt.Sprintf("### Callees of %s:\n\nSymbol not found.\n", symbol)
+			break
+		}
+		var allCallees []*AstraMapEdge
+		for _, id := range ids {
+			callees, err2 := GetCallees(db, id)
+			if err2 != nil {
+				err = err2
+				break
+			}
+			allCallees = append(allCallees, callees...)
+		}
 		if err == nil {
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("### Callees of %s:\n\n", symbol))
-			for _, c := range callees {
-				sb.WriteString(fmt.Sprintf("- %s (Line %d)\n", c.Target, c.Line))
+			for _, c := range allCallees {
+				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n", c.Source, c.Target, c.Line))
 			}
 			content = sb.String()
 		}
@@ -396,7 +420,13 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 			depth = 3
 		}
 
-		res, err2 := AnalyzeImpact(db, symbol, depth)
+		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
+		if resolveErr != nil || len(ids) == 0 {
+			content = fmt.Sprintf("Symbol not found: %s", symbol)
+			isErr = true
+			break
+		}
+		res, err2 := AnalyzeImpact(db, ids[0], depth)
 		err = err2
 		if err == nil {
 			data, _ := json.MarshalIndent(res, "", "  ")
@@ -417,7 +447,7 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 				"totalFiles":         status.FileCount,
 				"indexedNodes":       status.NodeCount,
 				"indexedEdges":       status.EdgeCount,
-				"supportedLanguages": []string{"go", "cpp", "python", "typescript", "java"},
+				"supportedLanguages": []string{"go", "c", "cpp", "python", "typescript", "java"},
 			}
 			data, _ := json.MarshalIndent(res, "", "  ")
 			content = string(data)
@@ -449,7 +479,21 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 	case "astramap_trace":
 		from, _ := argsMap["from"].(string)
 		to, _ := argsMap["to"].(string)
-		paths, err2 := TracePath(db, from, to)
+
+		fromIDs, resolveErr := ResolveSymbolToIDs(db, from)
+		if resolveErr != nil || len(fromIDs) == 0 {
+			content = fmt.Sprintf("From symbol not found: %s", from)
+			isErr = true
+			break
+		}
+		toIDs, resolveErr := ResolveSymbolToIDs(db, to)
+		if resolveErr != nil || len(toIDs) == 0 {
+			content = fmt.Sprintf("To symbol not found: %s", to)
+			isErr = true
+			break
+		}
+
+		paths, err2 := TracePath(db, fromIDs[0], toIDs[0])
 		err = err2
 		if err == nil {
 			var sb strings.Builder

@@ -144,6 +144,163 @@
         .breadcrumb-item:hover {
             color: #fff;
         }
+
+        /* About 按钮 */
+        .about-btn {
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: #a5b4fc;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: auto;
+        }
+        .about-btn:hover {
+            background: rgba(99, 102, 241, 0.3);
+            color: #fff;
+        }
+
+        /* About 弹窗 */
+        .about-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 5000;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+        .about-overlay.show {
+            display: flex;
+        }
+        .about-modal {
+            background: #1e293b;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 16px;
+            width: 90%;
+            max-width: 640px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        }
+        .about-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .about-header h2 {
+            font-size: 18px;
+            color: #f8fafc;
+            font-weight: 700;
+        }
+        .about-close {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .about-close:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.1);
+        }
+        .about-body {
+            padding: 24px;
+        }
+        .about-section {
+            margin-bottom: 24px;
+        }
+        .about-section:last-child {
+            margin-bottom: 0;
+        }
+        .about-section h3 {
+            font-size: 14px;
+            color: #60a5fa;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+        .about-section p,
+        .about-section li {
+            font-size: 13px;
+            color: #cbd5e1;
+            line-height: 1.7;
+        }
+        .about-section ul {
+            padding-left: 16px;
+        }
+        .about-section li {
+            margin-bottom: 4px;
+        }
+        .about-highlight {
+            color: #38bdf8;
+            font-weight: 600;
+        }
+        .about-code {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            color: #e2e8f0;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        .about-code .comment {
+            color: #64748b;
+        }
+        .about-code .cmd {
+            color: #38bdf8;
+        }
+        .about-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin: 8px 0;
+        }
+        .about-table th,
+        .about-table td {
+            padding: 8px 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .about-table th {
+            color: #94a3b8;
+            font-weight: 600;
+            background: rgba(15, 23, 42, 0.4);
+        }
+        .about-table td {
+            color: #cbd5e1;
+        }
+        .about-table tr:last-child td {
+            border-bottom: none;
+        }
+        .about-us {
+            color: #38bdf8 !important;
+            font-weight: 600;
+        }
+        .about-footer {
+            padding: 16px 24px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            background: rgba(15, 23, 42, 0.4);
+            text-align: center;
+        }
+        .about-footer p {
+            font-size: 12px;
+            color: #64748b;
+            margin: 4px 0;
+        }
+        .about-footer .copyright {
+            color: #94a3b8;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body class="view-explore">
@@ -152,6 +309,7 @@
         <div style="width: 24px;"></div>
         <button id="btn-explore" class="tab-btn active">探索视界</button>
         <button id="btn-trace" class="tab-btn">依赖分析</button>
+        <button id="btn-about" class="about-btn">关于</button>
         <div style="flex:1"></div>
         <div class="search-container">
             <input type="text" id="search-box" placeholder="搜索函数/方法符号..." autocomplete="off">
@@ -170,6 +328,100 @@
 
     <!-- 追踪分析画布 -->
     <div id="view-trace" class="view-panel"></div>
+
+    <!-- About 弹窗 -->
+    <div id="about-overlay" class="about-overlay">
+        <div class="about-modal">
+            <div class="about-header">
+                <h2>🚀 AstraMap 代码地图</h2>
+                <button id="about-close" class="about-close">&times;</button>
+            </div>
+            <div class="about-body">
+
+                <div class="about-section">
+                    <h3>核心优势</h3>
+                    <ul>
+                        <li><span class="about-highlight">95%+ 语义精度</span> — SCIP 编译器级索引，区分重载/泛型</li>
+                        <li><span class="about-highlight">60-95% Token 节约</span> — 单次调用替代多次 grep+Read</li>
+                        <li><span class="about-highlight">毫秒级更新</span> — 文件变更 50ms 内同步</li>
+                        <li><span class="about-highlight">条件编译支持</span> — C++/Go/Rust 条件分支动态投影</li>
+                    </ul>
+                </div>
+
+                <div class="about-section">
+                    <h3>工作原理</h3>
+                    <p>源码 → SCIP 高精度索引 + Tree-sitter 实时补丁 → SQLite 知识图谱 → MCP/HTTP API → 本地可视化与工具客户端</p>
+                </div>
+
+                <div class="about-section">
+                    <h3>🚀 2 分钟部署指南 (Linux)</h3>
+                    
+                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
+                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">📁 第一步：加入 PATH</div>
+                        <div style="margin-bottom: 12px;">
+                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px;">mkdir -p ~/bin</code>
+                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">cp ./amap ~/bin</code><br>
+                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-top: 8px; display: block;">echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc</code>
+                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-top: 8px; display: block;">source ~/.bashrc</code>
+                        </div>
+                    </div>
+                    
+                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
+                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">📂 第二步，进入所在项目</div>
+                        
+                        <div style="margin-bottom: 12px;">
+                            <div style="color: #f1f5f9; font-size: 13px; margin-bottom: 6px;"># 一键注册 MCP + 规则文件到 Claude Code等</div>
+                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; display: block;">amap install</code>
+                        </div>
+                        
+                        <div style="margin-bottom: 12px;">
+                            <div style="color: #f1f5f9; font-size: 13px; margin-bottom: 6px;"># 默认模式：自动检测变成工具，并生成代码地图所使用 SCIP</div>
+                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; display: block;">amap index</code>
+                        </div>
+                    </div>
+                    
+                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
+                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">🤖 第三步，打开 Claude Code</div>
+                        <div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">
+                            测试代码地图使用可以使用<code style="background: rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 3px; font-size: 12px;">/amap</code> 斜杠命令<br>
+                            或 MCP 服务器自动集成
+                        </div>
+                    </div>
+                    
+                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
+                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">🖥️ 第四步，进入所在项目，可使用代码看函数调用链图</div>
+                        <div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">
+                            <code style="background: rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 3px; font-size: 12px;">amap dashboard</code><br>
+                            默认端口 3000，冲突自动+1<br>
+                            访问: <code style="background: rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 3px; font-size: 12px;">http://localhost:3000</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="about-section">
+                    <h3>工具对比</h3>
+                    <table class="about-table">
+                        <thead>
+                            <tr><th>维度</th><th>CodeGraph</th><th>GitNexus</th><th>Graphify</th><th>AstraMap</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>索引源</td><td>Tree-sitter</td><td>Tree-sitter</td><td>Tree-sitter+静态图</td><td class="about-us">SCIP+Tree-sitter</td></tr>
+                            <tr><td>语义精度</td><td>启发式</td><td>符号级</td><td>混合</td><td class="about-us">编译器级</td></tr>
+                            <tr><td>条件编译</td><td>❌</td><td>❌</td><td>❌</td><td class="about-us">✅ 全支持</td></tr>
+                            <tr><td>项目规模</td><td>百万行</td><td>千万行</td><td>百万行</td><td class="about-us">亿行级</td></tr>
+                            <tr><td>部署复杂度</td><td>中等</td><td>简单</td><td>简单</td><td class="about-us">零配置</td></tr>
+                            <tr><td>交互可视化</td><td>❌ 纯文本</td><td>静态图</td><td>只读图表</td><td class="about-us">✅ 力导向图+追踪</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+            <div class="about-footer">
+                <p class="copyright">© 2024-2025 AstraMap — 高精度代码地图引擎</p>
+                <p>作者: <span class="about-highlight">何志川</span> &nbsp;|&nbsp; 版本: <span class="about-highlight">v0.1</span></p>
+            </div>
+        </div>
+    </div>
 
     <script>
         // ===== 补齐 SourceAstra 独立运行所需的 Mocks 全局变量，防止 JS 加载或交互报错 =====
@@ -314,6 +566,33 @@
             init.headers = init.headers || {};
             return originalFetch(input, init);
         };
+
+        // About 弹窗控制
+        const aboutOverlay = document.getElementById('about-overlay');
+        const aboutBtn = document.getElementById('btn-about');
+        const aboutClose = document.getElementById('about-close');
+
+        if (aboutBtn && aboutOverlay) {
+            aboutBtn.addEventListener('click', () => {
+                aboutOverlay.classList.add('show');
+            });
+        }
+        if (aboutClose && aboutOverlay) {
+            aboutClose.addEventListener('click', () => {
+                aboutOverlay.classList.remove('show');
+            });
+            aboutOverlay.addEventListener('click', (e) => {
+                if (e.target === aboutOverlay) {
+                    aboutOverlay.classList.remove('show');
+                }
+            });
+        }
+        // ESC 关闭弹窗
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && aboutOverlay && aboutOverlay.classList.contains('show')) {
+                aboutOverlay.classList.remove('show');
+            }
+        });
     </script>
 
     <script src="explore.js"></script>
@@ -415,55 +694,51 @@
                 const res = await fetch('/api/astramap/status');
                 const stats = await res.json();
                 
-                // 拉取全量扁平的节点与关联关系数据以装载 G_DATA (对应 explore.js / trace.js 的预期格式)
-                const resNodes = await fetch('/api/astramap/explore?q=&maxFiles=10000');
-                const exploreResult = await resNodes.json();
+                // 拉取全量轻量图数据以装载 G_DATA (对应 explore.js / trace.js 的预期格式)
+                const resNodes = await fetch('/api/astramap/data');
+                const graphData = await resNodes.json();
+                if (graphData.error) throw new Error(graphData.error);
                 
-                // 将 Explore 扁平化数据转化为 explore.js 所兼容的 symbols 字典与 edges 链表
+                // 将数据库图数据转化为 explore.js 所兼容的 symbols 字典与 edges 链表
                 const symMap = {};
                 const nameMap = {};
-                (exploreResult.Files || []).forEach(f => {
-                    (f.Symbols || []).forEach(s => {
-                        const sym = {
-                            id: s.id,
-                            kind: s.kind,
-                            type: s.kind, // trace.js 里需要兼容 type
-                            name: s.name,
-                            qualifiedName: s.qualifiedName,
-                            file: s.filePath,
-                            filePath: s.filePath,
-                            line: s.startLine,
-                            startLine: s.startLine,
-                            endLine: s.endLine,
-                            startColumn: s.startColumn,
-                            endColumn: s.endColumn,
-                            signature: s.signature,
-                            docstring: s.docstring,
-                            isExported: s.isExported
-                        };
-                        symMap[s.id] = sym;
-                        nameMap[s.name] = s.id;
-                    });
+                (graphData.nodes || []).forEach(s => {
+                    const sym = {
+                        id: s.id,
+                        kind: s.kind,
+                        type: s.kind, // trace.js 里需要兼容 type
+                        name: s.name,
+                        qualifiedName: s.qualifiedName,
+                        file: s.filePath,
+                        filePath: s.filePath,
+                        line: s.startLine,
+                        startLine: s.startLine,
+                        endLine: s.endLine,
+                        startColumn: s.startColumn,
+                        endColumn: s.endColumn,
+                        signature: s.signature,
+                        docstring: s.docstring,
+                        isExported: s.isExported
+                    };
+                    symMap[s.id] = sym;
+                    nameMap[s.name] = s.id;
                 });
 
-                const edges = [];
-                (exploreResult.Relationships || []).forEach(rel => {
-                    // 解析 "A → B" 的关系并转化为边的拓扑，使用 explore.js 预期的 from / to 字段
-                    const parts = rel.split(' → ');
-                    if (parts.length === 2) {
-                        edges.push({
-                            from: parts[0],
-                            to: parts[1]
-                        });
-                    }
-                });
+                const edges = (graphData.edges || []).map(e => ({
+                    from: e.source,
+                    to: e.target,
+                    kind: e.kind,
+                    provenance: e.provenance,
+                    line: e.line,
+                    col: e.col
+                }));
 
                 window.G_DATA = {
                     symbols: symMap,
                     nameMap: nameMap,
                     edges: edges,
                     links: edges,
-                    files: (exploreResult.Files || []).map(f => ({ file_path: f.FilePath }))
+                    files: (graphData.files || []).map(f => ({ file_path: f.path }))
                 };
             } catch(e) {
                 console.error("加载 AstraMap 初始化数据失败: ", e);

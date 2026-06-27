@@ -12,13 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	sitter "github.com/tree-sitter/go-tree-sitter"
+	c "github.com/tree-sitter/tree-sitter-c/bindings/go"
+	cpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
 	golang "github.com/tree-sitter/tree-sitter-go/bindings/go"
+	java "github.com/tree-sitter/tree-sitter-java/bindings/go"
 	python "github.com/tree-sitter/tree-sitter-python/bindings/go"
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
-	cpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
-	java "github.com/tree-sitter/tree-sitter-java/bindings/go"
-	"github.com/jmoiron/sqlx"
 )
 
 var (
@@ -72,9 +73,20 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 		} else {
 			langGrammar = sitter.NewLanguage(typescript.LanguageTypescript())
 		}
-	case ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx":
+	case ".c":
+		lang = "c"
+		langGrammar = sitter.NewLanguage(c.Language())
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hxx":
 		lang = "cpp"
 		langGrammar = sitter.NewLanguage(cpp.Language())
+	case ".h":
+		if hasProjectExtension(projectRoot, ".cpp", ".cc", ".cxx", ".hpp", ".hxx") {
+			lang = "cpp"
+			langGrammar = sitter.NewLanguage(cpp.Language())
+		} else {
+			lang = "c"
+			langGrammar = sitter.NewLanguage(c.Language())
+		}
 	case ".java":
 		lang = "java"
 		langGrammar = sitter.NewLanguage(java.Language())
@@ -196,7 +208,7 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 				isDef = true
 			}
 
-		case "cpp":
+		case "c", "cpp":
 			if nodeType == "class_specifier" || nodeType == "struct_specifier" {
 				if nodeType == "class_specifier" {
 					nodeKind = "class"
@@ -212,7 +224,7 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 				if declNode != nil {
 					nodeName, container = extractCppFuncNameAndContainer(declNode, codeBytes)
 				}
-				if container != "" {
+				if lang == "cpp" && container != "" {
 					nodeKind = "method"
 				} else {
 					nodeKind = "function"
@@ -323,7 +335,7 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 		var calleeNode *sitter.Node
 
 		switch lang {
-		case "go", "typescript", "cpp":
+		case "go", "typescript", "c", "cpp":
 			if nodeType == "call_expression" {
 				isCall = true
 				calleeNode = n.ChildByFieldName("function")
@@ -380,8 +392,8 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 			return
 		}
 		nodeType := n.Kind()
-		if nodeType == "import_spec" || nodeType == "import_statement" || nodeType == "import_from_statement" {
-			impPath := strings.Trim(nodeText(n, codeBytes), `"' `)
+		if nodeType == "import_spec" || nodeType == "import_statement" || nodeType == "import_from_statement" || nodeType == "preproc_include" {
+			impPath := normalizeImportText(nodeText(n, codeBytes))
 			if impPath != "" {
 				targetUSN := fmt.Sprintf("import:%s", impPath)
 				edges = append(edges, &AstraMapEdge{
@@ -471,6 +483,8 @@ func extractCalleeShortName(n *sitter.Node, code []byte) string {
 
 func getLangPrefix(lang string) string {
 	switch lang {
+	case "c":
+		return "c"
 	case "go":
 		return "go"
 	case "python":
@@ -483,6 +497,39 @@ func getLangPrefix(lang string) string {
 		return "java"
 	}
 	return "unknown"
+}
+
+func normalizeImportText(s string) string {
+	s = strings.TrimSpace(s)
+	for _, prefix := range []string{"#include", "import", "from"} {
+		s = strings.TrimSpace(strings.TrimPrefix(s, prefix))
+	}
+	s = strings.Trim(s, `"'<> `)
+	return s
+}
+
+func hasProjectExtension(projectRoot string, extensions ...string) bool {
+	wanted := make(map[string]struct{}, len(extensions))
+	for _, ext := range extensions {
+		wanted[ext] = struct{}{}
+	}
+	found := false
+	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if info.IsDir() {
+			if shouldSkipIndexDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if _, ok := wanted[strings.ToLower(filepath.Ext(path))]; ok {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 func nodeText(n *sitter.Node, code []byte) string {
@@ -585,8 +632,8 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 	}
 
 	insertStmt, err := tx.Preparex(`
-		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, line, col)
-		VALUES (?, ?, 'calls', 'heuristic', ?, ?)
+		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, line, col, metadata)
+		VALUES (?, ?, 'calls', 'heuristic', ?, ?, '')
 	`)
 	if err != nil {
 		return err

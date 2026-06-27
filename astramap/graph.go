@@ -36,17 +36,19 @@ type CodeOwner struct {
 
 // ===== 图遍历引擎 =====
 
+const edgeCols = `id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata`
+
 // GetCallers 查找指定符号的直接上游调用者
 func GetCallers(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 	var edges []*AstraMapEdge
-	err := db.Select(&edges, "SELECT * FROM astramap_edges WHERE target = ? AND kind = 'calls'", symbolID)
+	err := db.Select(&edges, "SELECT "+edgeCols+" FROM astramap_edges WHERE target = ? AND kind = 'calls'", symbolID)
 	return edges, err
 }
 
 // GetCallees 查找指定符号的直接下游被调用者
 func GetCallees(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 	var edges []*AstraMapEdge
-	err := db.Select(&edges, "SELECT * FROM astramap_edges WHERE source = ? AND kind = 'calls'", symbolID)
+	err := db.Select(&edges, "SELECT "+edgeCols+" FROM astramap_edges WHERE source = ? AND kind = 'calls'", symbolID)
 	return edges, err
 }
 
@@ -320,7 +322,7 @@ func GetCodeOwners(db *sqlx.DB, symbolID string, projectRoot string) ([]CodeOwne
 	cmd.Dir = projectRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return []CodeOwner{{Author: "SourceAstra-LLM", CommitCount: 1, Percent: 100.0}}, nil
+		return []CodeOwner{{Author: "Unknown", CommitCount: 1, Percent: 100.0}}, nil
 	}
 
 	authors := strings.Split(string(out), "\n")
@@ -335,7 +337,7 @@ func GetCodeOwners(db *sqlx.DB, symbolID string, projectRoot string) ([]CodeOwne
 	}
 
 	if total == 0 {
-		return []CodeOwner{{Author: "SourceAstra-LLM", CommitCount: 1, Percent: 100.0}}, nil
+		return []CodeOwner{{Author: "Unknown", CommitCount: 1, Percent: 100.0}}, nil
 	}
 
 	var owners []CodeOwner

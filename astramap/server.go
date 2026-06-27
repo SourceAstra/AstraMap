@@ -42,7 +42,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			"totalFiles":         status.FileCount,
 			"indexedNodes":       status.NodeCount,
 			"indexedEdges":       status.EdgeCount,
-			"supportedLanguages": []string{"go", "cpp", "python", "typescript", "java"},
+			"supportedLanguages": []string{"go", "c", "cpp", "python", "typescript", "java"},
 		})
 	})
 
@@ -57,6 +57,17 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			return
 		}
 		json.NewEncoder(w).Encode(nodes)
+	})
+
+	mux.HandleFunc("/api/astramap/data", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, err := QueryGraphData(db)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(data)
 	})
 
 	mux.HandleFunc("/api/astramap/node/", func(w http.ResponseWriter, r *http.Request) {
@@ -83,13 +94,22 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		callers, err := GetCallers(db, id)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		ids, resolveErr := ResolveSymbolToIDs(db, id)
+		if resolveErr != nil || len(ids) == 0 {
+			json.NewEncoder(w).Encode([]struct{}{})
 			return
 		}
-		json.NewEncoder(w).Encode(callers)
+		var allCallers []*AstraMapEdge
+		for _, nid := range ids {
+			callers, err := GetCallers(db, nid)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			allCallers = append(allCallers, callers...)
+		}
+		json.NewEncoder(w).Encode(allCallers)
 	})
 
 	mux.HandleFunc("/api/astramap/callees/", func(w http.ResponseWriter, r *http.Request) {
@@ -99,13 +119,22 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		callees, err := GetCallees(db, id)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		ids, resolveErr := ResolveSymbolToIDs(db, id)
+		if resolveErr != nil || len(ids) == 0 {
+			json.NewEncoder(w).Encode([]struct{}{})
 			return
 		}
-		json.NewEncoder(w).Encode(callees)
+		var allCallees []*AstraMapEdge
+		for _, nid := range ids {
+			callees, err := GetCallees(db, nid)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			allCallees = append(allCallees, callees...)
+		}
+		json.NewEncoder(w).Encode(allCallees)
 	})
 
 	mux.HandleFunc("/api/astramap/impact/", func(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +150,13 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 				depth = v
 			}
 		}
-		res, err := AnalyzeImpact(db, id, depth)
+		ids, resolveErr := ResolveSymbolToIDs(db, id)
+		if resolveErr != nil || len(ids) == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "symbol not found"})
+			return
+		}
+		res, err := AnalyzeImpact(db, ids[0], depth)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -157,7 +192,19 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			json.NewEncoder(w).Encode(map[string]string{"error": "parameters from and to required"})
 			return
 		}
-		paths, err := TracePath(db, from, to)
+		fromIDs, resolveErr := ResolveSymbolToIDs(db, from)
+		if resolveErr != nil || len(fromIDs) == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "from symbol not found"})
+			return
+		}
+		toIDs, resolveErr := ResolveSymbolToIDs(db, to)
+		if resolveErr != nil || len(toIDs) == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "to symbol not found"})
+			return
+		}
+		paths, err := TracePath(db, fromIDs[0], toIDs[0])
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -330,26 +377,24 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		json.NewEncoder(w).Encode(doc)
 	})
 
-	mux.HandleFunc("/api/chat/completion", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
+	mux.HandleFunc("/api/documents/generate", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		var req struct {
-			Messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
+			Type    string `json:"type"`
+			Key     string `json:"key"`
+			Context string `json:"context"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		prompt := ""
-		for i := len(req.Messages) - 1; i >= 0; i-- {
-			if req.Messages[i].Role == "user" {
-				prompt = req.Messages[i].Content
-				break
-			}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
 		}
-		doc := synthesizeUnderstandingDoc(prompt)
-		for _, line := range strings.Split(doc, "\n") {
-			fmt.Fprintf(w, "event: chunk\ndata: %s\x1E\n\n", line)
+		doc := synthesizeUnderstandingDoc(req.Type, req.Key, req.Context)
+		if stored, err := saveStoredDoc(projectRoot, req.Type, req.Key, doc); err == nil {
+			json.NewEncoder(w).Encode(stored)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		}
 	})
 
@@ -511,23 +556,30 @@ func saveStoredDoc(projectRoot, docType, key, content string) (storedDoc, error)
 	return doc, nil
 }
 
-func synthesizeUnderstandingDoc(prompt string) string {
+func synthesizeUnderstandingDoc(docType, key, context string) string {
 	title := "代码理解文档"
-	if strings.Contains(prompt, "项目理解文档") {
+	switch docType {
+	case "project":
 		title = "项目理解文档"
-	} else if strings.Contains(prompt, "文件理解文档") {
+	case "file":
 		title = "文件理解文档"
-	} else if strings.Contains(prompt, "模块架构理解文档") {
+	case "module":
 		title = "目录理解文档"
 	}
-	if len(prompt) > 4000 {
-		prompt = prompt[:4000]
+	context = strings.TrimSpace(context)
+	if len(context) > 12000 {
+		context = context[:12000] + "\n..."
+	}
+	if key == "" {
+		key = "_"
 	}
 	return fmt.Sprintf(`# %s
 
+目标：`+"`%s`"+`
+
 ## 核心职责
 
-该文档由 AstraMap standalone 根据当前代码地图上下文生成。它提炼当前目标的结构边界、函数分布和可见依赖，用于快速建立阅读入口。
+该文档由 AstraMap 根据当前代码地图本地生成。内容只来自已索引的目录、文件、符号、调用与源码片段，用于快速建立阅读入口。
 
 ## 结构概览
 
@@ -535,14 +587,15 @@ func synthesizeUnderstandingDoc(prompt string) string {
 
 ## 关键协作
 
-- 优先从函数入口进入依赖分析，确认调用方向和影响范围。
-- 再回到探索视界查看目录、文件与函数之间的聚合关系。
-- 对高扇出或跨目录调用的节点，建议单独追踪并补充人工判断。
+- 入口函数决定主要阅读路径。
+- 调用边展示运行时依赖方向。
+- import/include 边展示文件或模块级静态依赖。
+- 高扇出节点需要结合依赖分析确认影响范围。
 
 ## 阅读建议
 
 1. 从入口函数开始查看调用树。
 2. 对照文件理解文档确认局部职责。
 3. 对跨目录调用路径做二次审查，避免误判边界。
-`, title, strings.TrimSpace(prompt))
+`, title, key, context)
 }

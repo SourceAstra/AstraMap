@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS astramap_edges (
     provenance TEXT DEFAULT 'scip',     -- scip/tree-sitter/heuristic
     line       INTEGER,
     col        INTEGER,
-    metadata   TEXT                     -- JSON
+    metadata   TEXT DEFAULT ''          -- JSON
 );
 
 -- 文件跟踪表
@@ -129,5 +129,12 @@ func InitAstraMapSchema(db *sqlx.DB) error {
 	}
 
 	_, err = db.Exec(SchemaDDL)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 迁移：将已有 edges 中的 NULL metadata 规约为空字符串
+	_, _ = db.Exec("UPDATE astramap_edges SET metadata = '' WHERE metadata IS NULL")
+
+	return nil
 }

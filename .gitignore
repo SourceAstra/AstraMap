@@ -2,3 +2,7 @@
 *.db
 *.db-shm
 *.db-wal
+
+# docs 目录存在但内容不提交
+docs/*
+!docs/.gitkeep

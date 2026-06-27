@@ -116,11 +116,32 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 	var nodes []*AstraMapNode
 	var edges []*AstraMapEdge
 	now := time.Now().Unix()
+	globalScipToUsn := make(map[string]string)
+	fileNodeCounts := make(map[string]int)
+	fileLanguages := make(map[string]string)
+
+	for _, doc := range index.Documents {
+		for _, occ := range doc.Occurrences {
+			if (occ.SymbolRoles&int32(scip.SymbolRole_Definition)) == 0 || occ.Symbol == "" {
+				continue
+			}
+			info := extractSymbolInfo(occ.Symbol, scipSymMap)
+			if info.name == "" || len(info.name) <= 1 {
+				continue
+			}
+			usn := occ.Symbol
+			if len(usn) > 200 {
+				usn = fmt.Sprintf("scip:%s::%s", doc.RelativePath, info.name)
+			}
+			globalScipToUsn[occ.Symbol] = usn
+		}
+	}
 
 	// 2. 遍历 Documents 提取节点和边
 	for _, doc := range index.Documents {
 		relPath := doc.RelativePath
 		docLang := normalizeLanguage(doc.Language, relPath)
+		fileLanguages[relPath] = docLang
 
 		// 排序 occurrences 从而计算精确的函数 end_line
 		type defInfo struct {
@@ -146,6 +167,7 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 
 		// 第一遍：创建节点
 		scipToUsn := make(map[string]string)
+		sourceLines := readSourceLinesBestEffort(projectRoot, relPath)
 		for idx, d := range defs {
 			occ := d.occ
 			info := extractSymbolInfo(occ.Symbol, scipSymMap)
@@ -159,6 +181,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			// 获取本文件下一个定义起始行作为 endLine
 			if idx+1 < len(defs) {
 				endLine = defs[idx+1].startLine - 1
+			}
+			if info.isFunc {
+				endLine = estimateFunctionEndLine(sourceLines, startLine)
 			}
 			if endLine < startLine {
 				endLine = startLine
@@ -236,7 +261,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				UpdatedAt:     now,
 			}
 			nodes = append(nodes, node)
+			fileNodeCounts[relPath]++
 			scipToUsn[occ.Symbol] = usn
+			globalScipToUsn[occ.Symbol] = usn
 		}
 
 		// 第二遍：创建边 (调用边)
@@ -274,6 +301,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			}
 
 			targetUSN := scipToUsn[occ.Symbol]
+			if targetUSN == "" {
+				targetUSN = globalScipToUsn[occ.Symbol]
+			}
 			if targetUSN == "" {
 				targetUSN = fmt.Sprintf("external:%s", occ.Symbol)
 			}
@@ -336,6 +366,35 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 		if err != nil {
 			return fmt.Errorf("插入节点失败 (%s): %w", n.ID, err)
 		}
+	}
+
+	fileStmt, err := tx.Preparex(`
+		INSERT INTO astramap_files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '')
+		ON CONFLICT(path) DO UPDATE SET
+			content_hash=excluded.content_hash,
+			language=excluded.language,
+			size=excluded.size,
+			modified_at=excluded.modified_at,
+			indexed_at=excluded.indexed_at,
+			node_count=excluded.node_count,
+			errors=''
+	`)
+	if err != nil {
+		return err
+	}
+	defer fileStmt.Close()
+
+	for relPath, lang := range fileLanguages {
+		absPath := filepath.Join(projectRoot, relPath)
+		contentHash, _ := hashFile(absPath)
+		var size int64
+		var modifiedAt int64
+		if stat, statErr := os.Stat(absPath); statErr == nil {
+			size = stat.Size()
+			modifiedAt = stat.ModTime().Unix()
+		}
+		_, _ = fileStmt.Exec(relPath, contentHash, lang, size, modifiedAt, now, fileNodeCounts[relPath])
 	}
 
 	// 插入 external: 占位节点（FK 约束要求边目标必须存在于 nodes 表）
@@ -505,12 +564,116 @@ func hashFile(path string) (string, error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
+func readSourceLinesBestEffort(projectRoot, relPath string) []string {
+	data, err := os.ReadFile(filepath.Join(projectRoot, relPath))
+	if err != nil {
+		return nil
+	}
+	return strings.Split(string(data), "\n")
+}
+
+func estimateFunctionEndLine(lines []string, startLine int) int {
+	if len(lines) == 0 || startLine <= 0 || startLine > len(lines) {
+		return startLine
+	}
+
+	braceDepth := 0
+	seenOpenBrace := false
+	for lineNo := startLine; lineNo <= len(lines); lineNo++ {
+		line := stripLineForBraceScan(lines[lineNo-1])
+		for _, r := range line {
+			switch r {
+			case '{':
+				braceDepth++
+				seenOpenBrace = true
+			case '}':
+				if braceDepth > 0 {
+					braceDepth--
+				}
+				if seenOpenBrace && braceDepth == 0 {
+					return lineNo
+				}
+			}
+		}
+	}
+	return startLine
+}
+
+func stripLineForBraceScan(line string) string {
+	if idx := strings.Index(line, "//"); idx >= 0 {
+		line = line[:idx]
+	}
+	var b strings.Builder
+	inString := false
+	inChar := false
+	escaped := false
+	for _, r := range line {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '"' && !inChar {
+			inString = !inString
+			continue
+		}
+		if r == '\'' && !inString {
+			inChar = !inChar
+			continue
+		}
+		if !inString && !inChar {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // SyncAllFilesAstraMap 扫描项目目录，增量同步所有脏文件
-func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string) error {
+// allIndexExts is the full set of extensions SyncAllFilesAstraMap will index when no filter is provided.
+var allIndexExts = map[string]bool{
+	".go": true, ".py": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true,
+	".c": true, ".cpp": true, ".cc": true, ".cxx": true, ".h": true, ".hpp": true, ".hxx": true, ".java": true,
+}
+
+// LangExts maps language name to its source file extensions (exported for CLI use).
+var LangExts = map[string][]string{
+	"go":         {".go"},
+	"typescript": {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
+	"python":     {".py"},
+	"java":       {".java"},
+	"c":          {".c", ".h"},
+	"cpp":        {".cc", ".cpp", ".cxx", ".hpp", ".hxx"},
+}
+
+// ExtToLang maps file extension back to its language name.
+var ExtToLang = func() map[string]string {
+	m := make(map[string]string)
+	for lang, exts := range LangExts {
+		for _, ext := range exts {
+			m[ext] = lang
+		}
+	}
+	return m
+}()
+
+func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string) error {
 	logInfo("SyncAllFilesAstraMap: 开始扫描增量更新代码地图: %s", projectRoot)
-	extensions := map[string]bool{
-		".go": true, ".py": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true,
-		".c": true, ".cpp": true, ".cc": true, ".cxx": true, ".h": true, ".hpp": true, ".java": true,
+
+	extensions := make(map[string]bool)
+	if len(langFilter) > 0 {
+		for _, lang := range langFilter {
+			for _, ext := range LangExts[lang] {
+				extensions[ext] = true
+			}
+		}
+	}
+	if len(extensions) == 0 {
+		for ext := range allIndexExts {
+			extensions[ext] = true
+		}
 	}
 
 	scanned := 0
@@ -557,6 +720,30 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string) error {
 
 	logInfo("SyncAllFilesAstraMap: 增量扫描就绪，扫描了 %d 个文件，更新了 %d 个文件", scanned, updated)
 	return err
+}
+
+// ProvenanceStats returns node counts by language and edge counts by provenance.
+func ProvenanceStats(db *sqlx.DB) (map[string]int, map[string]int, error) {
+	nodeStats := make(map[string]int)
+	edgeStats := make(map[string]int)
+
+	type row struct {
+		Key   string `db:"key"`
+		Count int    `db:"cnt"`
+	}
+	var rows []row
+	if err := db.Select(&rows, "SELECT language AS key, COUNT(*) AS cnt FROM astramap_nodes GROUP BY language"); err == nil {
+		for _, r := range rows {
+			nodeStats[r.Key] = r.Count
+		}
+	}
+	rows = nil
+	if err := db.Select(&rows, "SELECT provenance AS key, COUNT(*) AS cnt FROM astramap_edges GROUP BY provenance"); err == nil {
+		for _, r := range rows {
+			edgeStats[r.Key] = r.Count
+		}
+	}
+	return nodeStats, edgeStats, nil
 }
 
 func shouldSkipIndexDir(name string) bool {
@@ -627,8 +814,8 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'heuristic' AND kind = 'implements'")
 
 	edgeStmt, err := tx.Preparex(`
-		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance)
-		VALUES (?, ?, 'implements', 'heuristic')
+		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, metadata)
+		VALUES (?, ?, 'implements', 'heuristic', '')
 	`)
 	if err != nil {
 		return err
@@ -711,8 +898,8 @@ func ResolveWebRoutes(db *sqlx.DB, projectRoot string) error {
 				`, routeUSN, routePath, routePath, handler.FilePath, time.Now().Unix())
 
 				_, _ = tx.Exec(`
-					INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance)
-					VALUES (?, ?, 'calls', 'heuristic')
+					INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, metadata)
+					VALUES (?, ?, 'calls', 'heuristic', '')
 				`, routeUSN, handler.ID)
 			}
 		}
@@ -856,7 +1043,7 @@ func getSymbolTypeFromKind(kind scip.SymbolInformation_Kind) (string, bool) {
 	case scip.SymbolInformation_Class, scip.SymbolInformation_Struct:
 		return "struct", false
 	case scip.SymbolInformation_Method:
-		return "method", false
+		return "method", true
 	case scip.SymbolInformation_Function, scip.SymbolInformation_Constructor:
 		return "function", true
 	case scip.SymbolInformation_Macro:
@@ -912,7 +1099,9 @@ func normalizeLanguage(lang, filePath string) string {
 		return "python"
 	case ".ts", ".tsx", ".js", ".jsx":
 		return "typescript"
-	case ".c", ".cpp", ".cc", ".h", ".hpp":
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hxx":
 		return "cpp"
 	case ".java":
 		return "java"

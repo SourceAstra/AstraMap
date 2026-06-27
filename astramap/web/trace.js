@@ -268,16 +268,17 @@
                     const bf = b.file || b.filePath || '';
                     if (af !== bf) return af.localeCompare(bf);
                     return (a.startLine || a.line || 0) - (b.startLine || b.line || 0);
-                })
-                .slice(0, needle ? 500 : 1200);
+                });
 
-            if (!funcs.length) {
+            const visibleFuncs = needle ? funcs.slice(0, 500) : funcs;
+
+            if (!visibleFuncs.length) {
                 tree.innerHTML = '<div class="und-tree-empty">没有匹配的函数</div>';
                 return;
             }
 
             const groups = new Map();
-            funcs.forEach(fn => {
+            visibleFuncs.forEach(fn => {
                 const file = fn.file || fn.filePath || '(unknown file)';
                 const parts = file.replace(/\\/g, '/').split('/');
                 const dir = parts.length > 1 && parts[0] ? parts[0] : '(root)';
@@ -292,7 +293,7 @@
                     const fnHtml = fileFuncs.map(fn => {
                         const active = fn.id === rootNodeId ? ' active' : '';
                         const line = fn.startLine || fn.line || 0;
-                        const idx = funcs.indexOf(fn);
+                        const idx = visibleFuncs.indexOf(fn);
                         return `<button class="und-tree-function${active}" data-node-index="${idx}" title="${this.escapeHtml(fn.qualifiedName || fn.name || fn.id)}">
                             <span class="und-tree-function-name">${this.escapeHtml(fn.name || fn.id)}</span>
                             <span class="und-tree-function-line">${line ? ':' + line : ''}</span>
@@ -313,7 +314,7 @@
             tree.querySelectorAll('.und-tree-function').forEach(btn => {
                 btn.onclick = () => {
                     const idx = Number(btn.getAttribute('data-node-index'));
-                    const sym = Number.isInteger(idx) ? funcs[idx] : null;
+                    const sym = Number.isInteger(idx) ? visibleFuncs[idx] : null;
                     if (sym) this.startTrace(sym);
                 };
             });
@@ -1783,6 +1784,16 @@
             if (!traceNodes.length) return;
 
             const rootId = rootNodeId;
+            const isPinnedDependency = (node) => {
+                if (!node) return false;
+                if (node.id === rootId) return true;
+                const name = (node.name || '').toLowerCase();
+                const file = (node.file || '').toLowerCase();
+                return name === 'drv_asw_api_acc' ||
+                    name === 'drv_asw_api_ioctl' ||
+                    name.includes('_api_acc') ||
+                    file.startsWith('driver/');
+            };
 
             // 1. 统计各个过滤后节点的入度和出度
             const inDegree = {};
@@ -1801,7 +1812,7 @@
             // 2. 找出所有“公共叶子节点”（即入度 > 1，且出度 === 0 的外部依赖或辅助工具函数）
             const commonLeaves = new Set();
             traceNodes.forEach(n => {
-                if (n.id !== rootId && inDegree[n.id] > 1 && outDegree[n.id] === 0) {
+                if (n.id !== rootId && !isPinnedDependency(n) && inDegree[n.id] > 1 && outDegree[n.id] === 0) {
                     commonLeaves.add(n.id);
                 }
             });
@@ -1875,9 +1886,10 @@
 
             Object.keys(parentToLeaves).forEach(parentId => {
                 const leaves = parentToLeaves[parentId];
-                if (leaves.length > 3) {
+                const foldableLeaves = leaves.filter(leaf => !isPinnedDependency(leaf));
+                if (foldableLeaves.length > 3) {
                     const keepCount = 2;
-                    const leavesToRemove = leaves.slice(keepCount);
+                    const leavesToRemove = foldableLeaves.slice(keepCount);
                     leavesToRemove.forEach(leaf => {
                         nodesToRemove.add(leaf.id);
                         nodesToKeep.delete(leaf.id);

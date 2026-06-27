@@ -2333,7 +2333,7 @@
                     </div>
                     <div class="explore-doc-empty-title">暂无此${type === 'file' ? '文件' : '模块'}的理解文档</div>
                     <div class="explore-doc-empty-desc">
-                        ${hint || '通过大语言模型直接阅读与分析该代码或结构，提炼其核心职责、架构设计分工与关键协作流。'}
+                        ${hint || '根据当前代码地图的目录、文件、符号与依赖关系生成本地理解文档。'}
                     </div>
                     <button type="button" class="explore-doc-btn" id="explore-doc-generate-btn" style="width:100%;">
                         <span>⚡</span> 一键生成理解文档
@@ -2372,27 +2372,6 @@
                 step4Class = 'active';
             }
 
-            const activeModel = window.getScopedLlmModelSlot
-                ? window.getScopedLlmModelSlot('GLOBAL')
-                : (localStorage.getItem('G_PRIMARY_MODEL') || localStorage.getItem('G_ACTIVE_MODEL') || 'deepseek-v3');
-            const configs = window.getLlmConfigs ? window.getLlmConfigs() : {};
-            const conf = configs[activeModel] || { name: 'DeepSeek-V3', model: 'deepseek-chat', url: '', key: '', temp: '30' };
-            const timeoutSeconds = window.getLlmTimeoutSeconds ? window.getLlmTimeoutSeconds(conf) : 300;
-            const retryCount = window.getLlmRetryCount ? window.getLlmRetryCount(conf) : 1;
-            const globalPolicy = window.getLlmReasoningPolicy ? window.getLlmReasoningPolicy(conf) : { enabled: true, effort: 'medium', visibility: 'summary' };
-            const override = (window.SA_REASONING_OVERRIDES && window.SA_REASONING_OVERRIDES.explore) || { enabled: null, effort: null, visibility: null };
-            const activeEnabled = override.enabled !== null ? override.enabled : globalPolicy.enabled;
-            const activeEffort = override.effort !== null ? override.effort : globalPolicy.effort;
-            const isOverride = override.enabled !== null || override.effort !== null || override.visibility !== null;
-            
-            const effortMap = { low: '低', medium: '标准', high: '深度', custom: '自定义' };
-            const activeEffortText = effortMap[activeEffort] || '标准';
-            const reasoningModeText = activeEnabled ? `开启 (${activeEffortText})` : '未开启';
-            
-            const metaBorder = isOverride ? '1px solid var(--chat-success, #10b981)' : '1px solid rgba(255,255,255,0.05)';
-            const metaBg = isOverride ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255,255,255,0.02)';
-            const metaColor = isOverride ? 'var(--chat-success, #10b981)' : THEME.textDim;
-
             this.docContent.innerHTML = `
                 <div class="explore-doc-loading-wrapper">
                     <div class="explore-doc-pulse-ring">
@@ -2401,18 +2380,7 @@
                     
                     <div style="text-align:center; margin-top:-8px;">
                         <div style="font-size:13.5px; font-weight:700; color:#38bdf8;" id="gen-step-msg">${this.escapeHtml(message)}</div>
-                        <div style="font-size:11px; color:${THEME.textDim}; margin-top:4px;">这通常需要 15 ~ 30 秒，请稍候...</div>
-                    </div>
-
-                    <!-- 大模型与推理属性栏 -->
-                    <div class="explore-doc-llm-meta" style="margin: 14px auto 16px; padding: 6px 10px; width: fit-content; background: ${metaBg}; border: ${metaBorder}; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 11px; color: ${metaColor}; cursor: pointer; user-select: none;" title="点击动态调整单次任务推理策略">
-                        <span>🤖 模型: <strong style="color: var(--chat-primary, #818cf8);">${conf.name || activeModel}</strong></span>
-                        <span style="opacity: 0.3;">|</span>
-                        <span>⚡ 推理: <strong style="color: ${activeEnabled ? 'var(--chat-success, #10b981)' : 'inherit'};">${reasoningModeText}${isOverride ? ' (覆写)' : ''}</strong></span>
-                        <span style="opacity: 0.3;">|</span>
-                        <span>⏱️ 超时: <strong>${timeoutSeconds}s</strong></span>
-                        <span style="opacity: 0.3;">|</span>
-                        <span>🔄 重试限制: <strong>${retryCount}次</strong></span>
+                        <div style="font-size:11px; color:${THEME.textDim}; margin-top:4px;">正在从本地代码地图归纳结构信息...</div>
                     </div>
                     
                     <div class="explore-doc-steps">
@@ -2422,7 +2390,7 @@
                         </div>
                         <div class="explore-doc-step-item ${step2Class}">
                             <div class="step-dot"></div>
-                            <span>2. 呼叫大语言模型智能推理</span>
+                            <span>2. 汇总符号、文件与依赖关系</span>
                         </div>
                         <div class="explore-doc-step-item ${step3Class}">
                             <div class="step-dot"></div>
@@ -2450,65 +2418,6 @@
             style.id = 'explore-spin-style';
             style.innerHTML = `@keyframes spin { to { transform: rotate(360deg); } }`;
             document.head.appendChild(style);
-        }
-
-        async fetchWithTimeout(url, options = {}, timeoutMs = 300000) {
-            const controller = new AbortController();
-            if (window.saRegisterActiveLlmRequest) window.saRegisterActiveLlmRequest(controller);
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            try {
-                return await fetch(url, { ...options, signal: controller.signal });
-            } catch (err) {
-                if (err && err.name === 'AbortError') {
-                    throw new Error(`生成请求超时，已等待 ${Math.round(timeoutMs / 1000)} 秒。`);
-                }
-                throw err;
-            } finally {
-                clearTimeout(timer);
-                if (window.saUnregisterActiveLlmRequest) window.saUnregisterActiveLlmRequest(controller);
-            }
-        }
-
-        async fetchChatCompletionWithRetry(url, options, timeoutMs = 300000, maxRetries = 2) {
-            let lastError = null;
-            for (let attempt = 0; attempt <= maxRetries; attempt++) {
-                if (attempt > 0) {
-                    const stepMsg = this.container.querySelector('#gen-step-msg');
-                    if (stepMsg) stepMsg.textContent = `模型服务暂时异常，正在重试第 ${attempt} 次...`;
-                    await new Promise(resolve => setTimeout(resolve, attempt * 1200));
-                }
-
-                try {
-                    const response = await this.fetchWithTimeout(url, options, timeoutMs);
-                    const text = await response.text();
-                    let body = null;
-                    if (text) {
-                        try {
-                            body = JSON.parse(text);
-                        } catch (_) {
-                            body = { raw: text };
-                        }
-                    }
-                    if (response.ok) {
-                        return body;
-                    }
-
-                    const message = body && body.error && body.error.message
-                        ? body.error.message
-                        : (body && body.raw ? body.raw : text);
-                    lastError = new Error(`LLM 响应错误 HTTP ${response.status}: ${message || response.statusText}`);
-                    if (response.status < 500 || attempt === maxRetries) {
-                        throw lastError;
-                    }
-                } catch (err) {
-                    lastError = err;
-                    const retriable = err && /超时|Failed to fetch|NetworkError|EOF|server_error|HTTP 5\d\d/i.test(err.message || String(err));
-                    if (!retriable || attempt === maxRetries) {
-                        throw err;
-                    }
-                }
-            }
-            throw lastError || new Error('模型服务请求失败');
         }
 
         ensureDocDrawerStyle() {
@@ -2540,33 +2449,8 @@
                         return;
                     }
 
-                    // 委托绑定推理策略覆写 Badge 点击
-                    const badge = e.target.closest('#explore-reasoning-override-badge');
-                    if (badge && this.docContent.contains(badge)) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (window.showReasoningOverridePopover) {
-                            window.showReasoningOverridePopover(e, 'explore');
-                        }
-                        return;
-                    }
-
-                    // 委托绑定生成时推理 Meta 栏点击
-                    const meta = e.target.closest('.explore-doc-llm-meta');
-                    if (meta && this.docContent.contains(meta)) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (window.showReasoningOverridePopover) {
-                            window.showReasoningOverridePopover(e, 'explore');
-                        }
-                        return;
-                    }
                 });
             }
-
-            window.G_EXPLORE_REFRESH_META = () => {
-                this.updateExploreReasoningBadge();
-            };
 
             const resizer = this.container.querySelector('#explore-doc-resizer');
             if (resizer) {
@@ -2660,11 +2544,6 @@
             const key = this.currentLevel === 'file' ? this.currentFile : this.currentDir;
             const title = this.currentLevel === 'file' ? `文件: ${key.split('/').pop()}` : (type === 'project' ? '项目理解文档' : `目录: ${this._dirDisplayName(key)}`);
 
-            // 如果不是刚刚生成而是人为点击其他版本，则清空上次产生的推理摘要
-            if (targetTimestamp !== '') {
-                this.lastReasoningSummary = null;
-            }
-
             this.docTitle.textContent = title;
             this.docContent.innerHTML = `<div style="text-align:center;padding:40px;color:${THEME.textDim};">加载中...</div>`;
 
@@ -2701,8 +2580,6 @@
             let html = '';
 
             if (hasDoc) {
-                let reasoningSummaryHtml = '';
-
                 html += `
                     <div class="explore-doc-config explore-doc-sticky-bar">
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
@@ -2716,9 +2593,6 @@
                                     `).join('')}
                                 </select>
                             </div>
-                            <div id="explore-reasoning-override-badge" style="display:inline-flex; align-items:center; gap:4px; cursor:pointer; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); color:#818cf8; padding:3px 8px; border-radius:6px; font-size:10.5px; transition:all 0.2s; user-select:none;" title="点击动态调整单次任务推理策略">
-                                <span>⚡ 推理: 开启 (默认)</span>
-                            </div>
                         </div>
                         <div style="display:flex; gap:8px; margin-top:4px; width:100%;">
                             <button type="button" class="explore-doc-btn" id="explore-doc-regenerate-btn" style="flex:1; min-height:30px; padding:4px 12px;">
@@ -2729,7 +2603,6 @@
                             </button>
                         </div>
                     </div>
-                    ${reasoningSummaryHtml}
                     <div class="explore-doc-markdown" id="explore-doc-markdown-render">
                         <div style="text-align:center;padding:20px;color:${THEME.textDim};">排版渲染中...</div>
                     </div>
@@ -2796,38 +2669,6 @@
                         <pre style="white-space:pre-wrap;word-break:break-word;color:${THEME.text};background:rgba(15,23,42,0.55);padding:16px;border-radius:8px;">${this.escapeHtml(docData.content)}</pre>
                     `;
                 });
-            }
-            this.updateExploreReasoningBadge();
-        }
-
-        updateExploreReasoningBadge() {
-            const badge = this.docContent ? this.docContent.querySelector('#explore-reasoning-override-badge') : null;
-            if (!badge) return;
-            const activeModel = window.getScopedLlmModelSlot
-                ? window.getScopedLlmModelSlot('GLOBAL')
-                : (localStorage.getItem('G_PRIMARY_MODEL') || localStorage.getItem('G_ACTIVE_MODEL') || 'deepseek-v3');
-            const configs = window.getLlmConfigs ? window.getLlmConfigs() : {};
-            const conf = configs[activeModel] || {};
-            const globalPolicy = window.getLlmReasoningPolicy ? window.getLlmReasoningPolicy(conf) : { enabled: true, effort: 'medium', visibility: 'summary' };
-            
-            const override = (window.SA_REASONING_OVERRIDES && window.SA_REASONING_OVERRIDES.explore) || { enabled: null, effort: null, visibility: null };
-            const activeEnabled = override.enabled !== null ? override.enabled : globalPolicy.enabled;
-            const activeEffort = override.effort !== null ? override.effort : globalPolicy.effort;
-            
-            const isOverride = override.enabled !== null || override.effort !== null || override.visibility !== null;
-            
-            const effortMap = { low: '低', medium: '标准', high: '深度', custom: '自定义' };
-            const effortText = effortMap[activeEffort] || '标准';
-
-            badge.innerHTML = `<span>⚡ 推理: ${activeEnabled ? `开启 (${effortText})` : '关闭'}${isOverride ? ' <strong style="color:var(--chat-success, #10b981);">(覆写)</strong>' : ' (默认)'}</span>`;
-            if (isOverride) {
-                badge.style.borderColor = 'var(--chat-success, #10b981)';
-                badge.style.background = 'rgba(16, 185, 129, 0.08)';
-                badge.style.color = 'var(--chat-success, #10b981)';
-            } else {
-                badge.style.borderColor = 'rgba(99, 102, 241, 0.25)';
-                badge.style.background = 'rgba(99, 102, 241, 0.08)';
-                badge.style.color = '#818cf8';
             }
         }
 
@@ -2959,6 +2800,33 @@
             }
         }
 
+        _formatDirDependencies() {
+            const edges = (this.dirEdges || []).slice()
+                .sort((a, b) => (b.count || 0) - (a.count || 0))
+                .slice(0, 20);
+            if (edges.length === 0) return '- 暂无跨目录依赖';
+            return edges.map(e => {
+                const source = String(e.source || '').replace(/^dir:/, '');
+                const target = String(e.target || '').replace(/^dir:/, '');
+                return `- \`${source}\` -> \`${target}\` (${e.count || 1} 条)`;
+            }).join('\n');
+        }
+
+        _formatModuleDependencies(dirPath) {
+            const dirPrefix = 'file:';
+            const files = Object.keys((this.dirMap && this.dirMap[dirPath] && this.dirMap[dirPath].files) || {});
+            const fileSet = new Set(files.map(f => dirPrefix + f));
+            const edges = (this.fileEdges || []).filter(e => fileSet.has(e.source) || fileSet.has(e.target))
+                .sort((a, b) => (b.count || 0) - (a.count || 0))
+                .slice(0, 20);
+            if (edges.length === 0) return '- 暂无跨文件依赖';
+            return edges.map(e => {
+                const source = String(e.source || '').replace(/^file:/, '');
+                const target = String(e.target || '').replace(/^file:/, '');
+                return `- \`${source}\` -> \`${target}\` (${e.count || 1} 条)`;
+            }).join('\n');
+        }
+
         async generateDoc() {
             if (this.docGenerating) return;
             this.docGenerating = true;
@@ -2985,100 +2853,65 @@
                     }
                 }
 
-                this.renderDocGeneratingState('正在呼叫大模型分析生成文档...');
+                this.renderDocGeneratingState('正在汇总代码地图结构...');
 
-                const activeModel = window.getScopedLlmModelSlot
-                    ? window.getScopedLlmModelSlot('GLOBAL')
-                    : (localStorage.getItem('G_PRIMARY_MODEL') || localStorage.getItem('G_ACTIVE_MODEL') || 'deepseek-v3');
-                const configs = window.getLlmConfigs ? window.getLlmConfigs() : {};
-                const conf = configs[activeModel] || { name: 'DeepSeek-V3', model: 'deepseek-chat', url: '', key: '', temp: '30' };
-                const timeoutSeconds = window.getLlmTimeoutSeconds ? window.getLlmTimeoutSeconds(conf) : 300;
-                const retryCount = window.getLlmRetryCount ? window.getLlmRetryCount(conf) : 1;
-
-                let systemPrompt = '';
-                let userPrompt = '';
+                let docContext = '';
                 if (type === 'file') {
-                    systemPrompt = `你是 SourceAstra 资深系统架构师。请为指定的文件生成专业的 Markdown 架构理解文档。\n要求结构清晰，以纯粹的中文专业词汇输出，严禁啰嗦。`;
-                    userPrompt = `请为文件 \`${key}\` 生成【文件理解文档】。\n\n该文件的完整源码内容如下：\n\`\`\`\n${codeContext}\n\`\`\`\n\n请严格包含以下维度进行分析，并输出优雅 Markdown：\n1. **核心职责 (Core Responsibilities)**\n2. **结构设计与关键函数 (Structure & Keys)**\n3. **核心算法或控制流 (Core Algorithms)**\n4. **关键外部/内部依赖 (Dependencies)**`;
+                    const fileData = this.fileMap && this.fileMap[key];
+                    const funcs = fileData && fileData.functions ? fileData.functions : [];
+                    docContext = [
+                        `文件路径: ${key}`,
+                        `所属目录: ${fileData ? fileData.dirPath : ''}`,
+                        `函数/方法: ${funcs.map(fn => fn.name || fn.qualifiedName || fn.id).join(', ') || '无'}`,
+                        '',
+                        '源码片段:',
+                        '```',
+                        codeContext,
+                        '```'
+                    ].join('\n');
                 } else if (type === 'project') {
-                    systemPrompt = `你是 SourceAstra 资深系统架构师。请为整个项目生成专业的 Markdown 架构理解文档。`;
                     const dirsList = Object.values(this.dirMap || {}).map(d => `- 目录: \`${d.dirPath}\`，文件 ${Object.keys(d.files || {}).length} 个，函数 ${d.functions.length} 个`).join('\n');
-                    userPrompt = `请为当前项目生成【项目理解文档】。\n\n目录概览如下：\n${dirsList}\n\n请严格包含以下维度：\n1. **项目整体职责**\n2. **目录结构与分层**\n3. **关键调用关系**\n4. **后续阅读建议**`;
+                    docContext = [
+                        '目录概览:',
+                        dirsList || '- 暂无目录数据',
+                        '',
+                        '跨目录依赖:',
+                        this._formatDirDependencies()
+                    ].join('\n');
                 } else {
-                    systemPrompt = `你是 SourceAstra 资深系统架构师。请为指定的模块生成专业的 Markdown 架构理解文档。\n要求分析全面、重点突出，以纯粹的中文专业词汇输出，严禁啰嗦。`;
                     const currentDirData = this.dirMap[key];
                     const files = currentDirData ? Object.values(currentDirData.files) : [];
                     const filesList = files.map(f => {
                         const funcs = (f.functions || []).map(fn => fn.name).slice(0, 10).join(', ');
                         return `- 文件: \`${f.filePath}\` (包含函数: ${funcs || '无'})`;
                     }).join('\n');
-                    userPrompt = `请为模块 \`${key}\` 生成【模块架构理解文档】。\n\n该模块包含的文件及部分函数列表如下：\n${filesList}\n\n请严格包含以下维度进行分析，并输出优雅 Markdown：\n1. **设计意图与全局职责 (Design Intent & Global Responsibilities)**\n2. **模块内部分工与结构说明 (Internal Division & Architecture)**\n3. **关键数据流或协作流程 (Key Workflows & Collaborations)**\n4. **模块后续演进或改进建议 (Evolution & Recommendations)**`;
+                    docContext = [
+                        `目录路径: ${key}`,
+                        '',
+                        '文件与函数:',
+                        filesList || '- 暂无文件数据',
+                        '',
+                        '目录依赖:',
+                        this._formatModuleDependencies(key)
+                    ].join('\n');
                 }
 
-                const response = await fetch('/api/chat/completion', {
+                const response = await fetch('/api/documents/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...(window.saAuthHeaders ? window.saAuthHeaders() : {}) },
                     body: JSON.stringify({
-                        active_model: activeModel,
-                        usage_context: {
-                            feature: 'explore-docs',
-                            project_id: key
-                        },
-                        messages: [
-                            { role: 'system', content: systemPrompt },
-                            { role: 'user', content: userPrompt }
-                        ],
-                        temperature: parseFloat(conf.temp || '30') / 100,
-                        timeout_seconds: timeoutSeconds,
-                        reasoning_override: {
-                            enabled: (window.SA_REASONING_OVERRIDES && window.SA_REASONING_OVERRIDES.explore && window.SA_REASONING_OVERRIDES.explore.enabled !== null) ? window.SA_REASONING_OVERRIDES.explore.enabled : undefined,
-                            effort: (window.SA_REASONING_OVERRIDES && window.SA_REASONING_OVERRIDES.explore && window.SA_REASONING_OVERRIDES.explore.effort) || undefined,
-                            visibility: (window.SA_REASONING_OVERRIDES && window.SA_REASONING_OVERRIDES.explore && window.SA_REASONING_OVERRIDES.explore.visibility) || undefined
-                        }
+                        type,
+                        key,
+                        context: docContext
                     })
                 });
 
                 if (!response.ok) {
                     const errText = await response.text().catch(() => '');
-                    throw new Error(`LLM 响应错误 HTTP ${response.status}: ${errText.slice(0, 200)}`);
+                    throw new Error(`文档生成失败 HTTP ${response.status}: ${errText.slice(0, 200)}`);
                 }
 
-                let generatedContent = '';
-                this.lastReasoningSummary = null;
-                if (window.saConsumeSSEStream) {
-                    await window.saConsumeSSEStream(response, (event, data) => {
-                        switch (event) {
-                            case 'reasoning-summary':
-                                try { const rs = JSON.parse(data); this.lastReasoningSummary = rs.summary || null; } catch (_) {}
-                                break;
-                            case 'chunk':
-                                generatedContent += data.replace(/\x1E/g, '\n');
-                                break;
-                        }
-                    });
-                }
-                if (!generatedContent) {
-                    throw new Error('LLM 返回的响应格式非预期，未找到 answer。');
-                }
-
-                this.renderDocGeneratingState('正在将文档保存到本地持久化层...');
-
-                const saveRes = await fetch('/api/documents/save', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': window.saAuthHeaders ? window.saAuthHeaders()['Authorization'] : ''
-                    },
-                    body: JSON.stringify({
-                        type: type,
-                        key: key,
-                        content: generatedContent
-                    })
-                });
-
-                if (!saveRes.ok) {
-                    throw new Error(`持久化失败 HTTP ${saveRes.status}`);
-                }
+                this.renderDocGeneratingState('正在刷新本地文档视图...');
 
                 await this.loadDocHistoryAndContent();
                 this.updateDocButtonState();
