@@ -722,6 +722,15 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 
 				beforeCallee := line[:m[2]]
 				dotIndex := strings.LastIndex(beforeCallee, ".")
+				if calleeName == "main" && dotIndex == -1 {
+					var filtered []string
+					for _, tID := range targets {
+						if strings.Contains(tID, ":"+fp+"::") {
+							filtered = append(filtered, tID)
+						}
+					}
+					targets = filtered
+				}
 				if dotIndex != -1 {
 					leftBound := dotIndex
 					for leftBound > 0 {

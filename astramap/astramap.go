@@ -505,7 +505,7 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 	}
 	defer tx.Rollback()
 
-	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ?", relPath)
+	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'scip%' AND id NOT LIKE 'external%'", relPath)
 
 	nodeStmt, err := tx.Preparex(`
 		INSERT INTO astramap_nodes (

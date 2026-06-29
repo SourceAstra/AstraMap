@@ -2013,7 +2013,13 @@ func ownersCmd() {
 	}
 	defer db.Close()
 
-	owners, err := astramap.GetCodeOwners(db, symbol, projectRoot)
+	ids, resolveErr := astramap.ResolveSymbolToIDs(db, symbol)
+	targetID := symbol
+	if resolveErr == nil && len(ids) > 0 {
+		targetID = ids[0]
+	}
+
+	owners, err := astramap.GetCodeOwners(db, targetID, projectRoot)
 	if err != nil {
 		logError("提取作者失败: %v", err)
 		os.Exit(1)
