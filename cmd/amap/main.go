@@ -136,8 +136,12 @@ func printHelp() {
 
 核心功能命令:
   serve                                       启动 stdio MCP 服务
-  dashboard                                   启动源码星空可视化控制台
-  index [--lang c,python]                     构建/更新代码地图索引（交互选择语言）
+  dashboard [--host] [--port]                 启动源码星空可视化控制台
+  index [选项]                                构建/更新代码地图索引
+    --lang c,python                           指定语言
+    --scip index.scip                         导入已有 SCIP 索引文件
+    --scip-only                               只导入 SCIP
+    --tree-sitter                             只跑 Tree-sitter
   install                                     一键安装 MCP 到 Claude Code / Cursor
 
 开发诊断工具 (CLI Diagnostics):
@@ -310,7 +314,7 @@ type LangCount struct {
 var skipDirs = []string{".git", ".astramap", ".understand-anything", ".cache", ".idea", ".vscode",
 	"node_modules", "build", "dist", "vendor", "target", "out", "tmp", "temp"}
 
-func countFilesByExt(projectRoot string, exts ...string) int {
+func countFilesByExt(projectRoot string, filter *astramap.IndexFilter, exts ...string) int {
 	wanted := make(map[string]bool, len(exts))
 	for _, ext := range exts {
 		wanted[ext] = true
@@ -320,18 +324,22 @@ func countFilesByExt(projectRoot string, exts ...string) int {
 		if err != nil {
 			return nil
 		}
+		relPath, _ := filepath.Rel(projectRoot, path)
 		if info.IsDir() {
 			for _, skip := range skipDirs {
 				if info.Name() == skip {
 					return filepath.SkipDir
 				}
 			}
+			if filter != nil && !filter.AllowsDir(relPath, astramap.StageDetect) {
+				return filepath.SkipDir
+			}
 			if strings.HasPrefix(info.Name(), ".trash") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if wanted[strings.ToLower(filepath.Ext(path))] {
+		if wanted[strings.ToLower(filepath.Ext(path))] && (filter == nil || filter.Allows(relPath, astramap.StageDetect)) {
 			count++
 		}
 		return nil
@@ -339,7 +347,7 @@ func countFilesByExt(projectRoot string, exts ...string) int {
 	return count
 }
 
-func detectProjectLanguages(projectRoot string) []LangCount {
+func detectProjectLanguages(projectRoot string, filter *astramap.IndexFilter) []LangCount {
 	// Phase 1: detect which languages exist (project markers + file extensions)
 	candidates := make(map[string]bool)
 
@@ -350,7 +358,7 @@ func detectProjectLanguages(projectRoot string) []LangCount {
 		candidates["typescript"] = true
 	} else if _, err := os.Stat(filepath.Join(projectRoot, "package.json")); err == nil {
 		candidates["typescript"] = true
-	} else if projectHasExtensions(projectRoot, ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs") {
+	} else if projectHasExtensions(projectRoot, filter, ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs") {
 		candidates["typescript"] = true
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, "pyproject.toml")); err == nil {
@@ -359,19 +367,19 @@ func detectProjectLanguages(projectRoot string) []LangCount {
 		candidates["python"] = true
 	} else if _, err := os.Stat(filepath.Join(projectRoot, "requirements.txt")); err == nil {
 		candidates["python"] = true
-	} else if projectHasExtensions(projectRoot, ".py") {
+	} else if projectHasExtensions(projectRoot, filter, ".py") {
 		candidates["python"] = true
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, "pom.xml")); err == nil {
 		candidates["java"] = true
 	} else if hasAnyProjectFile(projectRoot, "build.gradle", "build.gradle.kts", "gradlew") {
 		candidates["java"] = true
-	} else if projectHasExtensions(projectRoot, ".java") {
+	} else if projectHasExtensions(projectRoot, filter, ".java") {
 		candidates["java"] = true
 	}
-	if isCxxProject(projectRoot) {
+	if isCxxProject(projectRoot, filter) {
 		candidates["cpp"] = true
-	} else if isCProject(projectRoot) {
+	} else if isCProject(projectRoot, filter) {
 		candidates["c"] = true
 	}
 
@@ -382,7 +390,7 @@ func detectProjectLanguages(projectRoot string) []LangCount {
 		if !ok {
 			continue
 		}
-		cnt := countFilesByExt(projectRoot, exts...)
+		cnt := countFilesByExt(projectRoot, filter, exts...)
 		if cnt > 0 {
 			ranked = append(ranked, LangCount{Lang: lang, Count: cnt})
 		}
@@ -393,25 +401,25 @@ func detectProjectLanguages(projectRoot string) []LangCount {
 	return ranked
 }
 
-func isCProject(projectRoot string) bool {
-	return projectHasExtensions(projectRoot, ".c") || (projectHasExtensions(projectRoot, ".h") && !isCxxProject(projectRoot))
+func isCProject(projectRoot string, filter *astramap.IndexFilter) bool {
+	return projectHasExtensions(projectRoot, filter, ".c") || (projectHasExtensions(projectRoot, filter, ".h") && !isCxxProject(projectRoot, filter))
 }
 
-func isCxxProject(projectRoot string) bool {
+func isCxxProject(projectRoot string, filter *astramap.IndexFilter) bool {
 	for _, marker := range []string{"compile_commands.json", "CMakeLists.txt", "Makefile", "makefile"} {
 		if _, err := os.Stat(filepath.Join(projectRoot, marker)); err == nil {
 			if marker != "Makefile" && marker != "makefile" {
-				return projectHasExtensions(projectRoot, ".cc", ".cpp", ".cxx", ".hpp", ".hxx")
+				return projectHasExtensions(projectRoot, filter, ".cc", ".cpp", ".cxx", ".hpp", ".hxx")
 			}
-			if projectHasExtensions(projectRoot, ".cc", ".cpp", ".cxx", ".hpp", ".hxx") {
+			if projectHasExtensions(projectRoot, filter, ".cc", ".cpp", ".cxx", ".hpp", ".hxx") {
 				return true
 			}
 		}
 	}
-	return projectHasExtensions(projectRoot, ".cc", ".cpp", ".cxx", ".hpp", ".hxx")
+	return projectHasExtensions(projectRoot, filter, ".cc", ".cpp", ".cxx", ".hpp", ".hxx")
 }
 
-func projectHasExtensions(projectRoot string, exts ...string) bool {
+func projectHasExtensions(projectRoot string, filter *astramap.IndexFilter, exts ...string) bool {
 	wanted := make(map[string]bool, len(exts))
 	for _, ext := range exts {
 		wanted[ext] = true
@@ -422,18 +430,22 @@ func projectHasExtensions(projectRoot string, exts ...string) bool {
 		if err != nil || found {
 			return nil
 		}
+		relPath, _ := filepath.Rel(projectRoot, path)
 		if info.IsDir() {
 			for _, skip := range skipDirs {
 				if info.Name() == skip {
 					return filepath.SkipDir
 				}
 			}
+			if filter != nil && !filter.AllowsDir(relPath, astramap.StageDetect) {
+				return filepath.SkipDir
+			}
 			if strings.HasPrefix(info.Name(), ".trash") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if wanted[strings.ToLower(filepath.Ext(path))] {
+		if wanted[strings.ToLower(filepath.Ext(path))] && (filter == nil || filter.Allows(relPath, astramap.StageDetect)) {
 			found = true
 		}
 		return nil
@@ -549,7 +561,7 @@ func printLanguageToolchainHints(lang, projectRoot string) {
 		if hasAnyProjectFile(projectRoot, "pom.xml") {
 			printToolStatus("Maven", []string{"mvn"}, "Ubuntu/Debian: sudo apt install maven | macOS: brew install maven")
 		}
-		if projectHasExtensions(projectRoot, ".gradle") || hasAnyProjectFile(projectRoot, "build.gradle", "build.gradle.kts", "gradlew") {
+		if projectHasExtensions(projectRoot, nil, ".gradle") || hasAnyProjectFile(projectRoot, "build.gradle", "build.gradle.kts", "gradlew") {
 			if hasAnyProjectFile(projectRoot, "gradlew") {
 				fmt.Printf("  ✓ Gradle Wrapper: %s\n", filepath.Join(projectRoot, "gradlew"))
 			} else {
@@ -614,7 +626,7 @@ func firstAvailableTool(names ...string) string {
 	return ""
 }
 
-func runScipGeneration(toolPath, lang, projectRoot string) (string, error) {
+func runScipGeneration(toolPath, lang, projectRoot string, filter *astramap.IndexFilter) (string, error) {
 	_ = os.MkdirAll(filepath.Join(projectRoot, ".astramap"), 0755)
 	scipPath := filepath.Join(projectRoot, ".astramap", "index-"+lang+".scip")
 	var cmd *exec.Cmd
@@ -622,7 +634,7 @@ func runScipGeneration(toolPath, lang, projectRoot string) (string, error) {
 	case "go":
 		cmd = exec.Command(toolPath, "index", "--module-root", projectRoot, "-o", scipPath)
 	case "typescript":
-		if err := ensureTsConfig(projectRoot); err != nil {
+		if err := ensureTsConfig(projectRoot, filter); err != nil {
 			return "", err
 		}
 		cmd = exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", scipPath)
@@ -635,13 +647,15 @@ func runScipGeneration(toolPath, lang, projectRoot string) (string, error) {
 				return "", err
 			}
 		}
-		if err := fixCompileCommandsJson(compdbPath, projectRoot); err != nil {
-			logWarn("修复 compile_commands.json 路径失败: %v", err)
+		preparedCompdbPath, err := prepareCompileCommandsJson(compdbPath, projectRoot, filter)
+		if err != nil {
+			logWarn("准备 compile_commands.json 失败: %v", err)
+			preparedCompdbPath = compdbPath
 		}
-		if ok, count, reason := validateCompileCommandsJson(compdbPath); !ok {
+		if ok, count, reason := validateCompileCommandsJson(preparedCompdbPath); !ok {
 			return "", fmt.Errorf("compile_commands.json 无效: %s (entries=%d)", reason, count)
 		}
-		cmd = exec.Command(toolPath, "--compdb-path", compdbPath, "--index-output-path", scipPath, "--no-progress-report")
+		cmd = exec.Command(toolPath, "--compdb-path", preparedCompdbPath, "--index-output-path", scipPath, "--no-progress-report")
 	default:
 		return "", fmt.Errorf("不支持的语言: %s", lang)
 	}
@@ -684,29 +698,37 @@ func ensureCompileCommands(projectRoot, compdbPath string) error {
 
 // ensureTsConfig generates a minimal tsconfig.json for JS/TS projects that lack one.
 // scip-typescript requires tsconfig.json to discover source files.
-func ensureTsConfig(projectRoot string) error {
+func ensureTsConfig(projectRoot string, filter *astramap.IndexFilter) error {
 	tsconfigPath := filepath.Join(projectRoot, "tsconfig.json")
 	if _, err := os.Stat(tsconfigPath); err == nil {
 		return nil
 	}
 
 	fmt.Println("未发现 tsconfig.json，正在为 JS/TS 项目生成最小化配置...")
-	tsconfig := `{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "node",
-    "allowJs": true,
-    "checkJs": false,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true
-  },
-  "include": ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "dist", ".astramap", "build"]
-}
-`
-	if err := os.WriteFile(tsconfigPath, []byte(tsconfig), 0644); err != nil {
+	exclude := []string{"node_modules", "dist", ".astramap", "build"}
+	if filter != nil {
+		exclude = append(exclude, filter.Exclude...)
+		exclude = append(exclude, filter.ScipExclude...)
+	}
+	tsconfig := map[string]interface{}{
+		"compilerOptions": map[string]interface{}{
+			"target":           "ES2020",
+			"module":           "ESNext",
+			"moduleResolution": "node",
+			"allowJs":          true,
+			"checkJs":          false,
+			"noEmit":           true,
+			"skipLibCheck":     true,
+			"esModuleInterop":  true,
+		},
+		"include": []string{"**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"},
+		"exclude": exclude,
+	}
+	data, err := json.MarshalIndent(tsconfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("生成 tsconfig.json 失败: %w", err)
+	}
+	if err := os.WriteFile(tsconfigPath, append(data, '\n'), 0644); err != nil {
 		return fmt.Errorf("写入 tsconfig.json 失败: %w", err)
 	}
 	fmt.Println("tsconfig.json 生成完成")
@@ -755,18 +777,19 @@ func validateCompileCommandsJson(compdbPath string) (bool, int, string) {
 	return true, len(entries), ""
 }
 
-func fixCompileCommandsJson(compdbPath, projectRoot string) error {
+func prepareCompileCommandsJson(compdbPath, projectRoot string, filter *astramap.IndexFilter) (string, error) {
 	data, err := os.ReadFile(compdbPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	var entries []map[string]interface{}
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return err
+		return "", err
 	}
 
 	modified := false
+	filteredEntries := make([]map[string]interface{}, 0, len(entries))
 	for i, entry := range entries {
 		if dir, ok := entry["directory"].(string); ok && !filepath.IsAbs(dir) {
 			entries[i]["directory"] = filepath.Join(projectRoot, dir)
@@ -777,20 +800,36 @@ func fixCompileCommandsJson(compdbPath, projectRoot string) error {
 			entries[i]["file"] = filepath.Clean(filepath.Join(dir, file))
 			modified = true
 		}
+		filePath, ok := entries[i]["file"].(string)
+		if ok && filter != nil {
+			relPath, err := filepath.Rel(projectRoot, filePath)
+			if err == nil && !filter.Allows(relPath, astramap.StageScip) {
+				modified = true
+				continue
+			}
+		}
+		filteredEntries = append(filteredEntries, entries[i])
 	}
 	if !modified {
-		return nil
+		return compdbPath, nil
 	}
-	newData, err := json.MarshalIndent(entries, "", "  ")
+	newData, err := json.MarshalIndent(filteredEntries, "", "  ")
 	if err != nil {
-		return err
+		return "", err
 	}
-	return os.WriteFile(compdbPath, newData, 0644)
+	filteredPath := filepath.Join(projectRoot, ".astramap", "compile_commands.filtered.json")
+	if err := os.MkdirAll(filepath.Dir(filteredPath), 0755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filteredPath, newData, 0644); err != nil {
+		return "", err
+	}
+	return filteredPath, nil
 }
 
 // autoGenerateScip finds and runs SCIP tools for all selected languages.
 // Returns collected (scipFilePaths, languagesWithScip).
-func autoGenerateScip(projectRoot string, selectedLangs []LangCount) ([]string, []string) {
+func autoGenerateScip(projectRoot string, selectedLangs []LangCount, filter *astramap.IndexFilter) ([]string, []string) {
 	if len(selectedLangs) == 0 {
 		fmt.Println("未检测到已知项目语言，使用 Tree-sitter 模式")
 		return nil, nil
@@ -806,7 +845,7 @@ func autoGenerateScip(projectRoot string, selectedLangs []LangCount) ([]string, 
 			continue
 		}
 		fmt.Printf("检测到 %s 项目，正在生成 SCIP 索引 (%s)...\n", languageDisplayName(lang), toolPath)
-		scipPath, err := runScipGeneration(toolPath, lang, projectRoot)
+		scipPath, err := runScipGeneration(toolPath, lang, projectRoot, filter)
 		if err != nil {
 			logWarn("SCIP 生成失败: %v，回退到 Tree-sitter", err)
 			continue
@@ -819,14 +858,31 @@ func autoGenerateScip(projectRoot string, selectedLangs []LangCount) ([]string, 
 
 func indexCmd() {
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
-	scipFile := fs.String("scip-file", "", "已有 SCIP 索引文件路径（直接导入）")
-	scip := fs.Bool("scip", false, "自动检测项目语言并生成 SCIP 索引（高精度模式）")
-	treesitterOnly := fs.Bool("treesitter-only", false, "只使用轻量 Tree-sitter 进行快速文件扫描")
-	langFlag := fs.String("lang", "", "指定导入语言，逗号分隔 (如 --lang c 或 --lang go,python)；跳过交互选择")
+	scipFile := fs.String("scip", "", "SCIP 索引文件；留空则自动生成")
+	scipOnly := fs.Bool("scip-only", false, "只导入 SCIP，不跑 Tree-sitter")
+	treeSitter := fs.Bool("tree-sitter", false, "只跑 Tree-sitter")
+	fs.BoolVar(treeSitter, "treesitter-only", false, "只跑 Tree-sitter")
+	langFlag := fs.String("lang", "", "语言列表，逗号分隔")
 	_ = fs.Parse(os.Args[2:])
 
+	if configPath, created, err := astramap.EnsureIndexConfigExample(projectRoot); err != nil {
+		logError("生成 AstraMap 配置示例失败: %v", err)
+		os.Exit(1)
+	} else if created {
+		fmt.Printf("已生成索引过滤配置示例: %s\n", configPath)
+		fmt.Println("如需排除辅助文件或目录，编辑该文件后重新运行 amap index。")
+		fmt.Println()
+	}
+
+	filter, err := astramap.LoadIndexFilter(projectRoot)
+	if err != nil {
+		logError("读取 AstraMap 配置失败: %v", err)
+		os.Exit(1)
+	}
+	printIndexFilterMatchReport(projectRoot, filter)
+
 	// Detect languages with file counts
-	detected := detectProjectLanguages(projectRoot)
+	detected := detectProjectLanguages(projectRoot, filter)
 	if len(detected) == 0 {
 		fmt.Println("未检测到已知项目语言")
 		os.Exit(1)
@@ -874,12 +930,16 @@ func indexCmd() {
 	// Track auto-generated tsconfig.json for cleanup
 	tsconfigExisted := hasAnyProjectFile(projectRoot, "tsconfig.json")
 
-	// Generate SCIP indexes for all selected languages
+	// Generate or import SCIP indexes.
 	var scipPaths []string
-	if *scipFile != "" && !*treesitterOnly {
-		scipPaths = []string{*scipFile}
-	} else if !*treesitterOnly {
-		scipPaths, _ = autoGenerateScip(projectRoot, selected)
+	var scipAutoPaths []string
+	if !*treeSitter {
+		if *scipFile != "" {
+			scipPaths = []string{*scipFile}
+		} else {
+			scipAutoPaths, _ = autoGenerateScip(projectRoot, selected, filter)
+			scipPaths = scipAutoPaths
+		}
 	}
 
 	// Import all SCIP indexes
@@ -890,9 +950,9 @@ func indexCmd() {
 			os.Exit(1)
 		}
 		fmt.Println("SCIP 索引导入完成")
-		if *scip || *scipFile == "" {
-			os.Remove(scipPath)
-		}
+	}
+	for _, p := range scipAutoPaths {
+		os.Remove(p)
 	}
 
 	// Cleanup auto-generated tsconfig.json
@@ -901,14 +961,15 @@ func indexCmd() {
 		os.Remove(tsconfigPath)
 	}
 
-	// Tree-sitter incremental scan for selected languages only
-	var langFilter []string
-	for _, lc := range selected {
-		langFilter = append(langFilter, lc.Lang)
-	}
-	if err := astramap.SyncAllFilesAstraMap(db, projectRoot, langFilter...); err != nil {
-		logError("增量扫描失败: %v", err)
-		os.Exit(1)
+	if !*scipOnly {
+		var langFilter []string
+		for _, lc := range selected {
+			langFilter = append(langFilter, lc.Lang)
+		}
+		if err := astramap.SyncAllFilesAstraMap(db, projectRoot, langFilter...); err != nil {
+			logError("增量扫描失败: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	// Show provenance breakdown: SCIP vs Tree-sitter vs heuristic
@@ -1041,7 +1102,7 @@ func installCmd() {
 	fmt.Println()
 
 	success := 0
-	total := 7
+	total := 8
 
 	// 3.1 Claude Code (MCP + /amap slash command)
 	if installClaudeCode(selfPath, absProj) {
@@ -1078,6 +1139,11 @@ func installCmd() {
 		success++
 	}
 
+	// 3.8 Antigravity (mcp_config.json + AGENTS.md)
+	if installAntigravity(selfPath, absProj) {
+		success++
+	}
+
 	fmt.Println()
 	if success == total {
 		fmt.Printf("安装完成！%d/%d 工具注册成功。\n", success, total)
@@ -1088,9 +1154,10 @@ func installCmd() {
 	// 4. 提示用户构建索引
 	fmt.Println("\n下一步：构建代码地图索引")
 	fmt.Println("  amap index                    # 交互选择语言，SCIP 优先；无 SCIP 时 Tree-sitter 回退")
-	fmt.Println("  amap index --lang c           # 指定仅导入 C 语言（跳过交互）")
-	fmt.Println("  amap index --scip             # 强制自动生成 SCIP 索引（高精度）")
-	fmt.Println("  amap index --treesitter-only  # 仅 Tree-sitter 快速扫描")
+	fmt.Println("  amap index --lang c           # 指定语言")
+	fmt.Println("  amap index --scip index.scip  # 导入已有的 SCIP 索引文件")
+	fmt.Println("  amap index --scip-only        # 只导入 SCIP")
+	fmt.Println("  amap index --tree-sitter      # 只跑 Tree-sitter")
 }
 
 // printConfigs 输出各工具的 MCP 配置 JSON
@@ -1146,12 +1213,91 @@ func printConfigs(amapPath, projectPath string) {
 	fmt.Println("  Codex:        AGENTS.md (追加 AstraMap 段落) + ~/.codex/config.toml (MCP)")
 	fmt.Println("  Windsurf:     .windsurfrules (追加 AstraMap 段落)")
 	fmt.Println("  Cline:        .clinerules/astramap.md")
+	fmt.Println("  Antigravity:  .agents/AGENTS.md 或 ~/.gemini/config/AGENTS.md (追加 AstraMap 段落)")
 
 	fmt.Println("\n=== Codex MCP (TOML) ===")
 	fmt.Printf("  CLI: codex mcp add astramap -- %s serve --project .\n", amapPath)
 	fmt.Println("  或手动编辑 ~/.codex/config.toml:")
 	fmt.Printf("    [mcp_servers.astramap]\n    command = \"%s\"\n    args = [\"serve\", \"--project\", \".\"]\n", amapPath)
 	fmt.Println("    # 每个工具需设置 approval_mode = \"approve\"")
+
+	fmt.Println("\n=== Antigravity (~/.gemini/config/mcp_config.json 或项目 .agents/mcp_config.json) ===")
+	antigravityCfg := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"astramap": map[string]interface{}{
+				"command": amapPath,
+				"args":    []string{"serve", "--project", projectPath},
+			},
+		},
+	}
+	antigravityData, _ := json.MarshalIndent(antigravityCfg, "", "  ")
+	fmt.Println(string(antigravityData))
+}
+
+// installAntigravity 注册到 Google Antigravity / Agy (mcp_config.json + AGENTS.md)
+func installAntigravity(amapPath, projectPath string) bool {
+	mcpMethods := []string{}
+
+	// 1. 项目级 .agents/mcp_config.json
+	projMcpPath := filepath.Join(projectPath, ".agents", "mcp_config.json")
+	if err := writeMcpConfig(projMcpPath, "mcpServers", "astramap", map[string]interface{}{
+		"command": amapPath,
+		"args":    []string{"serve", "--project", projectPath},
+	}); err != nil {
+		logWarn("项目级 Antigravity MCP 注册失败 (%s): %v", projMcpPath, err)
+	} else {
+		mcpMethods = append(mcpMethods, ".agents/mcp_config.json")
+	}
+
+	// 2. 全局级 ~/.gemini/config/mcp_config.json 和 ~/.gemini/antigravity-cli/mcp_config.json
+	home, err := os.UserHomeDir()
+	if err == nil {
+		globalMcpPath1 := filepath.Join(home, ".gemini", "config", "mcp_config.json")
+		globalMcpPath2 := filepath.Join(home, ".gemini", "antigravity-cli", "mcp_config.json")
+
+		// 写入 globalMcpPath1
+		if err := writeMcpConfig(globalMcpPath1, "mcpServers", "astramap", map[string]interface{}{
+			"command": amapPath,
+			"args":    []string{"serve", "--project", projectPath},
+		}); err != nil {
+			logWarn("全局级 Antigravity MCP 注册失败 (%s): %v", globalMcpPath1, err)
+		} else {
+			mcpMethods = append(mcpMethods, "~/.gemini/config/mcp_config.json")
+		}
+
+		// 写入 globalMcpPath2
+		if err := writeMcpConfig(globalMcpPath2, "mcpServers", "astramap", map[string]interface{}{
+			"command": amapPath,
+			"args":    []string{"serve", "--project", projectPath},
+		}); err != nil {
+			logWarn("全局级 Antigravity CLI MCP 注册失败 (%s): %v", globalMcpPath2, err)
+		} else {
+			mcpMethods = append(mcpMethods, "~/.gemini/antigravity-cli/mcp_config.json")
+		}
+	} else {
+		logWarn("无法获取 Home 目录，跳过全局级 Antigravity MCP 注册")
+	}
+
+	// 3. 注册规则 (AGENTS.md)
+	// 项目级规则：.agents/AGENTS.md
+	rulesOK1 := appendRulesFile(filepath.Join(projectPath, ".agents", "AGENTS.md"), "## AstraMap", astramapRulesContent)
+
+	// 全局级规则：~/.gemini/config/AGENTS.md
+	rulesOK2 := false
+	if home != "" {
+		rulesOK2 = appendRulesFile(filepath.Join(home, ".gemini", "config", "AGENTS.md"), "## AstraMap", astramapRulesContent)
+	}
+
+	// 汇总输出
+	if len(mcpMethods) > 0 {
+		fmt.Printf("  ✓ Antigravity  — MCP 已注册 (已写入 %s)\n", strings.Join(mcpMethods, ", "))
+		if rulesOK1 || rulesOK2 {
+			fmt.Printf("  ✓ Antigravity  — 规则已追加写入 AGENTS.md\n")
+		}
+		return true
+	}
+	fmt.Println("  ✗ Antigravity  — MCP 注册失败")
+	return false
 }
 
 // installClaudeCode 注册到 Claude Code (MCP server + /amap slash command)
@@ -1635,6 +1781,33 @@ func diffCmd() {
 		fmt.Println("\n[测试建议]:")
 		fmt.Println("建议运行关联模块单元测试：")
 		fmt.Println("  go test -v ./...")
+	}
+}
+
+func printIndexFilterMatchReport(projectRoot string, filter *astramap.IndexFilter) {
+	report, err := astramap.BuildIndexFilterMatchReport(projectRoot, filter)
+	if err != nil {
+		logWarn("索引过滤命中列表生成失败: %v", err)
+		return
+	}
+	if len(report.Exclude) == 0 && len(report.ScipExclude) == 0 && len(report.TreeSitterExclude) == 0 {
+		return
+	}
+
+	fmt.Println("── 索引过滤命中 ──")
+	printFilterMatchList("exclude", report.Exclude)
+	printFilterMatchList("scipExclude", report.ScipExclude)
+	printFilterMatchList("treeSitterExclude", report.TreeSitterExclude)
+	fmt.Println()
+}
+
+func printFilterMatchList(name string, paths []string) {
+	fmt.Printf("  %s: %d\n", name, len(paths))
+	if len(paths) == 0 {
+		return
+	}
+	for _, path := range paths {
+		fmt.Printf("    - %s\n", path)
 	}
 }
 

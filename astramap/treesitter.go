@@ -593,6 +593,11 @@ type funcNode struct {
 // function call references against the global symbol registry in DB.
 // This fills in cross-file 'calls' edges that single-file parsing misses.
 func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return fmt.Errorf("读取 AstraMap 配置失败: %w", err)
+	}
+
 	type globalNode struct {
 		ID            string `db:"id"`
 		Name          string `db:"name"`
@@ -600,7 +605,7 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 		FilePath      string `db:"file_path"`
 	}
 	var allFuncs []globalNode
-	err := db.Select(&allFuncs, "SELECT id, name, qualified_name, file_path FROM astramap_nodes WHERE kind IN ('function', 'method')")
+	err = db.Select(&allFuncs, "SELECT id, name, qualified_name, file_path FROM astramap_nodes WHERE kind IN ('function', 'method')")
 	if err != nil {
 		return fmt.Errorf("query global registry failed: %w", err)
 	}
@@ -641,6 +646,9 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 	defer insertStmt.Close()
 
 	for _, fp := range files {
+		if !filter.Allows(fp, StageTreeSitter) {
+			continue
+		}
 		absPath := filepath.Join(projectRoot, fp)
 		file, err := os.Open(absPath)
 		if err != nil {

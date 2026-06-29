@@ -92,6 +92,10 @@ type AstraMapVerdict struct {
 func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error {
 	logInfo("ImportScipIndexToAstraMap: 开始导入 SCIP 索引: %s", scipPath)
 	logInfo("ImportScipIndexToAstraMap: 正在载入中，请稍后......")
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return fmt.Errorf("读取 AstraMap 配置失败: %w", err)
+	}
 	data, err := os.ReadFile(scipPath)
 	if err != nil {
 		return fmt.Errorf("读取 SCIP 索引文件失败: %w", err)
@@ -121,12 +125,18 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 	fileLanguages := make(map[string]string)
 
 	for _, doc := range index.Documents {
+		if !filter.Allows(doc.RelativePath, StageScip) {
+			continue
+		}
 		for _, occ := range doc.Occurrences {
 			if (occ.SymbolRoles&int32(scip.SymbolRole_Definition)) == 0 || occ.Symbol == "" {
 				continue
 			}
 			info := extractSymbolInfo(occ.Symbol, scipSymMap)
 			if info.name == "" || len(info.name) <= 1 {
+				continue
+			}
+			if isSyntheticAnonymousSymbol(occ.Symbol, info.name) {
 				continue
 			}
 			usn := occ.Symbol
@@ -140,6 +150,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 	// 2. 遍历 Documents 提取节点和边
 	for _, doc := range index.Documents {
 		relPath := doc.RelativePath
+		if !filter.Allows(relPath, StageScip) {
+			continue
+		}
 		docLang := normalizeLanguage(doc.Language, relPath)
 		fileLanguages[relPath] = docLang
 
@@ -172,6 +185,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			occ := d.occ
 			info := extractSymbolInfo(occ.Symbol, scipSymMap)
 			if info.name == "" || len(info.name) <= 1 {
+				continue
+			}
+			if isSyntheticAnonymousSymbol(occ.Symbol, info.name) {
 				continue
 			}
 
@@ -660,7 +676,14 @@ var ExtToLang = func() map[string]string {
 }()
 
 func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string) error {
-	logInfo("SyncAllFilesAstraMap: 开始扫描增量更新代码地图: %s", projectRoot)
+	logInfo("SyncAllFilesAstraMap: 增量扫描 %s", projectRoot)
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return fmt.Errorf("读取 AstraMap 配置失败: %w", err)
+	}
+	if err := PruneExcludedFiles(db, filter); err != nil {
+		return err
+	}
 
 	extensions := make(map[string]bool)
 	if len(langFilter) > 0 {
@@ -678,14 +701,14 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string)
 
 	scanned := 0
 	updated := 0
-	lastProgress := time.Now()
-	err := filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
+		relPath, _ := filepath.Rel(projectRoot, path)
 		if info.IsDir() {
 			name := info.Name()
-			if shouldSkipIndexDir(name) {
+			if shouldSkipIndexDir(name) || !filter.AllowsDir(relPath, StageTreeSitter) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -695,13 +718,11 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string)
 		if !extensions[ext] {
 			return nil
 		}
+		if !filter.Allows(relPath, StageTreeSitter) {
+			return nil
+		}
 
 		scanned++
-		relPath, _ := filepath.Rel(projectRoot, path)
-		if scanned%100 == 0 || time.Since(lastProgress) > 2*time.Second {
-			logInfo("SyncAllFilesAstraMap: Tree-sitter 扫描进度 scanned=%d updated=%d current=%s", scanned, updated, relPath)
-			lastProgress = time.Now()
-		}
 
 		changed, err := SyncFileAstraMap(db, projectRoot, path)
 		if err == nil && changed {
@@ -711,15 +732,50 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string)
 	})
 
 	// 触发跨文件调用解析
-	logInfo("SyncAllFilesAstraMap: 文件扫描完成 scanned=%d updated=%d，开始解析全局关系", scanned, updated)
+	logInfo("SyncAllFilesAstraMap: 扫描完成 %d 文件, %d 更新, 解析全局关系", scanned, updated)
 	_ = ResolveGoInterfaces(db)
 	_ = ResolveWebRoutes(db, projectRoot)
 	if err2 := ResolveCrossFileCalls(db, projectRoot); err2 != nil {
 		logError("ResolveCrossFileCalls failed: %v", err2)
 	}
 
-	logInfo("SyncAllFilesAstraMap: 增量扫描就绪，扫描了 %d 个文件，更新了 %d 个文件", scanned, updated)
+	logInfo("SyncAllFilesAstraMap: 就绪, %d 文件, %d 更新", scanned, updated)
 	return err
+}
+
+func PruneExcludedFiles(db *sqlx.DB, filter *IndexFilter) error {
+	var files []string
+	if err := db.Select(&files, "SELECT path FROM astramap_files"); err != nil {
+		return fmt.Errorf("query indexed files failed: %w", err)
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, filePath := range files {
+		if filter.Allows(filePath, StageTreeSitter) || filter.Allows(filePath, StageScip) {
+			continue
+		}
+
+		if _, err := tx.Exec(
+			"DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ?) OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ?)",
+			filePath, filePath,
+		); err != nil {
+			return fmt.Errorf("delete edges for excluded file %s failed: %w", filePath, err)
+		}
+
+		if _, err := tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ?", filePath); err != nil {
+			return fmt.Errorf("delete nodes for excluded file %s failed: %w", filePath, err)
+		}
+		if _, err := tx.Exec("DELETE FROM astramap_files WHERE path = ?", filePath); err != nil {
+			return fmt.Errorf("delete indexed file %s failed: %w", filePath, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // ProvenanceStats returns node counts by language and edge counts by provenance.
@@ -1034,6 +1090,13 @@ func extractSymbolInfo(sym string, infoMap map[string]*scip.SymbolInformation) s
 
 	name := parseSymbolNameFallback(sym)
 	return scipSymbolInfo{name: name, symType: "variable"}
+}
+
+func isSyntheticAnonymousSymbol(sym, name string) bool {
+	return strings.HasPrefix(name, "$anonymous_type_") ||
+		strings.HasPrefix(name, "$anon") ||
+		strings.Contains(sym, "$anonymous_type_") ||
+		strings.Contains(sym, "#$anonymous_type_")
 }
 
 func getSymbolTypeFromKind(kind scip.SymbolInformation_Kind) (string, bool) {

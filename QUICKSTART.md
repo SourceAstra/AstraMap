@@ -25,7 +25,7 @@ which amap
 ```bash
 cd /path/to/your/project
 
-# 一键注册 MCP + 规则文件到 Claude Code / VS Code / Cursor / Codex / Windsurf / Cline
+# 一键注册 MCP + 规则文件到 Claude Code / VS Code / Cursor / Codex / Windsurf / Cline / Antigravity
 amap install
 ```
 
@@ -39,8 +39,9 @@ amap install
   ✓ Codex         — MCP 已注册 + 规则已写入 AGENTS.md
   ✓ Windsurf      — 规则已写入 .windsurfrules
   ✓ Cline         — 规则已写入 .clinerules/astramap.md
+  ✓ Antigravity  — MCP 已注册 (已写入 .agents/mcp_config.json, ~/.gemini/config/mcp_config.json, ~/.gemini/antigravity-cli/mcp_config.json) + 规则已追加写入 AGENTS.md
 
-安装完成！7/7 工具注册成功。
+安装完成！8/8 工具注册成功。
 ```
 
 ## 第三步：构建索引
@@ -144,5 +145,5 @@ Log: /path/to/project/.astramap/dashboard.log
 
 ---
 
-© 2024-2025 AstraMap — 高精度代码地图引擎  
+© 2026-2026 AstraMap — 高精度代码地图引擎  
 作者: 何志川 | 版本: v0.1

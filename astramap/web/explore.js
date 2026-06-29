@@ -2035,7 +2035,7 @@
                 this.breadcrumbEl.appendChild(select);
             }
 
-            if (this.currentLevel === 'file' || this.currentLevel === 'module') {
+            if (this.currentLevel === 'file' || this.currentLevel === 'module' || this.currentLevel === 'top') {
                 const sep = document.createElement('span');
                 sep.textContent = '›';
                 sep.style.cssText = `color:${THEME.textDim};font-size:12px;margin:0 4px;`;
@@ -2331,7 +2331,7 @@
                             </defs>
                         </svg>
                     </div>
-                    <div class="explore-doc-empty-title">暂无此${type === 'file' ? '文件' : '模块'}的理解文档</div>
+                    <div class="explore-doc-empty-title">暂无此${type === 'file' ? '文件' : (type === 'project' ? '项目' : '模块')}的理解文档</div>
                     <div class="explore-doc-empty-desc">
                         ${hint || '根据当前代码地图的目录、文件、符号与依赖关系生成本地理解文档。'}
                     </div>
@@ -2487,11 +2487,11 @@
 
         async updateInlineDocButtonState(docBtn) {
             if (!docBtn) return;
-            const isValidLevel = this.currentLevel === 'file' || this.currentLevel === 'module';
+            const isValidLevel = this.currentLevel === 'file' || this.currentLevel === 'module' || this.currentLevel === 'top';
             if (!isValidLevel) return;
 
-            const type = this.currentLevel === 'file' ? 'file' : (this.currentDir === '__project__' ? 'project' : 'module');
-            const key = this.currentLevel === 'file' ? this.currentFile : this.currentDir;
+            const type = this.currentLevel === 'top' ? 'project' : (this.currentLevel === 'file' ? 'file' : 'module');
+            const key = type === 'project' ? '__project__' : (type === 'file' ? this.currentFile : this.currentDir);
             const textEl = docBtn.querySelector('#explore-doc-btn-text');
 
             try {
@@ -2540,8 +2540,8 @@
 
         async loadDocHistoryAndContent(targetTimestamp = '') {
             if (!this.docContent) return;
-            const type = this.currentLevel === 'file' ? 'file' : (this.currentDir === '__project__' ? 'project' : 'module');
-            const key = this.currentLevel === 'file' ? this.currentFile : this.currentDir;
+            const type = this.currentLevel === 'top' ? 'project' : (this.currentLevel === 'file' ? 'file' : 'module');
+            const key = type === 'project' ? '__project__' : (type === 'file' ? this.currentFile : this.currentDir);
             const title = this.currentLevel === 'file' ? `文件: ${key.split('/').pop()}` : (type === 'project' ? '项目理解文档' : `目录: ${this._dirDisplayName(key)}`);
 
             this.docTitle.textContent = title;
@@ -2613,7 +2613,8 @@
                     </div>
                 `;
             } else {
-                html += this._getEmptyDocHtml(this.currentLevel === 'file' ? 'file' : 'module');
+                const emptyType = this.currentLevel === 'top' ? 'project' : (this.currentLevel === 'file' ? 'file' : 'module');
+                html += this._getEmptyDocHtml(emptyType);
             }
 
             this.docContent.innerHTML = html;
@@ -2800,110 +2801,20 @@
             }
         }
 
-        _formatDirDependencies() {
-            const edges = (this.dirEdges || []).slice()
-                .sort((a, b) => (b.count || 0) - (a.count || 0))
-                .slice(0, 20);
-            if (edges.length === 0) return '- 暂无跨目录依赖';
-            return edges.map(e => {
-                const source = String(e.source || '').replace(/^dir:/, '');
-                const target = String(e.target || '').replace(/^dir:/, '');
-                return `- \`${source}\` -> \`${target}\` (${e.count || 1} 条)`;
-            }).join('\n');
-        }
-
-        _formatModuleDependencies(dirPath) {
-            const dirPrefix = 'file:';
-            const files = Object.keys((this.dirMap && this.dirMap[dirPath] && this.dirMap[dirPath].files) || {});
-            const fileSet = new Set(files.map(f => dirPrefix + f));
-            const edges = (this.fileEdges || []).filter(e => fileSet.has(e.source) || fileSet.has(e.target))
-                .sort((a, b) => (b.count || 0) - (a.count || 0))
-                .slice(0, 20);
-            if (edges.length === 0) return '- 暂无跨文件依赖';
-            return edges.map(e => {
-                const source = String(e.source || '').replace(/^file:/, '');
-                const target = String(e.target || '').replace(/^file:/, '');
-                return `- \`${source}\` -> \`${target}\` (${e.count || 1} 条)`;
-            }).join('\n');
-        }
-
         async generateDoc() {
             if (this.docGenerating) return;
             this.docGenerating = true;
 
             try {
-                const type = this.currentLevel === 'file' ? 'file' : (this.currentDir === '__project__' ? 'project' : 'module');
-                const key = this.currentLevel === 'file' ? this.currentFile : this.currentDir;
-                
+                const type = this.currentLevel === 'top' ? 'project' : (this.currentLevel === 'file' ? 'file' : 'module');
+                const key = type === 'project' ? '__project__' : (type === 'file' ? this.currentFile : this.currentDir);
+
                 this.renderDocGeneratingState();
-
-                let codeContext = '';
-                if (type === 'file') {
-                    const snippetRes = await fetch(`/api/snippet?file=${encodeURIComponent(key)}&count=100000`, {
-                        headers: window.saAuthHeaders ? window.saAuthHeaders() : {}
-                    });
-                    if (!snippetRes.ok) {
-                        throw new Error(`无法获取代码内容: HTTP ${snippetRes.status}`);
-                    }
-                    const snippetData = await snippetRes.json();
-                    if (snippetData.snippet && Array.isArray(snippetData.snippet)) {
-                        codeContext = snippetData.snippet.join('\n');
-                    } else if (snippetData.content) {
-                        codeContext = snippetData.content;
-                    }
-                }
-
-                this.renderDocGeneratingState('正在汇总代码地图结构...');
-
-                let docContext = '';
-                if (type === 'file') {
-                    const fileData = this.fileMap && this.fileMap[key];
-                    const funcs = fileData && fileData.functions ? fileData.functions : [];
-                    docContext = [
-                        `文件路径: ${key}`,
-                        `所属目录: ${fileData ? fileData.dirPath : ''}`,
-                        `函数/方法: ${funcs.map(fn => fn.name || fn.qualifiedName || fn.id).join(', ') || '无'}`,
-                        '',
-                        '源码片段:',
-                        '```',
-                        codeContext,
-                        '```'
-                    ].join('\n');
-                } else if (type === 'project') {
-                    const dirsList = Object.values(this.dirMap || {}).map(d => `- 目录: \`${d.dirPath}\`，文件 ${Object.keys(d.files || {}).length} 个，函数 ${d.functions.length} 个`).join('\n');
-                    docContext = [
-                        '目录概览:',
-                        dirsList || '- 暂无目录数据',
-                        '',
-                        '跨目录依赖:',
-                        this._formatDirDependencies()
-                    ].join('\n');
-                } else {
-                    const currentDirData = this.dirMap[key];
-                    const files = currentDirData ? Object.values(currentDirData.files) : [];
-                    const filesList = files.map(f => {
-                        const funcs = (f.functions || []).map(fn => fn.name).slice(0, 10).join(', ');
-                        return `- 文件: \`${f.filePath}\` (包含函数: ${funcs || '无'})`;
-                    }).join('\n');
-                    docContext = [
-                        `目录路径: ${key}`,
-                        '',
-                        '文件与函数:',
-                        filesList || '- 暂无文件数据',
-                        '',
-                        '目录依赖:',
-                        this._formatModuleDependencies(key)
-                    ].join('\n');
-                }
 
                 const response = await fetch('/api/documents/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...(window.saAuthHeaders ? window.saAuthHeaders() : {}) },
-                    body: JSON.stringify({
-                        type,
-                        key,
-                        context: docContext
-                    })
+                    body: JSON.stringify({ type, key })
                 });
 
                 if (!response.ok) {

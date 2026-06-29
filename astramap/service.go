@@ -40,12 +40,60 @@ type GraphDataResult struct {
 	Files []*AstraMapFile `json:"files"`
 }
 
+type ProjectedGraphResult struct {
+	Nodes []ProjectedNode `json:"nodes"`
+	Links []ProjectedLink `json:"links"`
+}
+
+type ProjectedNode struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Weight int    `json:"weight"`
+}
+
+type ProjectedLink struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Weight int    `json:"weight"`
+}
+
+type ModuleGraphResult struct {
+	Nodes []ModuleGraphNode `json:"nodes"`
+	Edges []ModuleGraphEdge `json:"edges"`
+}
+
+type ModuleGraphNode struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Kind     string `json:"kind"`
+	File     string `json:"file"`
+	FilePath string `json:"filePath"`
+	Line     int    `json:"line"`
+}
+
+type ModuleGraphEdge struct {
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Kind       string `json:"kind"`
+	Provenance string `json:"provenance,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	Col        int    `json:"col,omitempty"`
+}
+
+const nonSyntheticAnonymousNodeSQL = `
+	AND name NOT LIKE '$anonymous_type_%'
+	AND qualified_name NOT LIKE '%$anonymous_type_%'
+	AND id NOT LIKE '%$anonymous_type_%'
+`
+
 func QueryGraphData(db *sqlx.DB) (*GraphDataResult, error) {
 	var nodes []*AstraMapNode
 	if err := db.Select(&nodes, `
 		SELECT *
 		FROM astramap_nodes
 		WHERE kind IN ('function', 'method', 'class', 'struct', 'interface', 'route', 'external')
+		`+nonSyntheticAnonymousNodeSQL+`
 		ORDER BY file_path, start_line, name
 	`); err != nil {
 		return nil, err
@@ -62,6 +110,7 @@ func QueryGraphData(db *sqlx.DB) (*GraphDataResult, error) {
 	}
 
 	nodes, edges = canonicalizeDuplicateFunctionNodes(nodes, edges)
+	edges = filterEdgesToNodes(edges, nodes)
 
 	var files []*AstraMapFile
 	if err := db.Select(&files, "SELECT * FROM astramap_files ORDER BY path"); err != nil {
@@ -69,6 +118,155 @@ func QueryGraphData(db *sqlx.DB) (*GraphDataResult, error) {
 	}
 
 	return &GraphDataResult{Nodes: nodes, Edges: edges, Files: files}, nil
+}
+
+func QueryProjectedGraph(db *sqlx.DB) (*ProjectedGraphResult, error) {
+	var nodeRows []struct {
+		ID       string `db:"id"`
+		Name     string `db:"name"`
+		FilePath string `db:"file_path"`
+	}
+	if err := db.Select(&nodeRows, `
+		SELECT id, name, file_path
+		FROM astramap_nodes
+		WHERE kind IN ('function', 'method', 'class', 'struct', 'interface', 'route')
+		`+nonSyntheticAnonymousNodeSQL+`
+	`); err != nil {
+		return nil, err
+	}
+
+	nodeModule := make(map[string]string, len(nodeRows))
+	moduleWeight := make(map[string]int)
+	for _, row := range nodeRows {
+		module := moduleFromFilePath(row.FilePath)
+		nodeModule[row.ID] = module
+		moduleWeight[module]++
+	}
+
+	var edgeRows []struct {
+		Source string `db:"source"`
+		Target string `db:"target"`
+	}
+	if err := db.Select(&edgeRows, `
+		SELECT source, target
+		FROM astramap_edges
+		WHERE kind IN ('calls', 'imports', 'implements', 'route')
+	`); err != nil {
+		return nil, err
+	}
+
+	linkWeight := make(map[string]int)
+	for _, row := range edgeRows {
+		sourceModule := nodeModule[row.Source]
+		targetModule := nodeModule[row.Target]
+		if sourceModule == "" || targetModule == "" || sourceModule == targetModule {
+			continue
+		}
+		linkWeight[sourceModule+"\x00"+targetModule]++
+	}
+
+	nodes := make([]ProjectedNode, 0, len(moduleWeight))
+	for module, weight := range moduleWeight {
+		nodes = append(nodes, ProjectedNode{ID: module, Name: module, Weight: weight})
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+
+	links := make([]ProjectedLink, 0, len(linkWeight))
+	for key, weight := range linkWeight {
+		parts := strings.SplitN(key, "\x00", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		links = append(links, ProjectedLink{Source: parts[0], Target: parts[1], Weight: weight})
+	}
+	sort.Slice(links, func(i, j int) bool {
+		if links[i].Source != links[j].Source {
+			return links[i].Source < links[j].Source
+		}
+		return links[i].Target < links[j].Target
+	})
+
+	return &ProjectedGraphResult{Nodes: nodes, Links: links}, nil
+}
+
+func QueryFunctionList(db *sqlx.DB) ([]ModuleGraphNode, error) {
+	var nodes []*AstraMapNode
+	if err := db.Select(&nodes, `
+		SELECT id, kind, name, qualified_name, file_path, language, start_line, end_line,
+		       start_column, end_column, signature, docstring, visibility, return_type,
+		       is_exported, updated_at
+		FROM astramap_nodes
+		WHERE kind IN ('function', 'method')
+		`+nonSyntheticAnonymousNodeSQL+`
+		ORDER BY file_path, start_line, name
+	`); err != nil {
+		return nil, err
+	}
+	return moduleGraphNodes(nodes), nil
+}
+
+func QueryModuleGraph(db *sqlx.DB, moduleID string) (*ModuleGraphResult, error) {
+	if moduleID == "" {
+		moduleID = "(root)"
+	}
+
+	var nodes []*AstraMapNode
+	nodeQuery := `
+		SELECT id, kind, name, qualified_name, file_path, language, start_line, end_line,
+		       start_column, end_column, signature, docstring, visibility, return_type,
+		       is_exported, updated_at
+		FROM astramap_nodes
+		WHERE kind IN ('function', 'method', 'class', 'struct', 'interface', 'route')
+		` + nonSyntheticAnonymousNodeSQL
+	var nodeArgs []interface{}
+	if moduleID == "(root)" {
+		nodeQuery += " AND file_path NOT LIKE ?"
+		nodeArgs = append(nodeArgs, "%/%")
+	} else {
+		nodeQuery += " AND file_path LIKE ?"
+		nodeArgs = append(nodeArgs, moduleID+"/%")
+	}
+	nodeQuery += " ORDER BY file_path, start_line, name"
+	if err := db.Select(&nodes, nodeQuery, nodeArgs...); err != nil {
+		return nil, err
+	}
+
+	nodeIDs := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		nodeIDs = append(nodeIDs, node.ID)
+	}
+	if len(nodes) == 0 {
+		return &ModuleGraphResult{Nodes: []ModuleGraphNode{}, Edges: []ModuleGraphEdge{}}, nil
+	}
+
+	var edges []*AstraMapEdge
+	edgeQuery, edgeArgs, err := sqlx.In(`
+		SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
+		FROM astramap_edges
+		WHERE kind IN ('calls', 'imports', 'implements', 'route') AND source IN (?) AND target IN (?)
+		ORDER BY id
+	`, nodeIDs, nodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	edgeQuery = db.Rebind(edgeQuery)
+	if err := db.Select(&edges, edgeQuery, edgeArgs...); err != nil {
+		return nil, err
+	}
+
+	resultEdges := make([]ModuleGraphEdge, 0, len(edges))
+	for _, edge := range edges {
+		resultEdges = append(resultEdges, ModuleGraphEdge{
+			From:       edge.Source,
+			To:         edge.Target,
+			Kind:       edge.Kind,
+			Provenance: edge.Provenance,
+			Line:       edge.Line,
+			Col:        edge.Col,
+		})
+	}
+
+	return &ModuleGraphResult{Nodes: moduleGraphNodes(nodes), Edges: resultEdges}, nil
 }
 
 func canonicalizeDuplicateFunctionNodes(nodes []*AstraMapNode, edges []*AstraMapEdge) ([]*AstraMapNode, []*AstraMapEdge) {
@@ -146,13 +344,59 @@ func canonicalizeDuplicateFunctionNodes(nodes []*AstraMapNode, edges []*AstraMap
 	return filteredNodes, filteredEdges
 }
 
+func filterEdgesToNodes(edges []*AstraMapEdge, nodes []*AstraMapNode) []*AstraMapEdge {
+	visible := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		visible[node.ID] = true
+	}
+	filtered := make([]*AstraMapEdge, 0, len(edges))
+	for _, edge := range edges {
+		if visible[edge.Source] && visible[edge.Target] {
+			filtered = append(filtered, edge)
+		}
+	}
+	return filtered
+}
+
+func moduleFromFilePath(filePath string) string {
+	filePath = filepath.ToSlash(strings.TrimSpace(filePath))
+	filePath = strings.Trim(filePath, "/")
+	if filePath == "" {
+		return "(root)"
+	}
+	parts := strings.Split(filePath, "/")
+	if len(parts) <= 1 || parts[0] == "" {
+		return "(root)"
+	}
+	return parts[0]
+}
+
+func moduleGraphNodes(nodes []*AstraMapNode) []ModuleGraphNode {
+	result := make([]ModuleGraphNode, 0, len(nodes))
+	for _, node := range nodes {
+		if isSyntheticAnonymousSymbol(node.ID, node.Name) {
+			continue
+		}
+		result = append(result, ModuleGraphNode{
+			ID:       node.ID,
+			Name:     node.Name,
+			Type:     node.Kind,
+			Kind:     node.Kind,
+			File:     node.FilePath,
+			FilePath: node.FilePath,
+			Line:     node.StartLine,
+		})
+	}
+	return result
+}
+
 // QuerySearch performs fuzzy symbol search with parameterized queries.
 func QuerySearch(db *sqlx.DB, query, kind string, limit int) ([]*AstraMapNode, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	var nodes []*AstraMapNode
-	q := "SELECT * FROM astramap_nodes WHERE (name LIKE ? OR qualified_name LIKE ?) "
+	q := "SELECT * FROM astramap_nodes WHERE (name LIKE ? OR qualified_name LIKE ?) " + nonSyntheticAnonymousNodeSQL
 	params := []interface{}{"%" + query + "%", "%" + query + "%"}
 	if kind != "" {
 		q += "AND kind = ? "
@@ -168,12 +412,12 @@ func QuerySearch(db *sqlx.DB, query, kind string, limit int) ([]*AstraMapNode, e
 // Tries exact id match first, then name/qualified_name matching.
 func ResolveSymbolToIDs(db *sqlx.DB, symbol string) ([]string, error) {
 	var ids []string
-	err := db.Select(&ids, "SELECT id FROM astramap_nodes WHERE id = ?", symbol)
+	err := db.Select(&ids, "SELECT id FROM astramap_nodes WHERE id = ? "+nonSyntheticAnonymousNodeSQL, symbol)
 	if err == nil && len(ids) > 0 {
 		return ids, nil
 	}
 	err = db.Select(&ids,
-		"SELECT id FROM astramap_nodes WHERE name = ? OR qualified_name LIKE ? LIMIT 20",
+		"SELECT id FROM astramap_nodes WHERE (name = ? OR qualified_name LIKE ?) "+nonSyntheticAnonymousNodeSQL+" LIMIT 20",
 		symbol, "%"+symbol+"%")
 	if err != nil {
 		return nil, err
@@ -193,10 +437,10 @@ func QueryExplore(db *sqlx.DB, query, projectRoot string, maxFiles int) (*Explor
 	var err error
 	if len(terms) == 0 {
 		// Empty query: select top nodes to populate G_DATA skeleton
-		err = db.Select(&matchedNodes, "SELECT * FROM astramap_nodes ORDER BY file_path, start_line LIMIT ?", maxFiles)
+		err = db.Select(&matchedNodes, "SELECT * FROM astramap_nodes WHERE 1=1 "+nonSyntheticAnonymousNodeSQL+" ORDER BY file_path, start_line LIMIT ?", maxFiles)
 	} else {
 		ftsQuery := strings.Join(terms, " OR ")
-		err = db.Select(&matchedNodes, "SELECT * FROM astramap_nodes WHERE id IN (SELECT id FROM astramap_fts WHERE astramap_fts MATCH ?) LIMIT ?", ftsQuery, maxFiles)
+		err = db.Select(&matchedNodes, "SELECT * FROM astramap_nodes WHERE id IN (SELECT id FROM astramap_fts WHERE astramap_fts MATCH ?) "+nonSyntheticAnonymousNodeSQL+" LIMIT ?", ftsQuery, maxFiles)
 	}
 	if err != nil {
 		return nil, err
@@ -242,11 +486,11 @@ func QueryExplore(db *sqlx.DB, query, projectRoot string, maxFiles int) (*Explor
 func QueryNodeBySymbol(db *sqlx.DB, symbol, file string) ([]*AstraMapNode, error) {
 	var nodes []*AstraMapNode
 	if symbol != "" {
-		err := db.Select(&nodes, "SELECT * FROM astramap_nodes WHERE qualified_name LIKE ? OR name = ?", "%"+symbol+"%", symbol)
+		err := db.Select(&nodes, "SELECT * FROM astramap_nodes WHERE (qualified_name LIKE ? OR name = ?) "+nonSyntheticAnonymousNodeSQL, "%"+symbol+"%", symbol)
 		return nodes, err
 	}
 	if file != "" {
-		err := db.Select(&nodes, "SELECT * FROM astramap_nodes WHERE file_path = ? LIMIT 10", file)
+		err := db.Select(&nodes, "SELECT * FROM astramap_nodes WHERE file_path = ? "+nonSyntheticAnonymousNodeSQL+" LIMIT 10", file)
 		return nodes, err
 	}
 	return nodes, nil
@@ -272,6 +516,7 @@ func QueryFiles(db *sqlx.DB, pathPrefix, pattern string) ([]*AstraMapFile, error
 	q := "SELECT * FROM astramap_files "
 	var conditions []string
 	var params []interface{}
+	pathPrefix = normalizeFilePathPrefix(pathPrefix)
 	if pathPrefix != "" {
 		conditions = append(conditions, "path LIKE ?")
 		params = append(params, pathPrefix+"%")
@@ -289,6 +534,20 @@ func QueryFiles(db *sqlx.DB, pathPrefix, pattern string) ([]*AstraMapFile, error
 	var files []*AstraMapFile
 	err := db.Select(&files, q, params...)
 	return files, err
+}
+
+func normalizeFilePathPrefix(pathPrefix string) string {
+	pathPrefix = filepath.ToSlash(strings.TrimSpace(pathPrefix))
+	if pathPrefix == "" || pathPrefix == "." || pathPrefix == "./" {
+		return ""
+	}
+	pathPrefix = strings.TrimPrefix(pathPrefix, "./")
+	pathPrefix = strings.TrimLeft(pathPrefix, "/")
+	pathPrefix = filepath.ToSlash(filepath.Clean(pathPrefix))
+	if pathPrefix == "." {
+		return ""
+	}
+	return pathPrefix
 }
 
 // QueryVerdicts returns governance verdicts for a symbol.

@@ -49,39 +49,6 @@
             -webkit-text-fill-color: transparent;
             letter-spacing: 1px;
         }
-        .search-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-        }
-        #search-box {
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid var(--panel-border);
-            color: var(--text-main);
-            padding: 8px 16px; border-radius: 20px; width: 280px; font-size: 14px;
-            outline: none;
-            transition: all 0.3s ease;
-        }
-        #search-box:focus {
-            width: 340px;
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
-        }
-        #sr {
-            position: absolute; top: 46px; left: 0; width: 340px; 
-            max-height: 400px; background: #1e293b; 
-            border: 1px solid var(--panel-border); border-radius: 12px;
-            overflow-y: auto; display: none; z-index: 2000;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-        }
-        .sri {
-            padding: 12px 16px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05);
-            transition: background 0.2s;
-        }
-        .sri:hover { background: rgba(255, 255, 255, 0.05); }
-        .sri .nm { color: var(--color-function); font-weight: 600; font-size: 14px; }
-        .sri .lc { color: var(--text-muted); margin-top: 4px; font-size: 12px; font-family: monospace; }
-        
         /* 导航 Tab */
         .tab-btn {
             background: transparent;
@@ -309,12 +276,8 @@
         <div style="width: 24px;"></div>
         <button id="btn-explore" class="tab-btn active">探索视界</button>
         <button id="btn-trace" class="tab-btn">依赖分析</button>
-        <button id="btn-about" class="about-btn">关于</button>
         <div style="flex:1"></div>
-        <div class="search-container">
-            <input type="text" id="search-box" placeholder="搜索函数/方法符号..." autocomplete="off">
-            <div id="sr"></div>
-        </div>
+        <button id="btn-about" class="about-btn">关于</button>
     </header>
 
     <div id="global-breadcrumb-bar" style="display:none;">
@@ -426,7 +389,7 @@
     <script>
         // ===== 补齐 SourceAstra 独立运行所需的 Mocks 全局变量，防止 JS 加载或交互报错 =====
         window.G_CURRENT_VIEW = 'explore';
-        window.G_GRAPH_MODE = 'full';
+        window.G_GRAPH_MODE = 'projected';
         window.G_FILE_TO_MODULE = {};
         window.G_MODULES = [];
         
@@ -440,6 +403,7 @@
         window.SourceAstra = window.SourceAstra || {};
         window.SourceAstra.traceInitialized = false;
         window.SourceAstra.apiPrefix = '/api/astramap/';
+        window.saAuthHeaders = window.saAuthHeaders || function() { return {}; };
         window.saConsumeSSEStream = window.saConsumeSSEStream || async function(response, onEvent) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -598,56 +562,6 @@
     <script src="explore.js"></script>
     <script src="trace.js"></script>
     <script>
-        // 搜索逻辑桥接
-        const searchBox = document.getElementById('search-box');
-        const sr = document.getElementById('sr');
-        searchBox.addEventListener('input', async (e) => {
-            const q = e.target.value.trim();
-            if (!q) { sr.style.display = 'none'; return; }
-            try {
-                const res = await fetch(`/api/astramap/search?q=${encodeURIComponent(q)}`);
-                const data = await res.json();
-                if (data && data.length > 0) {
-                    sr.innerHTML = data.map(item => `
-                        <div class="sri" data-id="${item.id}" data-name="${item.name}" data-filepath="${item.filePath}">
-                            <div class="nm">${item.name} <span style="font-size:10px; color:#64748b;">${item.kind}</span></div>
-                            <div class="lc">${item.filePath}:${item.startLine}</div>
-                        </div>
-                    `).join('');
-                    sr.style.display = 'block';
-                } else {
-                    sr.style.display = 'none';
-                }
-            } catch(err) {
-                console.error(err);
-            }
-        });
-
-        // 绑定搜索元素点击事件
-        sr.addEventListener('click', (e) => {
-            const sri = e.target.closest('.sri');
-            if (!sri) return;
-            const symId = sri.getAttribute('data-id');
-            const symName = sri.getAttribute('data-name');
-            searchBox.value = symName;
-            sr.style.display = 'none';
-
-            // 触发当前视图探索渲染
-            if (activeTab === 'explore') {
-                if (window._exploreView) {
-                    window._exploreView._drawTrace(symId);
-                }
-            } else if (activeTab === 'trace') {
-                openTraceForSymbol(symId, symName);
-            }
-        });
-
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.search-container')) {
-                sr.style.display = 'none';
-            }
-        });
-
         // Tab 切换逻辑
         let activeTab = 'explore';
         const btnExplore = document.getElementById('btn-explore');
@@ -688,61 +602,95 @@
             }
         });
 
+        function astraMapSymbolFromNode(s) {
+            return {
+                id: s.id,
+                kind: s.kind || s.type,
+                type: s.type || s.kind,
+                name: s.name,
+                qualifiedName: s.qualifiedName || s.name,
+                file: s.file || s.filePath,
+                filePath: s.filePath || s.file,
+                line: s.line || s.startLine,
+                startLine: s.startLine || s.line,
+                endLine: s.endLine,
+                startColumn: s.startColumn,
+                endColumn: s.endColumn,
+                signature: s.signature,
+                docstring: s.docstring,
+                isExported: s.isExported
+            };
+        }
+
+        function astraMapInstallSymbols(nodes) {
+            const symMap = {};
+            const nameMap = {};
+            const fileSet = new Set();
+            window.G_FILE_TO_MODULE = {};
+            (nodes || []).forEach(s => {
+                const sym = astraMapSymbolFromNode(s);
+                symMap[sym.id] = sym;
+                nameMap[sym.name] = sym.id;
+                if (sym.file) {
+                    fileSet.add(sym.file);
+                    const parts = sym.file.replace(/\\/g, '/').split('/');
+                    const moduleId = parts.length > 1 && parts[0] ? parts[0] : '(root)';
+                    window.G_FILE_TO_MODULE[sym.file] = { id: moduleId, name: moduleId };
+                }
+            });
+            window.G_DATA = {
+                symbols: symMap,
+                nameMap: nameMap,
+                edges: [],
+                links: [],
+                files: Array.from(fileSet).sort().map(file => ({ file_path: file }))
+            };
+        }
+
+        async function astraMapLoadFullFallback() {
+            const resNodes = await fetch('/api/astramap/data');
+            const graphData = await resNodes.json();
+            if (graphData.error) throw new Error(graphData.error);
+            astraMapInstallSymbols(graphData.nodes || []);
+            const edges = (graphData.edges || []).map(e => ({
+                from: e.source,
+                to: e.target,
+                kind: e.kind,
+                provenance: e.provenance,
+                line: e.line,
+                col: e.col
+            }));
+            window.G_DATA.edges = edges;
+            window.G_DATA.links = edges;
+            window.G_DATA.files = (graphData.files || []).map(f => ({ file_path: f.path }));
+            window.G_GRAPH_MODE = 'full';
+        }
+
         // 挂载页面组件实例并拉取初始化数据
         window.addEventListener('DOMContentLoaded', async () => {
             try {
-                const res = await fetch('/api/astramap/status');
-                const stats = await res.json();
-                
-                // 拉取全量轻量图数据以装载 G_DATA (对应 explore.js / trace.js 的预期格式)
-                const resNodes = await fetch('/api/astramap/data');
-                const graphData = await resNodes.json();
-                if (graphData.error) throw new Error(graphData.error);
-                
-                // 将数据库图数据转化为 explore.js 所兼容的 symbols 字典与 edges 链表
-                const symMap = {};
-                const nameMap = {};
-                (graphData.nodes || []).forEach(s => {
-                    const sym = {
-                        id: s.id,
-                        kind: s.kind,
-                        type: s.kind, // trace.js 里需要兼容 type
-                        name: s.name,
-                        qualifiedName: s.qualifiedName,
-                        file: s.filePath,
-                        filePath: s.filePath,
-                        line: s.startLine,
-                        startLine: s.startLine,
-                        endLine: s.endLine,
-                        startColumn: s.startColumn,
-                        endColumn: s.endColumn,
-                        signature: s.signature,
-                        docstring: s.docstring,
-                        isExported: s.isExported
-                    };
-                    symMap[s.id] = sym;
-                    nameMap[s.name] = s.id;
-                });
-
-                const edges = (graphData.edges || []).map(e => ({
-                    from: e.source,
-                    to: e.target,
-                    kind: e.kind,
-                    provenance: e.provenance,
-                    line: e.line,
-                    col: e.col
-                }));
-
-                window.G_DATA = {
-                    symbols: symMap,
-                    nameMap: nameMap,
-                    edges: edges,
-                    links: edges,
-                    files: (graphData.files || []).map(f => ({ file_path: f.path }))
-                };
+                const [statusRes, overviewRes, functionsRes] = await Promise.all([
+                    fetch('/api/astramap/status'),
+                    fetch('/api/astramap/overview'),
+                    fetch('/api/astramap/functions')
+                ]);
+                await statusRes.json();
+                const overview = await overviewRes.json();
+                const functions = await functionsRes.json();
+                if (overview.error) throw new Error(overview.error);
+                if (functions.error) throw new Error(functions.error);
+                window.G_PROJECTED_GRAPH = overview;
+                window.G_MODULES = (overview.nodes || []).map(n => ({ id: n.id, name: n.name || n.id }));
+                astraMapInstallSymbols(functions || []);
             } catch(e) {
-                console.error("加载 AstraMap 初始化数据失败: ", e);
-                window.G_DATA = { symbols: {}, nameMap: {}, edges: [], links: [], files: [] };
+                console.warn("加载 AstraMap 轻量初始化数据失败，回退全量图: ", e);
+                try {
+                    await astraMapLoadFullFallback();
+                } catch(fullErr) {
+                    console.error("加载 AstraMap 初始化数据失败: ", fullErr);
+                    window.G_PROJECTED_GRAPH = { nodes: [], links: [] };
+                    window.G_DATA = { symbols: {}, nameMap: {}, edges: [], links: [], files: [] };
+                }
             }
 
             if (window.SourceAstra && typeof window.SourceAstra.initExplore === 'function') {
