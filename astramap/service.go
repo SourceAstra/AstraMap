@@ -581,11 +581,9 @@ func ReadSourceRange(projectRoot, filePath string, startLine, endLine int) (stri
 	return strings.Join(matched, "\n"), scanner.Err()
 }
 
-// QueryTraceCTE returns the path subgraph centered on startNodeID.
-// It keeps only edges that are on an upstream path into the root or a
-// downstream path out of the root. It intentionally avoids the old induced
-// subgraph behavior because that pulled in every side-call between visited
-// nodes and made common utilities dominate the view.
+// QueryTraceCTE returns the call neighborhood centered on startNodeID.
+// Depth controls ancestor and descendant generations. Siblings are direct
+// callees of visible ancestor nodes and are included as one-hop context only.
 func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNode, []*AstraMapEdge, error) {
 	var startID string
 	err := db.Get(&startID, "SELECT id FROM astramap_nodes WHERE id = ? LIMIT 1", startNodeID)
@@ -596,9 +594,6 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 		}
 	}
 	startID = resolveCanonicalTraceStart(db, startID)
-	const maxNodes = 180
-	const maxEdges = 500
-	const perNodeFanout = 32
 	if maxDepth <= 0 {
 		maxDepth = 3
 	}
@@ -619,49 +614,84 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 		id    string
 		depth int
 	}
-	walk := func(direction string) error {
+
+	queryEdges := func(direction string, nodeID string) ([]*AstraMapEdge, error) {
+		var edges []*AstraMapEdge
+		var err error
+		if direction == "up" {
+			err = db.Select(&edges, `
+				SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
+				FROM astramap_edges
+				WHERE kind = 'calls' AND target = ?
+				ORDER BY provenance = 'scip' DESC, line, id
+			`, nodeID)
+		} else {
+			err = db.Select(&edges, `
+				SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
+				FROM astramap_edges
+				WHERE kind = 'calls' AND source = ?
+				ORDER BY provenance = 'scip' DESC, line, id
+			`, nodeID)
+		}
+		return edges, err
+	}
+
+	upDepth := map[string]int{startID: 0}
+
+	walkUp := func() error {
 		queue := []item{{id: startID, depth: 0}}
 		seen := map[string]bool{startID: true}
-		for len(queue) > 0 && len(visited) < maxNodes && len(edgeMap) < maxEdges {
+		for len(queue) > 0 {
 			curr := queue[0]
 			queue = queue[1:]
 			if curr.depth >= maxDepth {
 				continue
 			}
 
-			var nextEdges []*AstraMapEdge
-			var err error
-			if direction == "up" {
-				err = db.Select(&nextEdges, `
-					SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
-					FROM astramap_edges
-					WHERE kind = 'calls' AND target = ?
-					ORDER BY provenance = 'scip' DESC, line, id
-					LIMIT ?
-				`, curr.id, perNodeFanout)
-			} else {
-				err = db.Select(&nextEdges, `
-					SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
-					FROM astramap_edges
-					WHERE kind = 'calls' AND source = ?
-					ORDER BY provenance = 'scip' DESC, line, id
-					LIMIT ?
-				`, curr.id, perNodeFanout)
+			nextEdges, err := queryEdges("up", curr.id)
+			if err != nil {
+				return err
 			}
+
+			for _, edge := range nextEdges {
+				nextID := edge.Source
+				if nextID == "" {
+					continue
+				}
+				addEdge(edge)
+				if !seen[nextID] {
+					seen[nextID] = true
+					upDepth[nextID] = curr.depth + 1
+					visited[nextID] = curr.depth + 1
+					queue = append(queue, item{id: nextID, depth: curr.depth + 1})
+				}
+			}
+		}
+		return nil
+	}
+
+	walkDown := func() error {
+		queue := []item{{id: startID, depth: 0}}
+		seen := map[string]bool{startID: true}
+		for len(queue) > 0 {
+			curr := queue[0]
+			queue = queue[1:]
+			if curr.depth >= maxDepth {
+				continue
+			}
+
+			nextEdges, err := queryEdges("down", curr.id)
 			if err != nil {
 				return err
 			}
 
 			for _, edge := range nextEdges {
 				nextID := edge.Target
-				if direction == "up" {
-					nextID = edge.Source
-				}
-				if nextID == "" || shouldPruneTraceUtility(db, startID, edge, direction, curr.depth) {
+				if nextID == "" {
 					continue
 				}
 				addEdge(edge)
-				if !seen[nextID] && len(visited) < maxNodes {
+				if !seen[nextID] {
 					seen[nextID] = true
 					visited[nextID] = curr.depth + 1
 					queue = append(queue, item{id: nextID, depth: curr.depth + 1})
@@ -671,10 +701,35 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 		return nil
 	}
 
-	if err := walk("up"); err != nil {
+	addSiblingEdgesFromAncestors := func() error {
+		for ancestorID, depth := range upDepth {
+			if ancestorID == startID || depth <= 0 || depth > maxDepth {
+				continue
+			}
+			siblingEdges, err := queryEdges("down", ancestorID)
+			if err != nil {
+				return err
+			}
+			for _, edge := range siblingEdges {
+				if edge.Target == "" {
+					continue
+				}
+				addEdge(edge)
+				if _, exists := visited[edge.Target]; !exists {
+					visited[edge.Target] = depth
+				}
+			}
+		}
+		return nil
+	}
+
+	if err := walkUp(); err != nil {
 		return nil, nil, err
 	}
-	if err := walk("down"); err != nil {
+	if err := walkDown(); err != nil {
+		return nil, nil, err
+	}
+	if err := addSiblingEdgesFromAncestors(); err != nil {
 		return nil, nil, err
 	}
 
@@ -724,32 +779,6 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 	})
 
 	return nodes, filteredEdges, nil
-}
-
-func shouldPruneTraceUtility(db *sqlx.DB, rootID string, edge *AstraMapEdge, direction string, currDepth int) bool {
-	if edge == nil || direction != "down" || currDepth == 0 {
-		return false
-	}
-	var node AstraMapNode
-	if err := db.Get(&node, "SELECT * FROM astramap_nodes WHERE id = ? LIMIT 1", edge.Target); err != nil {
-		return false
-	}
-	name := strings.ToLower(node.Name)
-	noisyName := strings.Contains(name, "free") ||
-		strings.Contains(name, "malloc") ||
-		strings.Contains(name, "memset") ||
-		strings.Contains(name, "memcpy") ||
-		strings.Contains(name, "lock") ||
-		strings.Contains(name, "unlock") ||
-		strings.Contains(name, "dbg") ||
-		strings.Contains(name, "debug") ||
-		strings.Contains(name, "log")
-	if !noisyName {
-		return false
-	}
-	var degree int
-	_ = db.Get(&degree, "SELECT COUNT(*) FROM astramap_edges WHERE kind = 'calls' AND target = ?", edge.Target)
-	return degree >= 8 && edge.Source != rootID
 }
 
 func resolveCanonicalTraceStart(db *sqlx.DB, nodeID string) string {

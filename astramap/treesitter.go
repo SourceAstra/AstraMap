@@ -612,11 +612,9 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 
 	shortMap := make(map[string][]string)
 	qualifiedMap := make(map[string][]string)
-	nodeFileMap := make(map[string]string)
 	for _, fn := range allFuncs {
 		shortMap[fn.Name] = append(shortMap[fn.Name], fn.ID)
 		qualifiedMap[fn.QualifiedName] = append(qualifiedMap[fn.QualifiedName], fn.ID)
-		nodeFileMap[fn.ID] = fn.FilePath
 	}
 
 	var files []string
@@ -744,7 +742,7 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 				}
 
 				for _, targetID := range targets {
-					if nodeFileMap[targetID] == fp {
+					if targetID == callerID {
 						continue
 					}
 					_, _ = insertStmt.Exec(callerID, targetID, lineNum, m[0]+1)

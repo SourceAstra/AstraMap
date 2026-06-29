@@ -114,13 +114,13 @@
                             <div class="und-toolbar-right">
                                 <label class="und-depth-label">深度
                                     <select id="und-depth-select" class="und-select">
-                                        <option value="1">1</option>
+                                        <option value="1" selected>1</option>
                                         <option value="2">2</option>
                                         <option value="3">3</option>
                                         <option value="4">4</option>
                                         <option value="5">5</option>
                                         <option value="6">6</option>
-                                        <option value="8" selected>8</option>
+                                        <option value="8">8</option>
                                     </select>
                                 </label>
                                 <label class="und-depth-label" style="margin-right:8px;">透视目录
@@ -1658,8 +1658,6 @@
                 }).map(l => ({ ...l }));
             }
 
-            this.pruneAndCloneGraph();
-
             // 1. 构建完整图的双向邻接表，并计算所有节点在调用树中的拓扑深度 _layer (基于未过滤的完整调用流关系)
             const calleeMap = {};
             const callerMap = {};
@@ -1702,6 +1700,14 @@
                     }
                 });
             }
+
+            traceLinks.forEach(l => {
+                const src = typeof l.source === 'object' ? l.source.id : l.source;
+                const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+                if (depthMap[src] !== undefined && depthMap[tgt] === undefined) {
+                    depthMap[tgt] = depthMap[src] + 1;
+                }
+            });
 
             traceNodes.forEach(n => {
                 n._layer = depthMap[n.id] !== undefined ? depthMap[n.id] : 0;

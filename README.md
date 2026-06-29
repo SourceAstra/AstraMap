@@ -107,8 +107,6 @@ index:
 | `amap owners <symbol>` | 代码所有权（git blame） |
 | `amap tree <symbol> [--dir=up\|down] [--depth=N]` | 调用拓扑树 |
 | `amap export <symbol> [--format=mermaid]` | 拓扑导出 |
-| `amap audit` | 质量审计门禁 |
-| `amap qa` | QA 综合指标 |
 | `amap query "<SQL>"` | SQL 直接查询 |
 
 ## MCP 工具清单
