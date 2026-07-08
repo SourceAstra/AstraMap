@@ -469,6 +469,7 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 		logError("ResolveCrossFileCalls failed: %v", err)
 	}
 
+	InvalidateOverviewCache()
 	logInfo("ImportScipIndexToAstraMap: 成功导入 %d 节点, %d 调用边", len(nodes), len(edges))
 	return nil
 }
@@ -620,7 +621,8 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-
+	
+	InvalidateOverviewCache()
 	return true, nil
 }
 
