@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "target": "ES2020"
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".astramap",
+    "build",
+    "**/.astramap/**",
+    "**/*.db",
+    "**/*.db-shm",
+    "**/*.db-wal",
+    "**/CLAUDE.md",
+    "docs/*",
+    "**/.agents/**",
+    "**/.claude/**",
+    "**/.clinerules/**",
+    "**/.cursor/**",
+    "**/.github/**",
+    "**/.mcp.json",
+    "**/.windsurfrules",
+    "**/AGENTS.md"
+  ],
+  "include": [
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.ts",
+    "**/*.tsx"
+  ]
+}
