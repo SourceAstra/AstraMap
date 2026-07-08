@@ -816,9 +816,14 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 			}
 
 			var callerID string
+			callerSpan := 0
 			for _, lf := range localFuncs {
 				if lineNum >= lf.StartLine && lineNum <= lf.EndLine {
-					callerID = lf.ID
+					span := lf.EndLine - lf.StartLine
+					if callerID == "" || span < callerSpan {
+						callerID = lf.ID
+						callerSpan = span
+					}
 				}
 			}
 			if callerID == "" {
@@ -869,6 +874,9 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 						}
 					}
 				}
+				if isAmbiguousHeuristicCall(calleeName, targets, dotIndex) {
+					continue
+				}
 
 				for _, targetID := range targets {
 					if targetID == callerID {
@@ -881,4 +889,14 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 	}
 
 	return tx.Commit()
+}
+
+func isAmbiguousHeuristicCall(calleeName string, targets []string, dotIndex int) bool {
+	if len(targets) <= 1 {
+		return false
+	}
+	if strings.HasPrefix(calleeName, "__") && strings.HasSuffix(calleeName, "__") {
+		return true
+	}
+	return dotIndex == -1
 }
