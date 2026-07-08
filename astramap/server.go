@@ -2,9 +2,11 @@ package astramap
 
 import (
 	"bufio"
+	"compress/gzip"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -24,26 +26,30 @@ var WebStatic embed.FS
 
 // StartStandaloneServer starts a decoupled HTTP server serving both mock-free APIs and AstraMap standalone Web UI.
 func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) error {
-	// 读写分离：writeDB 保留写连接供 watcher 使用，readDB 用于 Dashboard 查询
-	writeDB := db
+	// 读写分离：readDB 用于 Dashboard 查询
 	var readDB *sqlx.DB
 	readDBPath := filepath.Join(projectRoot, ".astramap", "astramap.db")
-	if rdb, err := sqlx.Open("sqlite", readDBPath+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_pragma=temp_store(MEMORY)&mode=ro"); err == nil {
-		rdb.SetMaxOpenConns(4)
+	if rdb, err := sqlx.Open("sqlite", readDBPath+"?mode=ro"); err == nil {
+		_, _ = rdb.Exec("PRAGMA journal_mode=WAL")
+		_, _ = rdb.Exec("PRAGMA synchronous=NORMAL")
+		_, _ = rdb.Exec("PRAGMA mmap_size=268435456")
+		_, _ = rdb.Exec("PRAGMA cache_size=-65536")
+		_, _ = rdb.Exec("PRAGMA temp_store=MEMORY")
+		_, _ = rdb.Exec("PRAGMA busy_timeout=5000")
+		_, _ = rdb.Exec("PRAGMA query_only=ON")
+		rdb.SetMaxOpenConns(8)
 		readDB = rdb
 		defer rdb.Close()
 	} else {
 		readDB = db
 	}
 
-	go watchProjectFiles(writeDB, projectRoot)
-
 	mux := http.NewServeMux()
 
 	// 1. JSON APIs matching standalone index.html calls (mock-free, no auth)
 	mux.HandleFunc("/api/astramap/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		status, err := QueryStatus(readDB)
+		status, err := QueryStatusWithProjectRoot(readDB, projectRoot)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -59,6 +65,8 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			"totalFiles":         status.FileCount,
 			"indexedNodes":       status.NodeCount,
 			"indexedEdges":       status.EdgeCount,
+			"dirtyCount":         status.DirtyCount,
+			"dirtyFiles":         status.DirtyFiles,
 			"supportedLanguages": []string{"go", "c", "cpp", "python", "typescript", "java"},
 		})
 	})
@@ -69,7 +77,11 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		kind := r.URL.Query().Get("kind")
 		nodes, err := QuerySearch(readDB, q, kind, 50)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			if validateSearchKind(kind) != nil {
+				w.WriteHeader(http.StatusBadRequest)
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
@@ -127,9 +139,8 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
-		if resolveErr == nil && len(ids) > 0 {
-			id = ids[0]
+		if resolvedID, resolveErr := resolvePrimarySymbolID(readDB, id); resolveErr == nil && resolvedID != "" {
+			id = resolvedID
 		}
 		var node AstraMapNode
 		err := readDB.Get(&node, "SELECT * FROM astramap_nodes WHERE id = ?", id)
@@ -149,26 +160,39 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
-		if resolveErr != nil || len(ids) == 0 {
+		resolvedID, resolveErr := resolvePrimarySymbolID(readDB, id)
+		if resolveErr != nil || resolvedID == "" {
 			json.NewEncoder(w).Encode([]struct{}{})
 			return
 		}
-		var allCallers []*AstraMapEdge
-		for _, nid := range ids {
-			callers, err := GetCallers(readDB, nid)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-				return
+		callers, err := GetCallers(readDB, resolvedID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		
+		nodeIDs := make([]string, 0, len(callers)*2)
+		for _, edge := range callers {
+			nodeIDs = append(nodeIDs, edge.Source, edge.Target)
+		}
+		canonicalMap, batchErr := BatchCanonicalSymbolIDs(readDB, nodeIDs)
+		if batchErr == nil {
+			for _, edge := range callers {
+				if val, ok := canonicalMap[edge.Source]; ok {
+					edge.Source = val
+				}
+				if val, ok := canonicalMap[edge.Target]; ok {
+					edge.Target = val
+				}
 			}
-			allCallers = append(allCallers, callers...)
+		} else {
+			for _, edge := range callers {
+				edge.Source = CanonicalSymbolIDForNodeID(readDB, edge.Source)
+				edge.Target = CanonicalSymbolIDForNodeID(readDB, edge.Target)
+			}
 		}
-		for _, edge := range allCallers {
-			edge.Source = CanonicalSymbolIDForNodeID(readDB, edge.Source)
-			edge.Target = CanonicalSymbolIDForNodeID(readDB, edge.Target)
-		}
-		json.NewEncoder(w).Encode(allCallers)
+		json.NewEncoder(w).Encode(callers)
 	})
 
 	mux.HandleFunc("/api/astramap/callees/", func(w http.ResponseWriter, r *http.Request) {
@@ -178,26 +202,39 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
-		if resolveErr != nil || len(ids) == 0 {
+		resolvedID, resolveErr := resolvePrimarySymbolID(readDB, id)
+		if resolveErr != nil || resolvedID == "" {
 			json.NewEncoder(w).Encode([]struct{}{})
 			return
 		}
-		var allCallees []*AstraMapEdge
-		for _, nid := range ids {
-			callees, err := GetCallees(readDB, nid)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-				return
+		callees, err := GetCallees(readDB, resolvedID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		
+		nodeIDs := make([]string, 0, len(callees)*2)
+		for _, edge := range callees {
+			nodeIDs = append(nodeIDs, edge.Source, edge.Target)
+		}
+		canonicalMap, batchErr := BatchCanonicalSymbolIDs(readDB, nodeIDs)
+		if batchErr == nil {
+			for _, edge := range callees {
+				if val, ok := canonicalMap[edge.Source]; ok {
+					edge.Source = val
+				}
+				if val, ok := canonicalMap[edge.Target]; ok {
+					edge.Target = val
+				}
 			}
-			allCallees = append(allCallees, callees...)
+		} else {
+			for _, edge := range callees {
+				edge.Source = CanonicalSymbolIDForNodeID(readDB, edge.Source)
+				edge.Target = CanonicalSymbolIDForNodeID(readDB, edge.Target)
+			}
 		}
-		for _, edge := range allCallees {
-			edge.Source = CanonicalSymbolIDForNodeID(readDB, edge.Source)
-			edge.Target = CanonicalSymbolIDForNodeID(readDB, edge.Target)
-		}
-		json.NewEncoder(w).Encode(allCallees)
+		json.NewEncoder(w).Encode(callees)
 	})
 
 	mux.HandleFunc("/api/astramap/impact/", func(w http.ResponseWriter, r *http.Request) {
@@ -209,17 +246,17 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		}
 		depth := 3
 		if d := r.URL.Query().Get("depth"); d != "" {
-			if v, err := strconv.Atoi(d); err == nil && v > 0 {
-				depth = v
+			if v, err := strconv.Atoi(d); err == nil {
+				depth = normalizeImpactDepth(v)
 			}
 		}
-		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
-		if resolveErr != nil || len(ids) == 0 {
+		resolvedID, resolveErr := resolvePrimarySymbolID(readDB, id)
+		if resolveErr != nil || resolvedID == "" {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "symbol not found"})
 			return
 		}
-		res, err := AnalyzeImpact(readDB, ids[0], depth)
+		res, err := AnalyzeImpact(readDB, resolvedID, depth)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -255,19 +292,19 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			json.NewEncoder(w).Encode(map[string]string{"error": "parameters from and to required"})
 			return
 		}
-		fromIDs, resolveErr := ResolveSymbolToIDs(readDB, from)
-		if resolveErr != nil || len(fromIDs) == 0 {
+		fromID, resolveErr := resolvePrimarySymbolID(readDB, from)
+		if resolveErr != nil || fromID == "" {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "from symbol not found"})
 			return
 		}
-		toIDs, resolveErr := ResolveSymbolToIDs(readDB, to)
-		if resolveErr != nil || len(toIDs) == 0 {
+		toID, resolveErr := resolvePrimarySymbolID(readDB, to)
+		if resolveErr != nil || toID == "" {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "to symbol not found"})
 			return
 		}
-		paths, err := TracePath(readDB, fromIDs[0], toIDs[0])
+		paths, err := TracePath(readDB, fromID, toID)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -301,8 +338,9 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 
 		// 必须转换为 trace.js 预期的 from/to 边格式与含有 file 属性的节点格式
 		type ResponseEdge struct {
-			From string `json:"from"`
-			To   string `json:"to"`
+			From     string `json:"from"`
+			To       string `json:"to"`
+			Metadata string `json:"metadata,omitempty"`
 		}
 
 		type ResponseNode struct {
@@ -347,8 +385,9 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		respEdges := make([]ResponseEdge, 0)
 		for _, e := range edges {
 			respEdges = append(respEdges, ResponseEdge{
-				From: CanonicalSymbolIDForNodeID(readDB, e.Source),
-				To:   CanonicalSymbolIDForNodeID(readDB, e.Target),
+				From:     CanonicalSymbolIDForNodeID(readDB, e.Source),
+				To:       CanonicalSymbolIDForNodeID(readDB, e.Target),
+				Metadata: e.Metadata,
 			})
 		}
 
@@ -500,11 +539,51 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 	if err != nil {
 		return fmt.Errorf("failed to create sub-FS: %w", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(subFS)))
+	staticHandler := http.FileServer(http.FS(subFS))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".min.js") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else if strings.HasSuffix(path, ".html") || path == "/" {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		staticHandler.ServeHTTP(w, r)
+	}))
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	fmt.Fprintf(os.Stderr, "[INFO] AstraMap Dashboard 启动 http://%s\n", addr)
-	return http.ListenAndServe(addr, loggingMiddleware(mux))
+
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      gzipMiddleware(loggingMiddleware(mux)),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	return srv.ListenAndServe()
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	io.Writer
+}
+
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Del("Content-Length")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
+	})
 }
 
 func readSnippetLines(projectRoot, relFile string, start, count int) ([]string, error) {
@@ -2276,6 +2355,11 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/" || strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".html") || strings.HasSuffix(path, ".min.js") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		start := time.Now()
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: 200}
 		next.ServeHTTP(lrw, r)
@@ -2329,6 +2413,14 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 	debounce := make(map[string]time.Time)
 	mu := sync.Mutex{}
 
+	debounceTmr := time.NewTimer(2 * time.Second)
+	if !debounceTmr.Stop() {
+		select {
+		case <-debounceTmr.C:
+		default:
+		}
+	}
+
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -2354,7 +2446,8 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			mu.Lock()
 			debounce[event.Name] = time.Now()
 			mu.Unlock()
-		case <-time.After(2 * time.Second):
+			debounceTmr.Reset(2 * time.Second)
+		case <-debounceTmr.C:
 			mu.Lock()
 			now := time.Now()
 			var pending []string
@@ -2388,6 +2481,7 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 				if err := ResolveCrossFileCalls(db, projectRoot); err != nil {
 					fmt.Fprintf(os.Stderr, "[WATCH] 解析跨文件调用失败: %v\n", err)
 				}
+				InvalidateOverviewCache()
 				fmt.Fprintf(os.Stderr, "[WATCH] 跨文件关系更新完毕\n")
 			}
 		case err, ok := <-watcher.Errors:
