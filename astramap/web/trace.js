@@ -27,6 +27,8 @@
     let _cachedComplexity = {};
     let showBlastRadius = false;
     let _blastRadiusCache = {};
+    let _cachedThemeColors = null;
+    let _traceAbortCtrl = null;
 
     // 页面级工具函数
     function hexToRgbA(hex, alpha) {
@@ -180,7 +182,13 @@
         bindEvents() {
             const functionSearch = document.getElementById('und-function-search');
             if (functionSearch) {
-                functionSearch.oninput = () => this.renderFunctionTree(functionSearch.value);
+                let _searchDebounceTimer = null;
+                functionSearch.oninput = () => {
+                    clearTimeout(_searchDebounceTimer);
+                    _searchDebounceTimer = setTimeout(() => {
+                        this.renderFunctionTree(functionSearch.value);
+                    }, 200);
+                };
             }
 
             const depthSelect = document.getElementById('und-depth-select');
@@ -442,18 +450,25 @@
         },
 
         async fetchTrace(nodeId, depth) {
+            if (_traceAbortCtrl) {
+                _traceAbortCtrl.abort();
+            }
+            _traceAbortCtrl = new AbortController();
+            const signal = _traceAbortCtrl.signal;
+
             const jobId = sessionStorage.getItem('sourceastra_job_id');
             const url = `/api/trace?node_id=${encodeURIComponent(nodeId)}&depth=${depth}${jobId ? '&job=' + jobId : ''}`;
 
             try {
                 // 并行发起 trace、modules 和 complexity 三个请求
                 const [modulesRes, traceRes, compRes] = await Promise.all([
-                    fetch('/api/modules'),
-                    fetch(url),
+                    fetch('/api/modules', { signal }),
+                    fetch(url, { signal }),
                     fetch('/api/complexity/calculate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({})
+                        body: JSON.stringify({}),
+                        signal
                     }).catch(() => null)
                 ]);
                 const modulesData = await modulesRes.json();
@@ -488,6 +503,7 @@
                     }
                 }
             } catch (e) {
+                if (e.name === 'AbortError') return;
                 console.error('[Understand v2] Trace error:', e);
             }
         },
@@ -542,7 +558,7 @@
                 // 对于 virtual_aggregate，其 module 继承自其 parentId 节点
                 traceNodes.forEach(n => {
                     if (n.type === 'virtual_aggregate' && n.parentId) {
-                        const parent = traceNodes.find(p => p.id === n.parentId);
+                        const parent = traceNodeMap.get(n.parentId);
                         if (parent) {
                             n._groupModuleId = parent._groupModuleId;
                             n._groupModuleName = parent._groupModuleName;
@@ -745,7 +761,7 @@
                 const nodeSpacingX = 260;
                 const nodeSpacingY = 150;
 
-                const rootNode = traceNodes.find(n => n.id === rootNodeId);
+                const rootNode = traceNodeMap.get(rootNodeId);
                 if (rootNode) {
                     rootNode.x = viewW / 2;
                     rootNode.y = viewH / 2;
@@ -754,11 +770,11 @@
                 const assignXDown = (parentId) => {
                     const children = calleeMap[parentId] || [];
                     if (children.length === 0) return;
-                    const pNode = traceNodes.find(n => n.id === parentId);
+                    const pNode = traceNodeMap.get(parentId);
                     if (!pNode) return;
                     const cCount = children.length;
                     children.forEach((cId, idx) => {
-                        const cNode = traceNodes.find(n => n.id === cId);
+                        const cNode = traceNodeMap.get(cId);
                         if (cNode) {
                             cNode.y = pNode.y + nodeSpacingY;
                             cNode.x = pNode.x + (idx - (cCount - 1) / 2) * nodeSpacingX;
@@ -771,11 +787,11 @@
                 const assignXUp = (childId) => {
                     const parents = callerMap[childId] || [];
                     if (parents.length === 0) return;
-                    const cNode = traceNodes.find(n => n.id === childId);
+                    const cNode = traceNodeMap.get(childId);
                     if (!cNode) return;
                     const pCount = parents.length;
                     parents.forEach((pId, idx) => {
-                        const pNode = traceNodes.find(n => n.id === pId);
+                        const pNode = traceNodeMap.get(pId);
                         if (pNode) {
                             pNode.y = cNode.y - nodeSpacingY;
                             pNode.x = cNode.x + (idx - (pCount - 1) / 2) * nodeSpacingX;
@@ -849,11 +865,19 @@
             ctx.save();
 
             // 缓存 CSS 变量与主题状态，仅在主题切换时刷新
-            const bodyStyle = getComputedStyle(document.body);
-            const bgColor1 = bodyStyle.getPropertyValue('--bg-color-1').trim() || '#0d111a';
-            const bgColor2 = bodyStyle.getPropertyValue('--bg-color-2').trim() || '#1a1e36';
-            const accent = bodyStyle.getPropertyValue('--accent-primary').trim();
-            const fnColor = bodyStyle.getPropertyValue('--color-function').trim();
+            if (!_cachedThemeColors) {
+                const bodyStyle = getComputedStyle(document.body);
+                _cachedThemeColors = {
+                    bgColor1: bodyStyle.getPropertyValue('--bg-color-1').trim() || '#0d111a',
+                    bgColor2: bodyStyle.getPropertyValue('--bg-color-2').trim() || '#1a1e36',
+                    accent: bodyStyle.getPropertyValue('--accent-primary').trim(),
+                    fnColor: bodyStyle.getPropertyValue('--color-function').trim()
+                };
+            }
+            const bgColor1 = _cachedThemeColors.bgColor1;
+            const bgColor2 = _cachedThemeColors.bgColor2;
+            const accent = _cachedThemeColors.accent;
+            const fnColor = _cachedThemeColors.fnColor;
 
             if (accent) {
                 COLORS.edge = accent.startsWith('#') ? hexToRgbA(accent, 0.4) : accent;
@@ -1095,8 +1119,8 @@
                 flowOffset = (flowOffset + 0.006) % 1;
                 traceLinks.forEach(l => {
                     if (!l._impact) return;
-                    const src = typeof l.source === 'object' ? l.source : traceNodes.find(n => n.id === l.source);
-                    const tgt = typeof l.target === 'object' ? l.target : traceNodes.find(n => n.id === l.target);
+                    const src = typeof l.source === 'object' ? l.source : traceNodeMap.get(l.source);
+                    const tgt = typeof l.target === 'object' ? l.target : traceNodeMap.get(l.target);
                     if (!src || !tgt || src.x == null) return;
 
                     const x1 = src.x;
@@ -1719,7 +1743,7 @@
             // 虚拟聚合节点继承父节点的目录属性
             traceNodes.forEach(n => {
                 if (n.type === 'virtual_aggregate' && n.parentId) {
-                    const parent = traceNodes.find(p => p.id === n.parentId);
+                    const parent = traceNodeMap.get(n.parentId);
                     if (parent) {
                         n._groupModuleId = parent._groupModuleId;
                         n._groupModuleName = parent._groupModuleName;
@@ -1961,18 +1985,27 @@
 
             let startX = 0, startWidth = 0;
 
+            let _traceResizerRAF = null;
             const onMouseMove = (e) => {
-                const dx = e.clientX - startX;
-                const newW = Math.max(200, Math.min(window.innerWidth - 300, startWidth - dx));
-                codePanel.style.width = newW + 'px';
-                
-                if (traceCanvas) {
-                    self.resizeTraceCanvas();
-                    self.renderGraph();
-                }
+                if (_traceResizerRAF) return;
+                _traceResizerRAF = requestAnimationFrame(() => {
+                    _traceResizerRAF = null;
+                    const dx = e.clientX - startX;
+                    const newW = Math.max(200, Math.min(window.innerWidth - 300, startWidth - dx));
+                    codePanel.style.width = newW + 'px';
+                    
+                    if (traceCanvas) {
+                        self.resizeTraceCanvas();
+                        self.renderGraph();
+                    }
+                });
             };
 
             const onMouseUp = () => {
+                if (_traceResizerRAF) {
+                    cancelAnimationFrame(_traceResizerRAF);
+                    _traceResizerRAF = null;
+                }
                 resizer.classList.remove('dragging');
                 document.body.classList.remove('resizing');
                 document.removeEventListener('mousemove', onMouseMove);
@@ -1989,11 +2022,15 @@
                 document.addEventListener('mouseup', onMouseUp);
             });
 
+            let _traceResizeTimer = null;
             window.addEventListener('resize', () => {
                 if (window.G_CURRENT_VIEW === 'trace' && traceCanvas) {
-                    self.resizeTraceCanvas();
-                    self.buildGraph();
-                    self.renderGraph();
+                    clearTimeout(_traceResizeTimer);
+                    _traceResizeTimer = setTimeout(() => {
+                        self.resizeTraceCanvas();
+                        self.buildGraph();
+                        self.renderGraph();
+                    }, 150);
                 }
             });
 
@@ -2036,11 +2073,11 @@
         }
     };
     window.SourceAstra.getModuleIdForNode = (nodeId) => {
-        const node = traceNodes.find(n => n.id === nodeId);
+        const node = traceNodeMap.get(nodeId);
         return node ? node._groupModuleId : null;
     };
     window.SourceAstra.getModuleNameForNode = (nodeId) => {
-        const node = traceNodes.find(n => n.id === nodeId);
+        const node = traceNodeMap.get(nodeId);
         return node ? node._groupModuleName : null;
     };
     window.SourceAstra.isolateModule = (moduleId) => {
@@ -2088,6 +2125,7 @@
     });
 
     window.addEventListener('sa-theme-changed', () => {
+        _cachedThemeColors = null;
         if (window.G_CURRENT_VIEW === 'trace' && traceCanvas) {
             Understand.renderGraph();
         }
