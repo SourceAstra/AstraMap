@@ -234,6 +234,8 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 					Properties: map[string]interface{}{
 						"path":    map[string]string{"type": "string", "description": "路径前缀过滤"},
 						"pattern": map[string]string{"type": "string", "description": "文件名正则或模式匹配 (如 *.go)"},
+						"limit":   map[string]string{"type": "integer", "description": "返回数量限制，默认 100"},
+						"offset":  map[string]string{"type": "integer", "description": "分页偏移量，默认 0"},
 					},
 				},
 			},
@@ -359,75 +361,66 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 
 	case "astramap_callers":
 		symbol, _ := argsMap["symbol"].(string)
-		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
-		if resolveErr != nil || len(ids) == 0 {
+		id, resolveErr := resolvePrimarySymbolID(db, symbol)
+		if resolveErr != nil || id == "" {
 			content = fmt.Sprintf("### Callers of %s:\n\nSymbol not found.\n", symbol)
 			break
 		}
-		var allCallers []*AstraMapEdge
-		for _, id := range ids {
-			callers, err2 := GetCallers(db, id)
-			if err2 != nil {
-				err = err2
-				break
-			}
-			allCallers = append(allCallers, callers...)
-		}
+		callers, err2 := GetCallers(db, id)
+		err = err2
 		if err == nil {
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("### Callers of %s:\n\n", symbol))
-			for _, c := range allCallers {
+			for _, c := range callers {
 				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
 					CanonicalSymbolIDForNodeID(db, c.Source),
 					CanonicalSymbolIDForNodeID(db, c.Target),
 					c.Line))
+				if c.Metadata != "" {
+					sb.WriteString(fmt.Sprintf("  - metadata: %s\n", c.Metadata))
+				}
 			}
 			content = sb.String()
 		}
 
 	case "astramap_callees":
 		symbol, _ := argsMap["symbol"].(string)
-		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
-		if resolveErr != nil || len(ids) == 0 {
+		id, resolveErr := resolvePrimarySymbolID(db, symbol)
+		if resolveErr != nil || id == "" {
 			content = fmt.Sprintf("### Callees of %s:\n\nSymbol not found.\n", symbol)
 			break
 		}
-		var allCallees []*AstraMapEdge
-		for _, id := range ids {
-			callees, err2 := GetCallees(db, id)
-			if err2 != nil {
-				err = err2
-				break
-			}
-			allCallees = append(allCallees, callees...)
-		}
+		callees, err2 := GetCallees(db, id)
+		err = err2
 		if err == nil {
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("### Callees of %s:\n\n", symbol))
-			for _, c := range allCallees {
+			for _, c := range callees {
 				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
 					CanonicalSymbolIDForNodeID(db, c.Source),
 					CanonicalSymbolIDForNodeID(db, c.Target),
 					c.Line))
+				if c.Metadata != "" {
+					sb.WriteString(fmt.Sprintf("  - metadata: %s\n", c.Metadata))
+				}
 			}
 			content = sb.String()
 		}
 
 	case "astramap_impact":
 		symbol, _ := argsMap["symbol"].(string)
-		depthVal, _ := argsMap["depth"].(float64)
-		depth := int(depthVal)
-		if depth <= 0 {
-			depth = 3
+		depth := 3
+		if depthVal, ok := argsMap["depth"].(float64); ok {
+			depth = normalizeImpactDepth(int(depthVal))
 		}
 
-		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
-		if resolveErr != nil || len(ids) == 0 {
+		id, resolveErr := resolvePrimarySymbolID(db, symbol)
+		if resolveErr != nil || id == "" {
 			content = fmt.Sprintf("Symbol not found: %s", symbol)
 			isErr = true
 			break
 		}
-		res, err2 := AnalyzeImpact(db, ids[0], depth)
+		res, err2 := AnalyzeImpact(db, id, depth)
 		err = err2
 		if err == nil {
 			data, _ := json.MarshalIndent(res, "", "  ")
@@ -435,7 +428,7 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		}
 
 	case "astramap_status":
-		status, err2 := QueryStatus(db)
+		status, err2 := QueryStatusWithProjectRoot(db, projectRoot)
 		err = err2
 		if err == nil {
 			statusStr := "ready"
@@ -448,6 +441,8 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 				"totalFiles":         status.FileCount,
 				"indexedNodes":       status.NodeCount,
 				"indexedEdges":       status.EdgeCount,
+				"dirtyCount":         status.DirtyCount,
+				"dirtyFiles":         status.DirtyFiles,
 				"supportedLanguages": []string{"go", "c", "cpp", "python", "typescript", "java"},
 			}
 			data, _ := json.MarshalIndent(res, "", "  ")
@@ -458,20 +453,20 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		from, _ := argsMap["from"].(string)
 		to, _ := argsMap["to"].(string)
 
-		fromIDs, resolveErr := ResolveSymbolToIDs(db, from)
-		if resolveErr != nil || len(fromIDs) == 0 {
+		fromID, resolveErr := resolvePrimarySymbolID(db, from)
+		if resolveErr != nil || fromID == "" {
 			content = fmt.Sprintf("From symbol not found: %s", from)
 			isErr = true
 			break
 		}
-		toIDs, resolveErr := ResolveSymbolToIDs(db, to)
-		if resolveErr != nil || len(toIDs) == 0 {
+		toID, resolveErr := resolvePrimarySymbolID(db, to)
+		if resolveErr != nil || toID == "" {
 			content = fmt.Sprintf("To symbol not found: %s", to)
 			isErr = true
 			break
 		}
 
-		paths, err2 := TracePath(db, fromIDs[0], toIDs[0])
+		paths, err2 := TracePath(db, fromID, toID)
 		err = err2
 		if err == nil {
 			var sb strings.Builder
@@ -493,11 +488,19 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 	case "astramap_files":
 		pathFilter, _ := argsMap["path"].(string)
 		pattern, _ := argsMap["pattern"].(string)
-		files, err2 := QueryFiles(db, pathFilter, pattern)
+		limitVal, _ := argsMap["limit"].(float64)
+		offsetVal, _ := argsMap["offset"].(float64)
+		limit := int(limitVal)
+		offset := int(offsetVal)
+		files, err2 := QueryFilesPaged(db, pathFilter, pattern, limit, offset)
 		err = err2
 		if err == nil {
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("### ── AstraMap 已索引源文件树 (共 %d 个文件) ──\n\n", len(files)))
+			sb.WriteString(fmt.Sprintf("### ── AstraMap 已索引源文件树 (返回 %d 个文件", len(files)))
+			if offset > 0 {
+				sb.WriteString(fmt.Sprintf(", offset %d", offset))
+			}
+			sb.WriteString(") ──\n\n")
 			for _, f := range files {
 				sb.WriteString(fmt.Sprintf("- `%s` (语言: %s, 节点数: %d, 大小: %d 字节)\n", f.Path, f.Language, f.NodeCount, f.Size))
 			}
