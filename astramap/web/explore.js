@@ -704,33 +704,43 @@
 
                     // 同步到 explore view 本地的 rawData 以便 _drawTrace 和子视图绘制
                     if (this.rawData) {
+                        const rawNodeIds = new Set(this.rawData.nodes.map(x => x.id));
                         (subgraph.nodes || []).forEach(n => {
-                            if (!this.rawData.nodes.some(x => x.id === n.id)) {
+                            if (!rawNodeIds.has(n.id)) {
                                 this.rawData.nodes.push(n);
+                                rawNodeIds.add(n.id);
                             }
                         });
+                        const rawLinkKeys = new Set(this.rawData.links.map(x => `${x.from}|${x.to}`));
                         (subgraph.edges || []).forEach(e => {
-                            if (!this.rawData.links.some(x => x.from === e.from && x.to === e.to)) {
+                            const key = `${e.from}|${e.to}`;
+                            if (!rawLinkKeys.has(key)) {
                                 this.rawData.links.push(e);
+                                rawLinkKeys.add(key);
                             }
                         });
                     }
 
-                    // 填充模块内部边
-                    (subgraph.edges || []).forEach(e => {
-                        const srcNode = subgraph.nodes.find(n => n.id === e.from);
-                        const tgtNode = subgraph.nodes.find(n => n.id === e.to);
-                        if (!srcNode || !tgtNode) return;
-                        const srcFile = srcNode.file || '(unknown file)';
-                        const tgtFile = tgtNode.file || '(unknown file)';
+                    if (subgraph.nodes && subgraph.edges) {
+                        const subNodeMap = new Map(subgraph.nodes.map(n => [n.id, n]));
+                        const existingFileEdges = new Set(this.fileEdges.map(x => `${x.source}|${x.target}`));
                         
-                        if (srcFile !== tgtFile) {
-                            // 检查 this.fileEdges 是否已有这条边
-                            if (!this.fileEdges.some(x => x.source === 'file:' + srcFile && x.target === 'file:' + tgtFile)) {
-                                this.fileEdges.push({ source: 'file:' + srcFile, target: 'file:' + tgtFile, count: 1 });
+                        subgraph.edges.forEach(e => {
+                            const srcNode = subNodeMap.get(e.from);
+                            const tgtNode = subNodeMap.get(e.to);
+                            if (!srcNode || !tgtNode) return;
+                            const srcFile = srcNode.file || '(unknown file)';
+                            const tgtFile = tgtNode.file || '(unknown file)';
+                            
+                            if (srcFile !== tgtFile) {
+                                const fileEdgeKey = `file:${srcFile}|file:${tgtFile}`;
+                                if (!existingFileEdges.has(fileEdgeKey)) {
+                                    this.fileEdges.push({ source: 'file:' + srcFile, target: 'file:' + tgtFile, count: 1 });
+                                    existingFileEdges.add(fileEdgeKey);
+                                }
                             }
-                        }
-                    });
+                        });
+                    }
                     
                     // 计算出入度
                     this.fileEdges.forEach(e => {
@@ -2455,12 +2465,21 @@
             const resizer = this.container.querySelector('#explore-doc-resizer');
             if (resizer) {
                 let startX = 0, startWidth = 0;
+                let _resizerRAF = null;
                 const onMouseMove = (e) => {
-                    const dx = e.clientX - startX;
-                    const newW = Math.max(300, Math.min(window.innerWidth - 250, startWidth - dx));
-                    this.docDrawer.style.width = newW + 'px';
+                    if (_resizerRAF) return;
+                    _resizerRAF = requestAnimationFrame(() => {
+                        _resizerRAF = null;
+                        const dx = e.clientX - startX;
+                        const newW = Math.max(300, Math.min(window.innerWidth - 250, startWidth - dx));
+                        this.docDrawer.style.width = newW + 'px';
+                    });
                 };
                 const onMouseUp = () => {
+                    if (_resizerRAF) {
+                        cancelAnimationFrame(_resizerRAF);
+                        _resizerRAF = null;
+                    }
                     resizer.classList.remove('dragging');
                     document.body.classList.remove('resizing');
                     document.removeEventListener('mousemove', onMouseMove);
