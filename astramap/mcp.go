@@ -75,10 +75,6 @@ You are Antigravity/Claude Code programming agent, analyzing the current project
 2. Handling Overloads:
    - If a symbol has multiple definitions (e.g. overloads, same method name in different classes), call 'astramap_node'.
    - It returns all candidates in one turn to avoid roundtrips.
-
-3. Observe Quality Redlines:
-   - Before you refactor or modify core methods, call 'astramap_verdict'.
-   - If there is an active REJECT verdict, review the Suggestion to fix it directly.
 `
 
 // RunMcpServer 启动 stdio MCP 协议循环
@@ -144,8 +140,10 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"query": map[string]string{"type": "string", "description": "模糊检索符号关键词"},
-						"kind":  map[string]string{"type": "string", "description": "符号类型 (function, struct, class, interface 等)"},
+						"query":  map[string]string{"type": "string", "description": "模糊检索符号关键词"},
+						"kind":   map[string]string{"type": "string", "description": "符号类型 (function, struct, class, interface 等)"},
+						"limit":  map[string]string{"type": "integer", "description": "返回数量限制，默认 20"},
+						"offset": map[string]string{"type": "integer", "description": "分页偏移量，默认 0"},
 					},
 					Required: []string{"query"},
 				},
@@ -217,17 +215,6 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 				},
 			},
 			{
-				Name:        "astramap_verdict",
-				Description: "获取目标符号在 SourceAstra 中的质量审计裁决结论与人工修复建议，指导进行定向重构。触发场景：用户问「X 有没有代码质量问题」时使用。",
-				InputSchema: InputSchema{
-					Type: "object",
-					Properties: map[string]interface{}{
-						"symbolId": map[string]string{"type": "string", "description": "符号的USN编码"},
-					},
-					Required: []string{"symbolId"},
-				},
-			},
-			{
 				Name:        "astramap_trace",
 				Description: "追踪从起始符号 A 到目标符号 B 的调用路径。触发场景：用户问「从 A 到 B 的调用链是什么」「执行流如何到达 Y」时使用。",
 				InputSchema: InputSchema{
@@ -288,14 +275,22 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 	case "astramap_search":
 		query, _ := argsMap["query"].(string)
 		kind, _ := argsMap["kind"].(string)
+		limitVal, _ := argsMap["limit"].(float64)
+		offsetVal, _ := argsMap["offset"].(float64)
+		limit := int(limitVal)
+		offset := int(offsetVal)
 
-		nodes, err2 := QuerySearch(db, query, kind, 20)
+		nodes, err2 := QuerySearchPaged(db, query, kind, limit, offset)
 		err = err2
 		if err == nil {
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("Found %d matches for \"%s\":\n\n", len(nodes), query))
+			sb.WriteString(fmt.Sprintf("Found %d matches for \"%s\"", len(nodes), query))
+			if offset > 0 {
+				sb.WriteString(fmt.Sprintf(" (offset %d)", offset))
+			}
+			sb.WriteString(":\n\n")
 			for i, n := range nodes {
-				sb.WriteString(fmt.Sprintf("%d. %s (%s) — %s:%d\n", i+1, n.QualifiedName, n.Kind, n.FilePath, n.StartLine))
+				sb.WriteString(fmt.Sprintf("%d. %s (%s) — %s:%d\n", offset+i+1, n.QualifiedName, n.Kind, n.FilePath, n.StartLine))
 				if n.Signature != "" {
 					sb.WriteString(fmt.Sprintf("   sig: %s\n", n.Signature))
 				}
@@ -382,7 +377,10 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("### Callers of %s:\n\n", symbol))
 			for _, c := range allCallers {
-				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n", c.Source, c.Target, c.Line))
+				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
+					CanonicalSymbolIDForNodeID(db, c.Source),
+					CanonicalSymbolIDForNodeID(db, c.Target),
+					c.Line))
 			}
 			content = sb.String()
 		}
@@ -407,7 +405,10 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("### Callees of %s:\n\n", symbol))
 			for _, c := range allCallees {
-				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n", c.Source, c.Target, c.Line))
+				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
+					CanonicalSymbolIDForNodeID(db, c.Source),
+					CanonicalSymbolIDForNodeID(db, c.Target),
+					c.Line))
 			}
 			content = sb.String()
 		}
@@ -453,29 +454,6 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 			content = string(data)
 		}
 
-	case "astramap_verdict":
-		symbolId, _ := argsMap["symbolId"].(string)
-		verdicts, err2 := QueryVerdicts(db, symbolId)
-		err = err2
-		if err == nil {
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("### ── AstraMap 代码治理裁决 (%s) ──\n\n", symbolId))
-			if len(verdicts) == 0 {
-				sb.WriteString("✅ 暂无未修复的缺陷裁决。该符号状态良好！\n")
-			} else {
-				for _, v := range verdicts {
-					badge := "⚠️ WARNING"
-					if v.HasActiveDefect == 1 {
-						badge = "❌ REJECTED"
-					}
-					sb.WriteString(fmt.Sprintf("#### [%s] Rule: %s (by %s)\n", badge, v.RuleID, v.Operator))
-					sb.WriteString(fmt.Sprintf("*缺陷描述*: %s\n", v.Description))
-					sb.WriteString(fmt.Sprintf("*修复建议*: **%s**\n\n", v.Suggestion))
-				}
-			}
-			content = sb.String()
-		}
-
 	case "astramap_trace":
 		from, _ := argsMap["from"].(string)
 		to, _ := argsMap["to"].(string)
@@ -502,7 +480,11 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 				sb.WriteString("No call path found.\n")
 			} else {
 				for i, path := range paths {
-					sb.WriteString(fmt.Sprintf("Path %d:\n  %s\n", i+1, strings.Join(path, " ──► ")))
+					displayPath := make([]string, 0, len(path))
+					for _, nodeID := range path {
+						displayPath = append(displayPath, CanonicalSymbolIDForNodeID(db, nodeID))
+					}
+					sb.WriteString(fmt.Sprintf("Path %d:\n  %s\n", i+1, strings.Join(displayPath, " ──► ")))
 				}
 			}
 			content = sb.String()
