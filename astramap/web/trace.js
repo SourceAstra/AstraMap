@@ -446,9 +446,15 @@
             const url = `/api/trace?node_id=${encodeURIComponent(nodeId)}&depth=${depth}${jobId ? '&job=' + jobId : ''}`;
 
             try {
-                const [modulesRes, traceRes] = await Promise.all([
+                // 并行发起 trace、modules 和 complexity 三个请求
+                const [modulesRes, traceRes, compRes] = await Promise.all([
                     fetch('/api/modules'),
-                    fetch(url)
+                    fetch(url),
+                    fetch('/api/complexity/calculate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    }).catch(() => null)
                 ]);
                 const modulesData = await modulesRes.json();
                 const data = await traceRes.json();
@@ -465,33 +471,22 @@
                 this.applyFilters();
                 this.buildGraph();
 
-                // 提取唯一文件，并发加速拉取文件复杂度
-                const files = new Set();
-                rawNodes.forEach(n => {
-                    if (n.file) files.add(n.file);
-                });
-                [...files].forEach(async (f) => {
+                // 处理预加载的 complexity 数据
+                if (compRes && compRes.ok) {
                     try {
-                        const compRes = await fetch('/api/complexity/calculate', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ file_path: f })
-                        });
-                        if (compRes.ok) {
-                            const results = await compRes.json();
-                            if (Array.isArray(results)) {
-                                results.forEach(metrics => {
-                                    if (metrics.symbol_id) {
-                                        _cachedComplexity[metrics.symbol_id] = metrics;
-                                    }
-                                });
-                                this.renderGraph();
-                            }
+                        const results = await compRes.json();
+                        if (Array.isArray(results)) {
+                            results.forEach(metrics => {
+                                if (metrics.symbol_id) {
+                                    _cachedComplexity[metrics.symbol_id] = metrics;
+                                }
+                            });
+                            this.renderGraph();
                         }
                     } catch (err) {
-                        console.warn('[Understand v2] Failed to pre-fetch complexity for', f, err);
+                        console.warn('[Understand v2] Failed to parse complexity data', err);
                     }
-                });
+                }
             } catch (e) {
                 console.error('[Understand v2] Trace error:', e);
             }
