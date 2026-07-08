@@ -2,14 +2,31 @@ package astramap
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/jmoiron/sqlx"
 )
+
+var (
+	overviewCache     *ProjectedGraphResult
+	overviewCacheLock sync.RWMutex
+)
+
+// InvalidateOverviewCache clears the cached ProjectedGraphResult.
+// This should be called whenever the graph data (nodes/edges) is mutated.
+func InvalidateOverviewCache() {
+	overviewCacheLock.Lock()
+	defer overviewCacheLock.Unlock()
+	overviewCache = nil
+	InvalidateQueryHelperCache()
+}
 
 var stopWords = map[string]bool{
 	"a": true, "about": true, "above": true, "after": true, "again": true, "against": true,
@@ -51,9 +68,11 @@ func cleanQueryTerms(query string) []string {
 
 // IndexStatus holds index health metrics.
 type IndexStatus struct {
-	NodeCount int `json:"node_count" db:"node_count"`
-	EdgeCount int `json:"edge_count" db:"edge_count"`
-	FileCount int `json:"file_count" db:"file_count"`
+	NodeCount  int      `json:"node_count" db:"node_count"`
+	EdgeCount  int      `json:"edge_count" db:"edge_count"`
+	FileCount  int      `json:"file_count" db:"file_count"`
+	DirtyCount int      `json:"dirty_count"`
+	DirtyFiles []string `json:"dirty_files"`
 }
 
 // ExploreFileResult groups symbols and source code for a single file.
@@ -157,6 +176,13 @@ func QueryGraphData(db *sqlx.DB) (*GraphDataResult, error) {
 }
 
 func QueryProjectedGraph(db *sqlx.DB) (*ProjectedGraphResult, error) {
+	overviewCacheLock.RLock()
+	cache := overviewCache
+	overviewCacheLock.RUnlock()
+	if cache != nil {
+		return cache, nil
+	}
+
 	var nodeRows []struct {
 		ID       string `db:"id"`
 		Name     string `db:"name"`
@@ -228,15 +254,18 @@ func QueryProjectedGraph(db *sqlx.DB) (*ProjectedGraphResult, error) {
 		return links[i].Target < links[j].Target
 	})
 
-	return &ProjectedGraphResult{Nodes: nodes, Links: links}, nil
+	result := &ProjectedGraphResult{Nodes: nodes, Links: links}
+	overviewCacheLock.Lock()
+	overviewCache = result
+	overviewCacheLock.Unlock()
+
+	return result, nil
 }
 
 func QueryFunctionList(db *sqlx.DB) ([]ModuleGraphNode, error) {
 	var nodes []*AstraMapNode
 	if err := db.Select(&nodes, `
-		SELECT id, kind, name, qualified_name, file_path, language, start_line, end_line,
-		       start_column, end_column, signature, docstring, visibility, return_type,
-		       is_exported, updated_at
+		SELECT id, kind, name, file_path, start_line
 		FROM astramap_nodes
 		WHERE kind IN ('function', 'method')
 		`+nonSyntheticAnonymousNodeSQL+`
@@ -474,6 +503,9 @@ func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*As
 	if offset < 0 {
 		offset = 0
 	}
+	if err := validateSearchKind(kind); err != nil {
+		return nil, err
+	}
 	var nodes []*AstraMapNode
 	q := "SELECT * FROM astramap_nodes WHERE (name LIKE ? OR qualified_name LIKE ?) " + nonSyntheticAnonymousNodeSQL
 	params := []interface{}{"%" + query + "%", "%" + query + "%"}
@@ -537,6 +569,57 @@ func CanonicalSymbolIDForNodeID(db *sqlx.DB, id string) string {
 		return "external:" + externalSymbolName(id)
 	}
 	return id
+}
+
+// BatchCanonicalSymbolIDs batches resolving of multiple node IDs to their canonical symbol IDs.
+func BatchCanonicalSymbolIDs(db *sqlx.DB, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+	uniqMap := make(map[string]struct{})
+	for _, id := range ids {
+		if id != "" {
+			uniqMap[id] = struct{}{}
+		}
+	}
+	if len(uniqMap) == 0 {
+		return map[string]string{}, nil
+	}
+	deduped := make([]string, 0, len(uniqMap))
+	for id := range uniqMap {
+		deduped = append(deduped, id)
+	}
+	result := make(map[string]string, len(ids))
+	const batchSize = 500
+	for i := 0; i < len(deduped); i += batchSize {
+		end := i + batchSize
+		if end > len(deduped) {
+			end = len(deduped)
+		}
+		batch := deduped[i:end]
+		query, args, err := sqlx.In("SELECT * FROM astramap_nodes WHERE id IN (?)", batch)
+		if err != nil {
+			return nil, err
+		}
+		query = db.Rebind(query)
+		var nodes []AstraMapNode
+		if err := db.Select(&nodes, query, args...); err != nil {
+			return nil, err
+		}
+		for _, node := range nodes {
+			result[node.ID] = CanonicalSymbolID(&node)
+		}
+	}
+	for _, id := range ids {
+		if _, ok := result[id]; !ok {
+			if strings.HasPrefix(id, "external:") {
+				result[id] = "external:" + externalSymbolName(id)
+			} else {
+				result[id] = id
+			}
+		}
+	}
+	return result, nil
 }
 
 // ResolveSymbolToIDs resolves a bare symbol name or partial ID to a list of full node IDs.
@@ -763,26 +846,50 @@ func QueryExplore(db *sqlx.DB, query, projectRoot string, maxFiles int) (*Explor
 // QueryNodeBySymbol finds nodes by symbol name or file path.
 func QueryNodeBySymbol(db *sqlx.DB, symbol, file string) ([]*AstraMapNode, error) {
 	var nodes []*AstraMapNode
+	file = normalizeNodeFileFilter(file)
 	if symbol != "" {
 		q := "SELECT * FROM astramap_nodes WHERE (qualified_name LIKE ? OR name = ?) " + nonSyntheticAnonymousNodeSQL
 		params := []interface{}{"%" + symbol + "%", symbol}
-		if strings.TrimSpace(file) != "" {
-			q += " AND file_path = ?"
-			params = append(params, file)
+		if file != "" {
+			q += " AND " + nodeFileFilterSQL()
+			params = append(params, nodeFileFilterParams(file)...)
 		}
 		q += " ORDER BY file_path, start_line, name"
 		err := db.Select(&nodes, q, params...)
 		return nodes, err
 	}
 	if file != "" {
-		err := db.Select(&nodes, "SELECT * FROM astramap_nodes WHERE file_path = ? "+nonSyntheticAnonymousNodeSQL+" LIMIT 10", file)
+		q := "SELECT * FROM astramap_nodes WHERE " + nodeFileFilterSQL() + nonSyntheticAnonymousNodeSQL + " LIMIT 10"
+		err := db.Select(&nodes, q, nodeFileFilterParams(file)...)
 		return nodes, err
 	}
 	return nodes, nil
 }
 
+func normalizeNodeFileFilter(file string) string {
+	file = filepath.ToSlash(strings.TrimSpace(file))
+	file = strings.TrimPrefix(file, "./")
+	file = strings.TrimLeft(file, "/")
+	if file == "." {
+		return ""
+	}
+	return file
+}
+
+func nodeFileFilterSQL() string {
+	return "(file_path = ? OR file_path LIKE ?)"
+}
+
+func nodeFileFilterParams(file string) []interface{} {
+	return []interface{}{file, "%/" + file}
+}
+
 // QueryStatus returns index health metrics.
 func QueryStatus(db *sqlx.DB) (*IndexStatus, error) {
+	return QueryStatusWithProjectRoot(db, "")
+}
+
+func QueryStatusWithProjectRoot(db *sqlx.DB, projectRoot string) (*IndexStatus, error) {
 	s := &IndexStatus{}
 	if err := db.Get(&s.NodeCount, "SELECT COUNT(*) FROM astramap_nodes"); err != nil {
 		return nil, err
@@ -793,11 +900,79 @@ func QueryStatus(db *sqlx.DB) (*IndexStatus, error) {
 	if err := db.Get(&s.FileCount, "SELECT COUNT(*) FROM astramap_files"); err != nil {
 		return nil, err
 	}
+	if projectRoot != "" {
+		dirty, dirtyCount, err := QueryDirtyFilesWithCount(db, projectRoot, 100)
+		if err != nil {
+			return nil, err
+		}
+		s.DirtyFiles = dirty
+		s.DirtyCount = dirtyCount
+	}
 	return s, nil
+}
+
+func QueryDirtyFiles(db *sqlx.DB, projectRoot string, limit int) ([]string, error) {
+	dirty, _, err := QueryDirtyFilesWithCount(db, projectRoot, limit)
+	return dirty, err
+}
+
+func QueryDirtyFilesWithCount(db *sqlx.DB, projectRoot string, limit int) ([]string, int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var files []*AstraMapFile
+	if err := db.Select(&files, "SELECT * FROM astramap_files ORDER BY path"); err != nil {
+		return nil, 0, err
+	}
+	dirty := make([]string, 0)
+	dirtyCount := 0
+	for _, f := range files {
+		if f == nil || f.Path == "" {
+			continue
+		}
+		absPath := filepath.Join(projectRoot, f.Path)
+		stat, err := os.Stat(absPath)
+		if err != nil {
+			dirtyCount++
+			if len(dirty) < limit {
+				dirty = append(dirty, f.Path)
+			}
+			continue
+		}
+		if stat.Size() != f.Size || stat.ModTime().Unix() != f.ModifiedAt {
+			hash, err := fileContentHash(absPath)
+			if err != nil || hash != f.ContentHash {
+				dirtyCount++
+				if len(dirty) < limit {
+					dirty = append(dirty, f.Path)
+				}
+			}
+		}
+	}
+	return dirty, dirtyCount, nil
+}
+
+func fileContentHash(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // QueryFiles lists indexed files, optionally filtered by path prefix and glob pattern.
 func QueryFiles(db *sqlx.DB, pathPrefix, pattern string) ([]*AstraMapFile, error) {
+	return QueryFilesPaged(db, pathPrefix, pattern, 100, 0)
+}
+
+func QueryFilesPaged(db *sqlx.DB, pathPrefix, pattern string, limit, offset int) ([]*AstraMapFile, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	q := "SELECT * FROM astramap_files "
 	var conditions []string
 	var params []interface{}
@@ -814,7 +989,8 @@ func QueryFiles(db *sqlx.DB, pathPrefix, pattern string) ([]*AstraMapFile, error
 	if len(conditions) > 0 {
 		q += "WHERE " + strings.Join(conditions, " AND ")
 	}
-	q += " ORDER BY path ASC LIMIT 100"
+	q += " ORDER BY path ASC LIMIT ? OFFSET ?"
+	params = append(params, limit, offset)
 
 	var files []*AstraMapFile
 	err := db.Select(&files, q, params...)
@@ -1035,6 +1211,7 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 
 	filteredEdges := make([]*AstraMapEdge, 0, len(edgeMap))
 	for _, edge := range edgeMap {
+		annotateConditionalMetadata(db, edge)
 		filteredEdges = append(filteredEdges, edge)
 	}
 	sort.Slice(filteredEdges, func(i, j int) bool {
