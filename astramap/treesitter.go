@@ -209,7 +209,21 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 			}
 
 		case "c", "cpp":
-			if nodeType == "class_specifier" || nodeType == "struct_specifier" {
+			if nodeType == "type_definition" {
+				if declNode := n.ChildByFieldName("declarator"); declNode != nil {
+					nodeName = extractDeclaratorIdentifier(declNode, codeBytes)
+				}
+				typeNode := n.ChildByFieldName("type")
+				switch {
+				case containsNodeKind(typeNode, "class_specifier"):
+					nodeKind = "class"
+				case containsNodeKind(typeNode, "struct_specifier"):
+					nodeKind = "struct"
+				default:
+					nodeKind = "type"
+				}
+				isDef = nodeName != ""
+			} else if nodeType == "class_specifier" || nodeType == "struct_specifier" {
 				if nodeType == "class_specifier" {
 					nodeKind = "class"
 				} else {
@@ -373,6 +387,15 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 								Col:        int(n.StartPosition().Column) + 1,
 							})
 						}
+					} else {
+						edges = append(edges, &AstraMapEdge{
+							Source:     callerNode.ID,
+							Target:     externalCallTargetID(lang, calleeName),
+							Kind:       "calls",
+							Provenance: "tree-sitter",
+							Line:       lineNum,
+							Col:        int(n.StartPosition().Column) + 1,
+						})
 					}
 				}
 			}
@@ -479,6 +502,54 @@ func extractCalleeShortName(n *sitter.Node, code []byte) string {
 		}
 	}
 	return nodeText(n, code)
+}
+
+func extractDeclaratorIdentifier(n *sitter.Node, code []byte) string {
+	if n == nil {
+		return ""
+	}
+	if n.Kind() == "identifier" || n.Kind() == "type_identifier" {
+		return nodeText(n, code)
+	}
+	if nameNode := n.ChildByFieldName("name"); nameNode != nil {
+		if name := extractDeclaratorIdentifier(nameNode, code); name != "" {
+			return name
+		}
+	}
+	if declNode := n.ChildByFieldName("declarator"); declNode != nil {
+		if name := extractDeclaratorIdentifier(declNode, code); name != "" {
+			return name
+		}
+	}
+	for i := n.ChildCount(); i > 0; i-- {
+		if name := extractDeclaratorIdentifier(n.Child(i-1), code); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func externalCallTargetID(lang, name string) string {
+	prefix := getLangPrefix(lang)
+	if prefix == "cpp" {
+		prefix = "cxx"
+	}
+	return fmt.Sprintf("external:%s . . $ %s.", prefix, name)
+}
+
+func containsNodeKind(n *sitter.Node, kind string) bool {
+	if n == nil {
+		return false
+	}
+	if n.Kind() == kind {
+		return true
+	}
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if containsNodeKind(n.Child(i), kind) {
+			return true
+		}
+	}
+	return false
 }
 
 func getLangPrefix(lang string) string {
@@ -593,6 +664,17 @@ type funcNode struct {
 // function call references against the global symbol registry in DB.
 // This fills in cross-file 'calls' edges that single-file parsing misses.
 func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
+	return resolveCrossFileCalls(db, projectRoot, nil)
+}
+
+func ResolveCrossFileCallsForFiles(db *sqlx.DB, projectRoot string, files []string) error {
+	if len(files) == 0 {
+		return nil
+	}
+	return resolveCrossFileCalls(db, projectRoot, files)
+}
+
+func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []string) error {
 	filter, err := LoadIndexFilter(projectRoot)
 	if err != nil {
 		return fmt.Errorf("读取 AstraMap 配置失败: %w", err)
@@ -618,9 +700,30 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 	}
 
 	var files []string
-	err = db.Select(&files, "SELECT path FROM astramap_files")
-	if err != nil {
-		return fmt.Errorf("query files failed: %w", err)
+	if len(changedFiles) == 0 {
+		err = db.Select(&files, "SELECT path FROM astramap_files")
+		if err != nil {
+			return fmt.Errorf("query files failed: %w", err)
+		}
+	} else {
+		seen := make(map[string]bool, len(changedFiles))
+		for _, filePath := range changedFiles {
+			if filePath == "" {
+				continue
+			}
+			relPath := filePath
+			if filepath.IsAbs(relPath) {
+				if rel, relErr := filepath.Rel(projectRoot, relPath); relErr == nil {
+					relPath = rel
+				}
+			}
+			relPath = filepath.ToSlash(relPath)
+			if seen[relPath] {
+				continue
+			}
+			seen[relPath] = true
+			files = append(files, relPath)
+		}
 	}
 
 	tx, err := db.Beginx()
@@ -629,9 +732,11 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'heuristic' AND kind = 'calls'")
-	if err != nil {
-		return fmt.Errorf("failed to clear old heuristic calls: %w", err)
+	if len(changedFiles) == 0 {
+		_, err = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'heuristic' AND kind = 'calls'")
+		if err != nil {
+			return fmt.Errorf("failed to clear old heuristic calls: %w", err)
+		}
 	}
 
 	insertStmt, err := tx.Preparex(`
@@ -647,6 +752,21 @@ func ResolveCrossFileCalls(db *sqlx.DB, projectRoot string) error {
 		if !filter.Allows(fp, StageTreeSitter) {
 			continue
 		}
+		if len(changedFiles) > 0 {
+			_, err = tx.Exec(`
+				DELETE FROM astramap_edges
+				WHERE provenance = 'heuristic'
+				  AND kind = 'calls'
+				  AND source IN (
+				    SELECT id FROM astramap_nodes
+				    WHERE file_path = ? AND kind IN ('function', 'method')
+				  )
+			`, fp)
+			if err != nil {
+				return fmt.Errorf("failed to clear heuristic calls for %s: %w", fp, err)
+			}
+		}
+
 		absPath := filepath.Join(projectRoot, fp)
 		file, err := os.Open(absPath)
 		if err != nil {
