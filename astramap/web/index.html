@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AstraMap - 源码星空独立控制台</title>
-    <script src="d3.min.js"></script>
+    <script src="d3.min.js" defer></script>
     <link rel="stylesheet" href="index.css">
     <link rel="stylesheet" href="explore.css">
     <link rel="stylesheet" href="trace.css">
@@ -15,7 +15,7 @@
             --bg-gradient: linear-gradient(135deg, var(--bg-color-1) 0%, var(--bg-color-2) 100%);
             --panel-bg: rgba(30, 41, 59, 0.7);
             --panel-border: rgba(255, 255, 255, 0.08);
-            --panel-blur: blur(10px);
+            --panel-blur: blur(4px);
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
             --text-dim: #64748b;
@@ -58,7 +58,7 @@
             border-radius: 6px;
             font-size: 13px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: color 0.2s, background-color 0.2s;
         }
         .tab-btn:hover {
             color: var(--text-main);
@@ -134,7 +134,7 @@
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(4px);
+            /* Removed backdrop-filter to reduce GPU compositing overhead */
             z-index: 5000;
             display: none;
             justify-content: center;
@@ -426,7 +426,8 @@
             }
         };
 
-        function openTraceForSymbol(symbolId, symbolName) {
+        async function openTraceForSymbol(symbolId, symbolName) {
+            await loadTraceModule();
             const sym = (window.G_DATA && window.G_DATA.symbols && window.G_DATA.symbols[symbolId])
                 || { id: symbolId, name: symbolName || symbolId, type: 'function' };
             window.G_SELECTED = sym;
@@ -560,7 +561,20 @@
     </script>
 
     <script src="explore.js"></script>
-    <script src="trace.js"></script>
+    <script>
+        let _traceLoaded = false;
+        async function loadTraceModule() {
+            if (_traceLoaded) return;
+            _traceLoaded = true;
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'trace.js';
+                s.onload = resolve;
+                s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        }
+    </script>
     <script>
         // Tab 切换逻辑
         let activeTab = 'explore';
@@ -587,7 +601,7 @@
             }
         });
 
-        btnTrace.addEventListener('click', () => {
+        btnTrace.addEventListener('click', async () => {
             activeTab = 'trace';
             window.G_CURRENT_VIEW = 'trace';
             btnTrace.classList.add('active');
@@ -596,6 +610,7 @@
             viewExplore.classList.remove('active');
             document.body.className = 'view-trace';
             
+            await loadTraceModule();
             // 初始化 Trace 视图
             if (window.SourceAstra && typeof window.SourceAstra.initUnderstand === 'function') {
                 window.SourceAstra.initUnderstand();
@@ -669,19 +684,16 @@
         // 挂载页面组件实例并拉取初始化数据
         window.addEventListener('DOMContentLoaded', async () => {
             try {
-                const [statusRes, overviewRes, functionsRes] = await Promise.all([
+                const [statusRes, overviewRes] = await Promise.all([
                     fetch('/api/astramap/status'),
-                    fetch('/api/astramap/overview'),
-                    fetch('/api/astramap/functions')
+                    fetch('/api/astramap/overview')
                 ]);
                 await statusRes.json();
                 const overview = await overviewRes.json();
-                const functions = await functionsRes.json();
                 if (overview.error) throw new Error(overview.error);
-                if (functions.error) throw new Error(functions.error);
                 window.G_PROJECTED_GRAPH = overview;
                 window.G_MODULES = (overview.nodes || []).map(n => ({ id: n.id, name: n.name || n.id }));
-                astraMapInstallSymbols(functions || []);
+                astraMapInstallSymbols([]);
             } catch(e) {
                 console.warn("加载 AstraMap 轻量初始化数据失败，回退全量图: ", e);
                 try {
