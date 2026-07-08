@@ -46,23 +46,10 @@ CREATE TABLE IF NOT EXISTS astramap_files (
     language     TEXT NOT NULL,
     size         INTEGER NOT NULL,
     modified_at  INTEGER NOT NULL,
+    modified_at_ns INTEGER DEFAULT 0,
     indexed_at   INTEGER NOT NULL,
     node_count   INTEGER DEFAULT 0,
     errors       TEXT                   -- JSON array
-);
-
--- 治理缺陷与裁决缓存表
-CREATE TABLE IF NOT EXISTS astramap_verdicts (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol_id      TEXT NOT NULL,
-    has_active_defect INTEGER DEFAULT 0,
-    stage          TEXT,
-    decision       TEXT,
-    rule_id        TEXT,
-    description    TEXT,
-    suggestion     TEXT,
-    operator       TEXT,
-    updated_at     INTEGER NOT NULL
 );
 
 -- FTS5 全文搜索索引
@@ -83,7 +70,6 @@ CREATE INDEX IF NOT EXISTS idx_am_edges_target_kind ON astramap_edges(target, ki
 CREATE INDEX IF NOT EXISTS idx_am_edges_kind ON astramap_edges(kind);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_am_edges_unique ON astramap_edges(source, target, kind, line);
 CREATE INDEX IF NOT EXISTS idx_am_files_language ON astramap_files(language);
-CREATE INDEX IF NOT EXISTS idx_am_verdicts_symbol ON astramap_verdicts(symbol_id);
 
 -- FTS 同步触发器
 CREATE TRIGGER IF NOT EXISTS am_fts_ai AFTER INSERT ON astramap_nodes BEGIN
@@ -135,6 +121,7 @@ func InitAstraMapSchema(db *sqlx.DB) error {
 
 	// 迁移：将已有 edges 中的 NULL metadata 规约为空字符串
 	_, _ = db.Exec("UPDATE astramap_edges SET metadata = '' WHERE metadata IS NULL")
+	_, _ = db.Exec("ALTER TABLE astramap_files ADD COLUMN modified_at_ns INTEGER DEFAULT 0")
 
 	return nil
 }
