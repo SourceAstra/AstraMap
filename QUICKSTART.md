@@ -1,15 +1,16 @@
 # AstraMap 2 分钟部署指南
 
-> 从零到 AI 工具集成代码地图，只需四步。
+> 从零到 AI 工具集成代码地图，只需五步。
 
 ---
 
-## 第一步：加入 PATH
+## 第一步：安装并加入 PATH
 
 ```bash
 mkdir -p ~/bin
 cp ./amap ~/bin
-echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+chmod 777 ~/bin/amap
+grep -qxF 'export PATH="$HOME/bin:$PATH"' ~/.bashrc || echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -20,14 +21,62 @@ which amap
 # 应输出: /home/you/bin/amap
 ```
 
-## 第二步：进入目标项目，一键注册
+## 第二步：配置 ~/.bashrc 达到无感降本工作流
+
+把下面这段追加到 `~/.bashrc`。它的目标是：平时先刷新一次代码地图，然后后台静默保活一个低频 watch；遇到问题时，再单独开前台 watch 看变化。
+
+```bash
+# AstraMap local binary
+export PATH="$HOME/bin:$PATH"
+
+# AI coding runtime defaults
+export CLAUDE_CODE_EFFORT_LEVEL=high
+export DISABLE_TELEMETRY=1
+
+# 平时：静默版。先更新一次代码地图，再后台静默保活，最后进入 Claude
+alias cc='amap index && (amap watch 30 >/dev/null 2>&1 &); claude'
+```
+
+排障时，改用下面这组双窗口命令：
+
+```bash
+# 排障：双窗口。前台手动看增量更新日志，能直接看到哪些文件被刷新
+alias cc='amap index && claude'
+alias amapw='amap watch 30'
+```
+
+立刻生效：
+
+```bash
+source ~/.bashrc
+```
+
+推荐终端分屏：
+
+```bash
+# 窗口 1：持续低频增量刷新代码地图
+amapw
+
+# 窗口 2：先刷新索引，再启动 AI 编码工具
+cc
+```
+
+风险提示：
+
+- 不要长期同时保留多个 `amap watch 30`
+- 如果后台 watch 和前台 watch 同时跑，会重复扫描同一个索引目录，终端日志会重复，数据库写入也会变多
+- `cc` 里的后台 watch 会静默常驻；如果你只想排障查看更新，临时切到双窗口版再开 `amapw`
+
+## 第三步：进入目标项目，一键注册
 
 ```bash
 cd /path/to/your/project
 
-# 一键注册 MCP + 规则文件到 Claude Code / VS Code / Cursor / Codex / Windsurf / Cline / Antigravity
+# 先探测当前机器上可用的 IDE / 客户端，再只注册探测到的项
 amap install
 ```
+
+执行时会先列出可用的客户端，比如 `Claude Code`、`VS Code`、`Cursor`、`Codex`、`Windsurf`、`Antigravity`。没有探测到的目标会跳过，不再无脑写一遍所有配置。
 
 注册成功后输出：
 
@@ -41,13 +90,15 @@ amap install
   ✓ Cline         — 规则已写入 .clinerules/astramap.md
   ✓ Antigravity  — MCP 已注册 (已写入 .agents/mcp_config.json, ~/.gemini/config/mcp_config.json, ~/.gemini/antigravity-cli/mcp_config.json) + 规则已追加写入 AGENTS.md
 
-安装完成！8/8 工具注册成功。
+安装完成！N/M 工具注册成功。
 ```
 
-## 第三步：构建索引
+紧接着还会有一段 `注册核验`，逐项检查实际落盘文件，确认当前注册状态是否真的生效。
+
+## 第四步：构建索引
 
 ```bash
-# 默认模式：自动检测语言，SCIP 优先；无 SCIP 时 Tree-sitter 回退
+# 默认模式：首次初始化 SCIP；之后快速增量更新，复用 config.yaml 里的语言选择
 amap index
 
 # 指定仅导入某语言（跳过交互选择）
@@ -55,7 +106,21 @@ amap index --lang go
 
 # 仅 Tree-sitter 快速扫描（跳过 SCIP 检测）
 amap index --treesitter-only
+
+# 强制刷新 SCIP 层
+amap index --refresh-scip
+
+# 全量刷新一次
+amap index --full
+
+# 启动时索引一次，然后在后台静默30 秒最多增量刷新一次
+amap index --watch 30
+
+# 前台增量刷新一次默认 10 秒；可看到哪些文件被更新，也可写 amap watch 30，即30s
+amap watch
 ```
+
+语言选择会写入 `.astramap/config.yaml` 的 `index.languages`。第二次普通 `amap index` 会复用该配置并静默执行。
 
 索引输出示例（Go 项目）：
 
@@ -75,7 +140,7 @@ SCIP 索引导入完成
 索引构建完成！
 ```
 
-## 第四步：启动可视化控制台
+## 第五步：启动可视化控制台
 
 ```bash
 amap dashboard
@@ -100,14 +165,14 @@ Log: /path/to/project/.astramap/dashboard.log
 ## 工作原理
 
 ```
-源码 → SCIP 高精度索引 + Tree-sitter 实时补丁 → SQLite 知识图谱 → MCP/HTTP API → 本地可视化与工具客户端
+源码 → SCIP 高精度索引 + Tree-sitter 按哈希增量补丁 → SQLite 知识图谱 → MCP/HTTP API → 本地可视化与工具客户端
 ```
 
 ## 核心优势
 
 - **95%+ 语义精度** — SCIP 编译器级索引，区分重载/泛型
 - **60-95% Token 节约** — 单次调用替代多次 grep+Read
-- **毫秒级更新** — 文件变更 50ms 内同步
+- **低频增量更新** — `amap watch [秒数]` 或 `amap index --watch [秒数]` 批量刷新变更文件
 
 ## 工具对比
 
