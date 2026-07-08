@@ -119,7 +119,32 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 			addIndexPattern(filter, current, item)
 		}
 	}
-	return filter, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// 尝试加载项目根目录下的 .gitignore 规则
+	gitIgnorePath := filepath.Join(projectRoot, ".gitignore")
+	if gitIgnoreFile, err := os.Open(gitIgnorePath); err == nil {
+		defer gitIgnoreFile.Close()
+		gitIgnoreScanner := bufio.NewScanner(gitIgnoreFile)
+		for gitIgnoreScanner.Scan() {
+			line := strings.TrimSpace(gitIgnoreScanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			pattern := convertGitIgnoreToGlob(line)
+			if pattern != "" {
+				filter.Exclude = append(filter.Exclude, normalizeFilterPath(pattern))
+			}
+		}
+	}
+
+	return filter, nil
+}
+
+func IndexConfigExample() string {
+	return indexConfigExample
 }
 
 const indexConfigExample = `# AstraMap index filter config.
@@ -138,6 +163,9 @@ const indexConfigExample = `# AstraMap index filter config.
 # - "testdata/**" can be excluded only from Tree-sitter with treeSitterExclude.
 
 index:
+  # languages:
+  #   - go
+  #   - typescript
   # include:
   #   - "**/*.go"
   #   - "**/*.ts"
@@ -158,6 +186,9 @@ func (f *IndexFilter) Allows(relPath string, stage IndexStage) bool {
 		return true
 	}
 
+	if hasHiddenSegment(relPath) {
+		return false
+	}
 	if matchesAnyPattern(relPath, builtInIndexExcludes) {
 		return false
 	}
@@ -181,6 +212,9 @@ func (f *IndexFilter) AllowsDir(relPath string, stage IndexStage) bool {
 	relPath = normalizeFilterPath(relPath)
 	if relPath == "" || relPath == "." {
 		return true
+	}
+	if hasHiddenSegment(relPath) {
+		return false
 	}
 	if matchesAnyPattern(relPath, builtInIndexExcludes) || matchesAnyPattern(relPath+"/", builtInIndexExcludes) {
 		return false
@@ -256,19 +290,6 @@ func BuildIndexFilterMatchReport(projectRoot string, filter *IndexFilter) (*Inde
 var builtInIndexExcludes = []string{
 	".git/**",
 	".astramap/**",
-	".understand-anything/**",
-	".cache/**",
-	".idea/**",
-	".vscode/**",
-	"node_modules/**",
-	"build/**",
-	"dist/**",
-	"vendor/**",
-	"target/**",
-	"out/**",
-	"tmp/**",
-	"temp/**",
-	".trash*/**",
 }
 
 func stripConfigComment(line string) string {
@@ -342,6 +363,12 @@ func parseConfigValue(value string) string {
 func normalizeFilterPath(value string) string {
 	raw := filepath.ToSlash(strings.TrimSpace(value))
 	hasTrailingSlash := strings.HasSuffix(raw, "/")
+	for strings.HasPrefix(raw, "../") {
+		raw = strings.TrimPrefix(raw, "../")
+	}
+	if raw == ".." {
+		raw = ""
+	}
 	raw = strings.TrimPrefix(raw, "./")
 	raw = strings.TrimPrefix(raw, "/")
 	value = path.Clean(raw)
@@ -411,4 +438,39 @@ func matchPathSegments(patterns, segments []string) bool {
 		return false
 	}
 	return matchPathSegments(patterns[1:], segments[1:])
+}
+
+func hasHiddenSegment(relPath string) bool {
+	for _, seg := range strings.Split(relPath, "/") {
+		if strings.HasPrefix(seg, ".") && seg != "." && seg != ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func convertGitIgnoreToGlob(line string) string {
+	line = filepath.ToSlash(strings.TrimSpace(line))
+	if line == "" {
+		return ""
+	}
+	if strings.HasPrefix(line, "!") {
+		return ""
+	}
+	isDir := strings.HasSuffix(line, "/")
+	line = strings.TrimSuffix(line, "/")
+	isRootOnly := strings.HasPrefix(line, "/")
+	line = strings.TrimPrefix(line, "/")
+
+	pattern := line
+	if isDir {
+		pattern += "/**"
+	}
+	if !isRootOnly && !strings.Contains(line, "/") {
+		if isDir {
+			return "**/" + pattern
+		}
+		return "**/" + pattern
+	}
+	return pattern
 }
