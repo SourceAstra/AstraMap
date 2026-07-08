@@ -85,7 +85,7 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 	}
 
 	result := &ImpactResult{
-		RootSymbolID:  symbolID,
+		RootSymbolID:  CanonicalSymbolIDForNodeID(db, symbolID),
 		AffectedNodes: []AffectedNodeSummary{},
 	}
 
@@ -101,7 +101,7 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 		}
 
 		result.AffectedNodes = append(result.AffectedNodes, AffectedNodeSummary{
-			SymbolID:    sym,
+			SymbolID:    CanonicalSymbolIDForNodeID(db, sym),
 			ImpactLevel: level,
 			Reason:      fmt.Sprintf("在图层 %d 中通过调用链路受到影响", depth),
 		})
