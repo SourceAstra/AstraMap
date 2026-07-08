@@ -12,8 +12,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"astramap-standalone/astramap"
+	"github.com/fsnotify/fsnotify"
 	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite"
 )
@@ -36,7 +38,7 @@ func getAstraMapDB(projectRoot string) (*sqlx.DB, error) {
 	_ = os.MkdirAll(dbDir, 0755)
 	dbPath := filepath.Join(dbDir, "astramap.db")
 
-	db, err := sqlx.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
+	db, err := sqlx.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_pragma=temp_store(MEMORY)")
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +100,8 @@ func main() {
 		dashboardCmd()
 	case "index":
 		indexCmd()
+	case "watch":
+		watchCmd()
 	case "install":
 		installCmd()
 	case "diff":
@@ -118,8 +122,6 @@ func main() {
 		queryCmd()
 	case "tree":
 		treeCmd()
-	case "audit":
-		auditCmd()
 	default:
 		fmt.Printf("未知的子命令: %s\n\n", subcmd)
 		printHelp()
@@ -138,11 +140,22 @@ func printHelp() {
   serve                                       启动 stdio MCP 服务
   dashboard [--host] [--port]                 启动源码星空可视化控制台
   index [选项]                                构建/更新代码地图索引
-    --lang c,python                           指定语言
-    --scip index.scip                         导入已有 SCIP 索引文件
-    --scip-only                               只导入 SCIP
-    --tree-sitter                             只跑 Tree-sitter
+      --lang c,python                         指定语言
+      --scip index.scip                       导入已有 SCIP 索引文件
+      --scip-only                             只导入 SCIP
+      --refresh-scip                          强制重新生成并导入 SCIP
+      --full                                  全量刷新 SCIP 层，再做 Tree-sitter 增量扫描
+      --tree-sitter                           只跑 Tree-sitter
+      --watch [秒数]                          索引后持续低频监听并增量刷新，默认 10 秒
+  watch [秒数]                                初次索引后持续低频监听并增量刷新，默认 10 秒
   install                                     一键安装 MCP 到 Claude Code / Cursor
+
+常用示例:
+  amap index                                  快速增量更新一次
+  amap index --full                           全量刷新一次
+  amap index --watch 30                       启动时索引一次，然后每 30 秒最多增量刷新一次
+  amap watch                                  每 10 秒最多增量刷新一次
+  amap watch 30                               每 30 秒最多增量刷新一次
 
 开发诊断工具 (CLI Diagnostics):
   diff [--suggest-tests]                      基于 git diff 评估修改影响面与测试建议
@@ -154,7 +167,6 @@ func printHelp() {
   owners <symbol>                             结合 GitBlame 定位最熟悉此符号的所有者
   query "<SQL>"                               通过 SQL 直接操作和检索底层图拓扑
   tree <symbol> [--dir=up|down] [--depth=N]   在终端绘制指定符号的调用拓扑树
-  audit                                       扫描质量审计 Verdicts 缺陷
 `)
 }
 
@@ -856,15 +868,89 @@ func autoGenerateScip(projectRoot string, selectedLangs []LangCount, filter *ast
 	return scipPaths, scipLangs
 }
 
+type indexOptions struct {
+	scipFile      string
+	scipOnly      bool
+	refreshScip   bool
+	full          bool
+	treeSitter    bool
+	watch         bool
+	watchInterval time.Duration
+	langFlag      string
+}
+
 func indexCmd() {
+	args, watch, watchInterval := extractIndexWatchArgs(os.Args[2:])
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
 	scipFile := fs.String("scip", "", "SCIP 索引文件；留空则自动生成")
 	scipOnly := fs.Bool("scip-only", false, "只导入 SCIP，不跑 Tree-sitter")
+	refreshScip := fs.Bool("refresh-scip", false, "强制重新生成并导入 SCIP 索引")
+	full := fs.Bool("full", false, "全量刷新高精度 SCIP 层，再执行 Tree-sitter 增量扫描")
 	treeSitter := fs.Bool("tree-sitter", false, "只跑 Tree-sitter")
 	fs.BoolVar(treeSitter, "treesitter-only", false, "只跑 Tree-sitter")
 	langFlag := fs.String("lang", "", "语言列表，逗号分隔")
+	_ = fs.Parse(args)
+	runIndex(indexOptions{
+		scipFile:      *scipFile,
+		scipOnly:      *scipOnly,
+		refreshScip:   *refreshScip,
+		full:          *full,
+		treeSitter:    *treeSitter,
+		watch:         watch,
+		watchInterval: watchInterval,
+		langFlag:      *langFlag,
+	})
+}
+
+func extractIndexWatchArgs(args []string) ([]string, bool, time.Duration) {
+	cleaned := make([]string, 0, len(args))
+	watch := false
+	interval := 10 * time.Second
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--watch" {
+			watch = true
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				seconds, err := strconv.Atoi(args[i+1])
+				if err != nil || seconds <= 0 {
+					logError("--watch 间隔必须是正整数秒，例如: amap index --watch 30")
+					os.Exit(1)
+				}
+				interval = time.Duration(seconds) * time.Second
+				i++
+			}
+			continue
+		}
+		cleaned = append(cleaned, arg)
+	}
+	return cleaned, watch, interval
+}
+
+func watchCmd() {
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
 	_ = fs.Parse(os.Args[2:])
 
+	interval := 10 * time.Second
+	if fs.NArg() > 0 {
+		seconds, err := strconv.Atoi(fs.Arg(0))
+		if err != nil || seconds <= 0 {
+			logError("watch 间隔必须是正整数秒，例如: amap watch 10")
+			os.Exit(1)
+		}
+		interval = time.Duration(seconds) * time.Second
+	}
+	if fs.NArg() > 1 {
+		logError("watch 只接受一个可选秒数参数，例如: amap watch 10")
+		os.Exit(1)
+	}
+
+	runIndex(indexOptions{
+		watch:         true,
+		watchInterval: interval,
+	})
+}
+
+func runIndex(opts indexOptions) {
 	if configPath, created, err := astramap.EnsureIndexConfigExample(projectRoot); err != nil {
 		logError("生成 AstraMap 配置示例失败: %v", err)
 		os.Exit(1)
@@ -879,27 +965,42 @@ func indexCmd() {
 		logError("读取 AstraMap 配置失败: %v", err)
 		os.Exit(1)
 	}
-	printIndexFilterMatchReport(projectRoot, filter)
 
-	// Detect languages with file counts
-	detected := detectProjectLanguages(projectRoot, filter)
-	if len(detected) == 0 {
-		fmt.Println("未检测到已知项目语言")
+	db, err := getAstraMapDB(projectRoot)
+	if err != nil {
+		logError("无法连接数据库: %v", err)
 		os.Exit(1)
 	}
-
-	// Display detected languages
-	fmt.Println("检测到以下语言文件:")
-	for i, lc := range detected {
-		fmt.Printf("  %d. %s (%d 个源文件)\n", i+1, languageDisplayName(lc.Lang), lc.Count)
-	}
+	defer db.Close()
 
 	// Determine selected languages
 	var selected []LangCount
-	if *langFlag != "" {
+	var detected []LangCount
+	quiet := false
+	plainIncremental := opts.langFlag == "" && opts.scipFile == "" && !opts.scipOnly && !opts.refreshScip && !opts.full
+	if opts.langFlag == "" {
+		if saved, ok := loadSavedIndexLanguages(projectRoot, db); ok {
+			selected = saved
+			quiet = plainIncremental
+		}
+	}
+	if len(selected) == 0 {
+		// Detect languages with file counts only when no saved language set exists.
+		detected = detectProjectLanguages(projectRoot, filter)
+		if len(detected) == 0 {
+			fmt.Println("未检测到已知项目语言")
+			os.Exit(1)
+		}
+	}
+	if len(selected) == 0 && opts.langFlag != "" {
 		// Non-interactive: --lang c,python
-		selected = resolveLangNames(*langFlag, detected)
-	} else if len(detected) > 1 {
+		selected = resolveLangNames(opts.langFlag, detected)
+	}
+	if len(selected) == 0 && len(detected) > 1 {
+		fmt.Println("检测到以下语言文件:")
+		for i, lc := range detected {
+			fmt.Printf("  %d. %s (%d 个源文件)\n", i+1, languageDisplayName(lc.Lang), lc.Count)
+		}
 		fmt.Println()
 		fmt.Print("请选择要导入的语言 (输入序号，多选用逗号分隔，如 1,3；回车导入全部): ")
 		var input string
@@ -909,23 +1010,30 @@ func indexCmd() {
 		} else {
 			selected = detected
 		}
-	} else {
+	}
+	if len(selected) == 0 {
 		selected = detected
 	}
 
-	fmt.Printf("\n将导入语言: ")
-	var langNames []string
-	for _, lc := range selected {
-		langNames = append(langNames, languageDisplayName(lc.Lang))
-	}
-	fmt.Println(strings.Join(langNames, ", "))
-
-	db, err := getAstraMapDB(projectRoot)
-	if err != nil {
-		logError("无法连接数据库: %v", err)
+	if err := saveIndexLanguages(projectRoot, selected); err != nil {
+		logError("保存索引语言选择失败: %v", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	astramap.SetQuietLogging(quiet)
+	if !quiet {
+		fmt.Printf("\n将导入语言: ")
+		var langNames []string
+		for _, lc := range selected {
+			langNames = append(langNames, languageDisplayName(lc.Lang))
+		}
+		fmt.Println(strings.Join(langNames, ", "))
+	}
+
+	existingScip, err := hasScipIndex(db)
+	if err != nil {
+		logError("读取 SCIP 索引状态失败: %v", err)
+		os.Exit(1)
+	}
 
 	// Track auto-generated tsconfig.json for cleanup
 	tsconfigExisted := hasAnyProjectFile(projectRoot, "tsconfig.json")
@@ -933,23 +1041,30 @@ func indexCmd() {
 	// Generate or import SCIP indexes.
 	var scipPaths []string
 	var scipAutoPaths []string
-	if !*treeSitter {
-		if *scipFile != "" {
-			scipPaths = []string{*scipFile}
+	shouldRefreshScip := opts.scipFile != "" || opts.scipOnly || opts.refreshScip || opts.full || !existingScip
+	if !opts.treeSitter && shouldRefreshScip {
+		if opts.scipFile != "" {
+			scipPaths = []string{opts.scipFile}
 		} else {
 			scipAutoPaths, _ = autoGenerateScip(projectRoot, selected, filter)
 			scipPaths = scipAutoPaths
 		}
+	} else if !opts.treeSitter && !quiet {
+		fmt.Println("检测到已有 SCIP 索引，本次跳过 SCIP 全量刷新；如需刷新请使用 --refresh-scip。")
 	}
 
 	// Import all SCIP indexes
 	for _, scipPath := range scipPaths {
-		fmt.Printf("正在导入 SCIP 索引: %s\n", scipPath)
+		if !quiet {
+			fmt.Printf("正在导入 SCIP 索引: %s\n", scipPath)
+		}
 		if err := astramap.ImportScipIndexToAstraMap(db, scipPath, projectRoot); err != nil {
 			logError("SCIP 导入失败: %v", err)
 			os.Exit(1)
 		}
-		fmt.Println("SCIP 索引导入完成")
+		if !quiet {
+			fmt.Println("SCIP 索引导入完成")
+		}
 	}
 	for _, p := range scipAutoPaths {
 		os.Remove(p)
@@ -961,24 +1076,561 @@ func indexCmd() {
 		os.Remove(tsconfigPath)
 	}
 
-	if !*scipOnly {
+	noChange := true
+	if !opts.scipOnly {
 		var langFilter []string
 		for _, lc := range selected {
 			langFilter = append(langFilter, lc.Lang)
 		}
-		if err := astramap.SyncAllFilesAstraMap(db, projectRoot, langFilter...); err != nil {
+		stopSpinner := startIndexSpinner(quiet, "AstraMap 增量索引中")
+		syncResult, err := astramap.SyncAllFilesAstraMapResult(db, projectRoot, langFilter...)
+		if err != nil {
+			stopSpinner("AstraMap 增量索引失败")
 			logError("增量扫描失败: %v", err)
 			os.Exit(1)
 		}
+		noChange = syncResult.Updated == 0 && !syncResult.Pruned && syncResult.PrunedDeleted == 0
+		if noChange {
+			stopSpinner("AstraMap 无变更")
+		} else {
+			stopSpinner("AstraMap 增量索引完成")
+		}
+	} else if opts.watch {
+		logError("watch 需要 Tree-sitter 增量扫描，不能与 --scip-only 同用")
+		os.Exit(1)
 	}
 
 	// Show provenance breakdown: SCIP vs Tree-sitter vs heuristic
-	nodeStats, edgeStats, _ := astramap.ProvenanceStats(db)
-	fmt.Println("索引构建完成！")
-	fmt.Println()
-	fmt.Println("── 索引来源统计 ──")
-	fmt.Printf("  节点 (按语言): %s\n", formatLangStats(nodeStats))
-	fmt.Printf("  边   (按来源): %s\n", formatProvStats(edgeStats))
+	if !quiet && !noChange {
+		nodeStats, edgeStats, _ := astramap.ProvenanceStats(db)
+		fmt.Println("索引构建完成！")
+		fmt.Println()
+		fmt.Println("── 索引来源统计 ──")
+		fmt.Printf("  节点 (按语言): %s\n", formatLangStats(nodeStats))
+		fmt.Printf("  边   (按来源): %s\n", formatProvStats(edgeStats))
+	}
+
+	if opts.watch {
+		if opts.watchInterval < time.Second {
+			logWarn("watch 间隔过短，已提升到 1s")
+			opts.watchInterval = time.Second
+		}
+		var langFilter []string
+		for _, lc := range selected {
+			langFilter = append(langFilter, lc.Lang)
+		}
+		if err := watchIndexCmd(db, projectRoot, opts.watchInterval, langFilter...); err != nil {
+			logError("watch 失败: %v", err)
+			os.Exit(1)
+		}
+	}
+}
+
+func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, langFilter ...string) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("初始化文件监听失败: %w", err)
+	}
+	defer watcher.Close()
+
+	if err := addIndexWatchDirs(watcher, projectRoot); err != nil {
+		return err
+	}
+
+	fmt.Printf("watch 已启动: %s，每 %s 最多刷新一次\n", projectRoot, interval)
+
+	dirty := make(map[string]bool)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return nil
+			}
+			if event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) {
+				if info, statErr := os.Stat(event.Name); statErr == nil && info.IsDir() && !shouldSkipWatchDir(filepath.Base(event.Name)) {
+					_ = addIndexWatchDirs(watcher, event.Name)
+				}
+			}
+			if isIndexWatchEvent(event) {
+				dirty[event.Name] = true
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return nil
+			}
+			logWarn("watch 事件错误: %v", err)
+		case <-ticker.C:
+			if len(dirty) == 0 {
+				continue
+			}
+			paths := make([]string, 0, len(dirty))
+			for path := range dirty {
+				paths = append(paths, path)
+			}
+			dirty = make(map[string]bool)
+
+			result, err := astramap.SyncChangedFilesAstraMapResult(db, projectRoot, paths, langFilter...)
+			if err != nil {
+				logWarn("watch 增量刷新失败: %v", err)
+				for _, path := range paths {
+					dirty[path] = true
+				}
+				continue
+			}
+			if len(result.UpdatedFiles) > 0 {
+				fmt.Printf("watch 更新 %d 文件: %s (%s)\n", result.Updated, formatUpdatedFiles(result.UpdatedFiles), time.Now().Format("15:04:05"))
+			} else if result.Pruned || result.PrunedDeleted > 0 {
+				fmt.Printf("watch 清理索引记录 (%s)\n", time.Now().Format("15:04:05"))
+			}
+		}
+	}
+}
+
+func formatUpdatedFiles(files []string) string {
+	const limit = 6
+	if len(files) <= limit {
+		return strings.Join(files, ", ")
+	}
+	return fmt.Sprintf("%s, ... +%d", strings.Join(files[:limit], ", "), len(files)-limit)
+}
+
+func startIndexSpinner(enabled bool, label string) func(string) {
+	if !enabled {
+		return func(string) {}
+	}
+
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	started := time.Now()
+	go func() {
+		defer close(stopped)
+		frames := []byte{'-', '\\', '|', '/'}
+		ticker := time.NewTicker(120 * time.Millisecond)
+		defer ticker.Stop()
+		i := 0
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				fmt.Fprintf(os.Stderr, "\r%c %s... %.1fs", frames[i%len(frames)], label, time.Since(started).Seconds())
+				i++
+			}
+		}
+	}()
+
+	return func(doneLabel string) {
+		close(done)
+		<-stopped
+		fmt.Fprintf(os.Stderr, "\r%s (%.1fs)\n", doneLabel, time.Since(started).Seconds())
+	}
+}
+
+func hasScipIndex(db *sqlx.DB) (bool, error) {
+	var count int
+	if err := db.Get(&count, `
+		SELECT
+			(SELECT COUNT(*) FROM astramap_edges WHERE provenance = 'scip') +
+			(SELECT COUNT(*) FROM astramap_nodes WHERE id LIKE 'scip%' OR id LIKE 'go:%' OR id LIKE 'cxx:%')
+	`); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+type savedIndexState struct {
+	Languages []string `json:"languages"`
+	UpdatedAt int64    `json:"updated_at"`
+}
+
+func loadSavedIndexLanguages(projectRoot string, db *sqlx.DB) ([]LangCount, bool) {
+	if langs, ok := readIndexLanguagesFromConfig(projectRoot); ok {
+		if selected := selectKnownLanguages(langs); len(selected) > 0 {
+			return selected, true
+		}
+	}
+	if state, ok := readLegacyIndexState(projectRoot); ok {
+		if selected := selectKnownLanguages(state.Languages); len(selected) > 0 {
+			return selected, true
+		}
+	}
+	langs, err := inferIndexedLanguages(db)
+	if err != nil || len(langs) == 0 {
+		return nil, false
+	}
+	selected := selectKnownLanguages(langs)
+	return selected, len(selected) > 0
+}
+
+func readLegacyIndexState(projectRoot string) (savedIndexState, bool) {
+	var state savedIndexState
+	data, err := os.ReadFile(indexStatePath(projectRoot))
+	if err != nil {
+		return state, false
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, false
+	}
+	return state, len(state.Languages) > 0
+}
+
+func saveIndexLanguages(projectRoot string, selected []LangCount) error {
+	return writeIndexLanguagesToConfig(projectRoot, langIDs(selected))
+}
+
+func indexStatePath(projectRoot string) string {
+	return filepath.Join(projectRoot, ".astramap", "index-state.json")
+}
+
+func indexConfigPath(projectRoot string) string {
+	return filepath.Join(projectRoot, ".astramap", "config.yaml")
+}
+
+func readIndexLanguagesFromConfig(projectRoot string) ([]string, bool) {
+	data, err := os.ReadFile(indexConfigPath(projectRoot))
+	if err != nil {
+		return nil, false
+	}
+	lines := strings.Split(string(data), "\n")
+	inIndex := false
+	current := ""
+	var langs []string
+	for _, raw := range lines {
+		line := stripYAMLComment(raw)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent == 0 {
+			inIndex = trimmed == "index:"
+			current = ""
+			continue
+		}
+		if !inIndex {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "-") {
+			if current == "languages" {
+				langs = append(langs, parseYAMLScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))))
+			}
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		current = strings.ToLower(strings.TrimSpace(key))
+		if current != "languages" {
+			continue
+		}
+		for _, item := range parseYAMLListValue(strings.TrimSpace(value)) {
+			langs = append(langs, item)
+		}
+	}
+	return langs, len(langs) > 0
+}
+
+func writeIndexLanguagesToConfig(projectRoot string, langs []string) error {
+	path := indexConfigPath(projectRoot)
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return err
+		}
+		data = []byte(astramap.IndexConfigExample())
+	} else if err != nil {
+		return err
+	}
+
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	block := indexLanguagesBlock(langs)
+	indexStart, indexEnd := findTopLevelSection(lines, "index")
+	if indexStart == -1 {
+		lines = append(lines, "", "index:")
+		lines = append(lines, block...)
+	} else {
+		langStart, langEnd := findNestedKeyBlock(lines, indexStart+1, indexEnd, "languages")
+		if langStart == -1 {
+			next := append([]string{}, lines[:indexStart+1]...)
+			next = append(next, block...)
+			next = append(next, lines[indexStart+1:]...)
+			lines = next
+		} else {
+			next := append([]string{}, lines[:langStart]...)
+			next = append(next, block...)
+			next = append(next, lines[langEnd:]...)
+			lines = next
+		}
+	}
+	lines = ensureIndexFilterTemplate(lines)
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+}
+
+func indexLanguagesBlock(langs []string) []string {
+	block := []string{"  languages:"}
+	for _, lang := range langs {
+		block = append(block, "    - "+lang)
+	}
+	return block
+}
+
+func findTopLevelSection(lines []string, name string) (int, int) {
+	start := -1
+	for i, line := range lines {
+		clean := stripYAMLComment(line)
+		if strings.TrimSpace(clean) == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(clean)
+		indent := len(clean) - len(strings.TrimLeft(clean, " \t"))
+		if indent == 0 && strings.TrimSuffix(trimmed, ":") == name {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return -1, len(lines)
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		clean := stripYAMLComment(lines[i])
+		if strings.TrimSpace(clean) == "" {
+			continue
+		}
+		indent := len(clean) - len(strings.TrimLeft(clean, " \t"))
+		if indent == 0 {
+			end = i
+			break
+		}
+	}
+	return start, end
+}
+
+func findNestedKeyBlock(lines []string, start, end int, key string) (int, int) {
+	for i := start; i < end; i++ {
+		clean := yamlStructuralLine(lines[i])
+		if strings.TrimSpace(clean) == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(clean)
+		indent := len(clean) - len(strings.TrimLeft(clean, " \t"))
+		k, _, ok := strings.Cut(trimmed, ":")
+		if ok && indent > 0 && strings.EqualFold(strings.TrimSpace(k), key) {
+			blockEnd := end
+			for j := i + 1; j < end; j++ {
+				next := yamlStructuralLine(lines[j])
+				if strings.TrimSpace(next) == "" {
+					continue
+				}
+				nextIndent := len(next) - len(strings.TrimLeft(next, " \t"))
+				if nextIndent <= indent {
+					blockEnd = j
+					break
+				}
+			}
+			return i, blockEnd
+		}
+	}
+	return -1, end
+}
+
+func ensureIndexFilterTemplate(lines []string) []string {
+	indexStart, indexEnd := findTopLevelSection(lines, "index")
+	if indexStart == -1 {
+		return lines
+	}
+	for i := indexStart + 1; i < indexEnd; i++ {
+		clean := yamlStructuralLine(lines[i])
+		if strings.TrimSpace(clean) == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(clean)
+		indent := len(clean) - len(strings.TrimLeft(clean, " \t"))
+		key, _, ok := strings.Cut(trimmed, ":")
+		if !ok || indent == 0 {
+			continue
+		}
+		switch normalizeIndexTemplateKey(key) {
+		case "include", "exclude", "scipexclude", "treesitterexclude":
+			return lines
+		}
+	}
+
+	tail := []string{
+		"  # include:",
+		"  #   - \"**/*.go\"",
+		"  #   - \"**/*.ts\"",
+		"  # exclude:",
+		"  #   - \"docs/**\"",
+		"  #   - \"vendor/**\"",
+		"  #   - \"**/*.pb.go\"",
+		"  #   - \"**/*.min.js\"",
+		"  # scipExclude:",
+		"  #   - \"examples/**\"",
+		"  # treeSitterExclude:",
+		"  #   - \"testdata/**\"",
+	}
+	next := append([]string{}, lines[:indexEnd]...)
+	next = append(next, tail...)
+	next = append(next, lines[indexEnd:]...)
+	return next
+}
+
+func normalizeIndexTemplateKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	key = strings.ReplaceAll(key, "-", "")
+	key = strings.ReplaceAll(key, "_", "")
+	return key
+}
+
+func yamlStructuralLine(line string) string {
+	clean := stripYAMLComment(line)
+	if strings.TrimSpace(clean) != "" {
+		return clean
+	}
+
+	indent := len(line) - len(strings.TrimLeft(line, " \t"))
+	trimmedLeft := strings.TrimLeft(line, " \t")
+	if !strings.HasPrefix(trimmedLeft, "#") {
+		return clean
+	}
+	comment := strings.TrimPrefix(trimmedLeft, "#")
+	if strings.HasPrefix(comment, " ") {
+		comment = comment[1:]
+	}
+	return line[:indent] + comment
+}
+
+func stripYAMLComment(line string) string {
+	inSingle := false
+	inDouble := false
+	escaped := false
+	for i, r := range line {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && inDouble {
+			escaped = true
+			continue
+		}
+		switch r {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case '#':
+			if !inSingle && !inDouble {
+				return line[:i]
+			}
+		}
+	}
+	return line
+}
+
+func parseYAMLListValue(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		value = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "["), "]"))
+	}
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := parseYAMLScalar(part)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func parseYAMLScalar(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"'`)
+	return value
+}
+
+func inferIndexedLanguages(db *sqlx.DB) ([]string, error) {
+	var langs []string
+	err := db.Select(&langs, "SELECT DISTINCT language FROM astramap_files WHERE language != '' ORDER BY language")
+	return langs, err
+}
+
+func selectKnownLanguages(langs []string) []LangCount {
+	selected := make([]LangCount, 0, len(langs))
+	seen := make(map[string]bool, len(langs))
+	for _, lang := range langs {
+		lang = strings.TrimSpace(lang)
+		if lang == "" || seen[lang] {
+			continue
+		}
+		if _, ok := astramap.LangExts[lang]; !ok {
+			continue
+		}
+		selected = append(selected, LangCount{Lang: lang})
+		seen[lang] = true
+	}
+	return selected
+}
+
+func langIDs(selected []LangCount) []string {
+	langs := make([]string, 0, len(selected))
+	for _, lc := range selected {
+		langs = append(langs, lc.Lang)
+	}
+	return langs
+}
+
+func addIndexWatchDirs(watcher *fsnotify.Watcher, root string) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		if shouldSkipWatchDir(info.Name()) {
+			return filepath.SkipDir
+		}
+		_ = watcher.Add(path)
+		return nil
+	})
+}
+
+func shouldSkipWatchDir(name string) bool {
+	switch name {
+	case ".git", ".astramap", ".understand-anything", ".cache", ".idea", ".vscode",
+		"node_modules", "build", "dist", "vendor", "target", "out", "tmp", "temp":
+		return true
+	default:
+		return strings.HasPrefix(name, ".trash")
+	}
+}
+
+func isIndexWatchEvent(event fsnotify.Event) bool {
+	if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) && !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
+		return false
+	}
+	if event.Name == "" {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(event.Name))
+	if ext == "" {
+		return event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
+	}
+	_, ok := astramap.ExtToLang[ext]
+	return ok
 }
 
 func parseLangSelection(input string, detected []LangCount) []LangCount {
@@ -1098,50 +1750,81 @@ func installCmd() {
 		return
 	}
 
+	probes := probeInstallTargets()
+	printInstallProbeReport(probes)
+
 	fmt.Println("正在注册 AstraMap MCP 服务与规则文件...")
 	fmt.Println()
 
 	success := 0
-	total := 8
+	total := 0
 
 	// 3.1 Claude Code (MCP + /amap slash command)
-	if installClaudeCode(selfPath, absProj) {
-		success++
+	if probes["Claude Code"] {
+		total++
+		if installClaudeCode(selfPath, absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - Claude Code  — 未探测到 claude CLI，跳过")
 	}
 
 	// 3.2 VS Code (MCP + Copilot instructions)
-	if installVSCode(selfPath, absProj) {
-		success++
+	if probes["VS Code"] {
+		total++
+		if installVSCode(selfPath, absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - VS Code      — 未探测到 code CLI，跳过")
 	}
 
 	// 3.3 Cursor (MCP + .cursor/rules)
-	if installCursor(selfPath, absProj) {
-		success++
+	if probes["Cursor"] {
+		total++
+		if installCursor(selfPath, absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - Cursor       — 未探测到 cursor CLI，跳过")
 	}
 
 	// 3.4 项目级 .mcp.json
+	total++
 	if installProjectMcpJson(selfPath, absProj) {
 		success++
 	}
 
 	// 3.5 Codex (MCP + AGENTS.md)
-	if installCodex(selfPath, absProj) {
-		success++
+	if probes["Codex"] {
+		total++
+		if installCodex(selfPath, absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - Codex        — 未探测到 codex CLI，跳过")
 	}
 
 	// 3.6 Windsurf (.windsurfrules)
+	total++
 	if installWindsurf(absProj) {
 		success++
 	}
 
 	// 3.7 Cline (.clinerules)
+	total++
 	if installCline(absProj) {
 		success++
 	}
 
 	// 3.8 Antigravity (mcp_config.json + AGENTS.md)
-	if installAntigravity(selfPath, absProj) {
-		success++
+	if probes["Antigravity"] {
+		total++
+		if installAntigravity(selfPath, absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - Antigravity  — 未探测到 gemini/.gemini，跳过")
 	}
 
 	fmt.Println()
@@ -1151,13 +1834,120 @@ func installCmd() {
 		fmt.Printf("安装完成！%d/%d 工具注册成功。未成功的工具可手动配置，运行 amap install --show-config 查看配置。\n", success, total)
 	}
 
+	fmt.Println("\n── 注册核验 ──")
+	printInstallVerification(absProj)
+
 	// 4. 提示用户构建索引
 	fmt.Println("\n下一步：构建代码地图索引")
-	fmt.Println("  amap index                    # 交互选择语言，SCIP 优先；无 SCIP 时 Tree-sitter 回退")
+	fmt.Println("  amap index                    # 快速增量；已有 SCIP 时只刷新 Tree-sitter 脏文件")
 	fmt.Println("  amap index --lang c           # 指定语言")
 	fmt.Println("  amap index --scip index.scip  # 导入已有的 SCIP 索引文件")
 	fmt.Println("  amap index --scip-only        # 只导入 SCIP")
+	fmt.Println("  amap index --refresh-scip     # 强制重新生成并导入 SCIP")
+	fmt.Println("  amap index --full             # 全量刷新 SCIP 层，再执行增量扫描")
 	fmt.Println("  amap index --tree-sitter      # 只跑 Tree-sitter")
+	fmt.Println("  amap watch 10                 # 每 10 秒最多增量刷新一次")
+}
+
+func probeInstallTargets() map[string]bool {
+	probes := map[string]bool{}
+	for _, name := range []string{"claude", "code", "cursor", "codex", "windsurf", "gemini"} {
+		_, err := exec.LookPath(name)
+		probes[probeNameFromCommand(name)] = err == nil
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		probes["Antigravity"] = probes["Antigravity"] || dirExists(filepath.Join(home, ".gemini"))
+	}
+	return probes
+}
+
+func probeNameFromCommand(name string) string {
+	switch name {
+	case "claude":
+		return "Claude Code"
+	case "code":
+		return "VS Code"
+	case "cursor":
+		return "Cursor"
+	case "codex":
+		return "Codex"
+	case "windsurf":
+		return "Windsurf"
+	case "gemini":
+		return "Antigravity"
+	default:
+		return name
+	}
+}
+
+func printInstallProbeReport(probes map[string]bool) {
+	fmt.Println("探测到的 IDE 客户端:")
+	for _, name := range []string{"Claude Code", "VS Code", "Cursor", "Codex", "Windsurf", "Antigravity"} {
+		if probes[name] {
+			fmt.Printf("  ✓ %s\n", name)
+			continue
+		}
+		fmt.Printf("  - %s\n", name)
+	}
+	fmt.Println("工作区共享目标:")
+	fmt.Println("  - 项目 .mcp.json / .claude/commands / .cursor/rules / .windsurfrules / .clinerules")
+}
+
+func printInstallVerification(projectPath string) {
+	home, err := os.UserHomeDir()
+	checks := []struct {
+		name string
+		ok   bool
+	}{
+		{"Claude Code slash command", fileContains(filepath.Join(projectPath, ".claude", "commands", "amap.md"), "allowed-tools: astramap_search")},
+		{"VS Code Copilot rules", fileContains(filepath.Join(projectPath, ".github", "copilot-instructions.md"), "## AstraMap")},
+		{"Cursor MCP", fileContains(filepath.Join(projectPath, ".cursor", "mcp.json"), "\"astramap\"")},
+		{"Cursor rules", fileContains(filepath.Join(projectPath, ".cursor", "rules", "astramap.mdc"), "alwaysApply: true")},
+		{"Project .mcp.json", fileContains(filepath.Join(projectPath, ".mcp.json"), "\"astramap\"")},
+		{"Codex AGENTS", fileContains(filepath.Join(projectPath, "AGENTS.md"), "## AstraMap")},
+		{"Windsurf rules", fileContains(filepath.Join(projectPath, ".windsurfrules"), "## AstraMap")},
+		{"Cline rules", fileContains(filepath.Join(projectPath, ".clinerules", "astramap.md"), "AstraMap")},
+		{"Antigravity project MCP", fileContains(filepath.Join(projectPath, ".agents", "mcp_config.json"), "\"astramap\"")},
+	}
+	if err == nil && home != "" {
+		checks = append(checks, struct {
+			name string
+			ok   bool
+		}{"Codex MCP", fileContains(filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.astramap]")})
+		checks = append(checks, struct {
+			name string
+			ok   bool
+		}{"Antigravity global MCP", fileContains(filepath.Join(home, ".gemini", "config", "mcp_config.json"), "\"astramap\"")})
+		checks = append(checks, struct {
+			name string
+			ok   bool
+		}{"Antigravity CLI MCP", fileContains(filepath.Join(home, ".gemini", "antigravity-cli", "mcp_config.json"), "\"astramap\"")})
+	}
+
+	for _, check := range checks {
+		if check.ok {
+			fmt.Printf("  ✓ %s\n", check.name)
+		} else {
+			fmt.Printf("  - %s\n", check.name)
+		}
+	}
+}
+
+func fileContains(path, needle string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	if !strings.Contains(string(data), needle) {
+		return false
+	}
+	return true
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // printConfigs 输出各工具的 MCP 配置 JSON
@@ -1364,7 +2154,7 @@ func installSlashCommand(projectPath string) bool {
 const amapSlashCommandTpl = `---
 description: AstraMap 代码地图查询
 argument-hint: <子命令> <参数>
-allowed-tools: astramap_search astramap_explore astramap_node astramap_callers astramap_callees astramap_impact astramap_status astramap_verdict astramap_trace astramap_files
+allowed-tools: astramap_search astramap_explore astramap_node astramap_callers astramap_callees astramap_impact astramap_status astramap_trace astramap_files
 ---
 
 根据用户输入执行 AstraMap 代码地图查询。
@@ -1553,7 +2343,7 @@ func appendCodexToolApprovals() {
 	tools := []string{
 		"astramap_search", "astramap_explore", "astramap_node",
 		"astramap_callers", "astramap_callees", "astramap_impact",
-		"astramap_status", "astramap_verdict", "astramap_trace", "astramap_files",
+		"astramap_status", "astramap_trace", "astramap_files",
 	}
 	var sb strings.Builder
 	sb.WriteString("\n")
@@ -1593,7 +2383,7 @@ func appendCodexTomlMcp(configPath, amapPath string) bool {
 	tools := []string{
 		"astramap_search", "astramap_explore", "astramap_node",
 		"astramap_callers", "astramap_callees", "astramap_impact",
-		"astramap_status", "astramap_verdict", "astramap_trace", "astramap_files",
+		"astramap_status", "astramap_trace", "astramap_files",
 	}
 	for _, t := range tools {
 		sb.WriteString(fmt.Sprintf("\n\n[mcp_servers.astramap.tools.%s]\napproval_mode = \"approve\"", t))
@@ -2150,22 +2940,4 @@ func treeCmd() {
 	}
 
 	printTree(resolvedID, 0, true)
-}
-
-func auditCmd() {
-	db, err := getAstraMapDB(projectRoot)
-	if err != nil {
-		os.Exit(1)
-	}
-	defer db.Close()
-
-	var rejectCount int
-	_ = db.Get(&rejectCount, "SELECT COUNT(*) FROM astramap_verdicts WHERE has_active_defect = 1")
-
-	fmt.Printf("正在执行本地审计门禁扫描...\n")
-	if rejectCount > 0 {
-		fmt.Printf("❌ 审计未通过！在当前项目发现有 %d 处 REJECTED 的代码缺陷 Verdicts。\n", rejectCount)
-		os.Exit(1)
-	}
-	fmt.Println("✅ 审计通过！没有检测到任何被拦截的缺陷。")
 }
