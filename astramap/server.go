@@ -24,14 +24,26 @@ var WebStatic embed.FS
 
 // StartStandaloneServer starts a decoupled HTTP server serving both mock-free APIs and AstraMap standalone Web UI.
 func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) error {
-	go watchProjectFiles(db, projectRoot)
+	// 读写分离：writeDB 保留写连接供 watcher 使用，readDB 用于 Dashboard 查询
+	writeDB := db
+	var readDB *sqlx.DB
+	readDBPath := filepath.Join(projectRoot, ".astramap", "astramap.db")
+	if rdb, err := sqlx.Open("sqlite", readDBPath+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_pragma=temp_store(MEMORY)&mode=ro"); err == nil {
+		rdb.SetMaxOpenConns(4)
+		readDB = rdb
+		defer rdb.Close()
+	} else {
+		readDB = db
+	}
+
+	go watchProjectFiles(writeDB, projectRoot)
 
 	mux := http.NewServeMux()
 
 	// 1. JSON APIs matching standalone index.html calls (mock-free, no auth)
 	mux.HandleFunc("/api/astramap/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		status, err := QueryStatus(db)
+		status, err := QueryStatus(readDB)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -55,7 +67,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		w.Header().Set("Content-Type", "application/json")
 		q := r.URL.Query().Get("q")
 		kind := r.URL.Query().Get("kind")
-		nodes, err := QuerySearch(db, q, kind, 50)
+		nodes, err := QuerySearch(readDB, q, kind, 50)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -66,7 +78,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 
 	mux.HandleFunc("/api/astramap/overview", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		data, err := QueryProjectedGraph(db)
+		data, err := QueryProjectedGraph(readDB)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -77,7 +89,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 
 	mux.HandleFunc("/api/astramap/functions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		nodes, err := QueryFunctionList(db)
+		nodes, err := QueryFunctionList(readDB)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -88,7 +100,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 
 	mux.HandleFunc("/api/graph/module", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		data, err := QueryModuleGraph(db, r.URL.Query().Get("id"))
+		data, err := QueryModuleGraph(readDB, r.URL.Query().Get("id"))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -99,7 +111,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 
 	mux.HandleFunc("/api/astramap/data", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		data, err := QueryGraphData(db)
+		data, err := QueryGraphData(readDB)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -115,13 +127,18 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
+		if resolveErr == nil && len(ids) > 0 {
+			id = ids[0]
+		}
 		var node AstraMapNode
-		err := db.Get(&node, "SELECT * FROM astramap_nodes WHERE id = ?", id)
+		err := readDB.Get(&node, "SELECT * FROM astramap_nodes WHERE id = ?", id)
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "node not found"})
 			return
 		}
+		node.ID = CanonicalSymbolID(&node)
 		json.NewEncoder(w).Encode(node)
 	})
 
@@ -132,20 +149,24 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		ids, resolveErr := ResolveSymbolToIDs(db, id)
+		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
 		if resolveErr != nil || len(ids) == 0 {
 			json.NewEncoder(w).Encode([]struct{}{})
 			return
 		}
 		var allCallers []*AstraMapEdge
 		for _, nid := range ids {
-			callers, err := GetCallers(db, nid)
+			callers, err := GetCallers(readDB, nid)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
 			allCallers = append(allCallers, callers...)
+		}
+		for _, edge := range allCallers {
+			edge.Source = CanonicalSymbolIDForNodeID(readDB, edge.Source)
+			edge.Target = CanonicalSymbolIDForNodeID(readDB, edge.Target)
 		}
 		json.NewEncoder(w).Encode(allCallers)
 	})
@@ -157,20 +178,24 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		ids, resolveErr := ResolveSymbolToIDs(db, id)
+		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
 		if resolveErr != nil || len(ids) == 0 {
 			json.NewEncoder(w).Encode([]struct{}{})
 			return
 		}
 		var allCallees []*AstraMapEdge
 		for _, nid := range ids {
-			callees, err := GetCallees(db, nid)
+			callees, err := GetCallees(readDB, nid)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
 			allCallees = append(allCallees, callees...)
+		}
+		for _, edge := range allCallees {
+			edge.Source = CanonicalSymbolIDForNodeID(readDB, edge.Source)
+			edge.Target = CanonicalSymbolIDForNodeID(readDB, edge.Target)
 		}
 		json.NewEncoder(w).Encode(allCallees)
 	})
@@ -188,13 +213,13 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 				depth = v
 			}
 		}
-		ids, resolveErr := ResolveSymbolToIDs(db, id)
+		ids, resolveErr := ResolveSymbolToIDs(readDB, id)
 		if resolveErr != nil || len(ids) == 0 {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "symbol not found"})
 			return
 		}
-		res, err := AnalyzeImpact(db, ids[0], depth)
+		res, err := AnalyzeImpact(readDB, ids[0], depth)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -212,7 +237,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 				maxFiles = v
 			}
 		}
-		result, err := QueryExplore(db, q, projectRoot, maxFiles)
+		result, err := QueryExplore(readDB, q, projectRoot, maxFiles)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -230,19 +255,19 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			json.NewEncoder(w).Encode(map[string]string{"error": "parameters from and to required"})
 			return
 		}
-		fromIDs, resolveErr := ResolveSymbolToIDs(db, from)
+		fromIDs, resolveErr := ResolveSymbolToIDs(readDB, from)
 		if resolveErr != nil || len(fromIDs) == 0 {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "from symbol not found"})
 			return
 		}
-		toIDs, resolveErr := ResolveSymbolToIDs(db, to)
+		toIDs, resolveErr := ResolveSymbolToIDs(readDB, to)
 		if resolveErr != nil || len(toIDs) == 0 {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "to symbol not found"})
 			return
 		}
-		paths, err := TracePath(db, fromIDs[0], toIDs[0])
+		paths, err := TracePath(readDB, fromIDs[0], toIDs[0])
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -267,7 +292,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			return
 		}
 
-		nodes, edges, err := QueryTraceCTE(db, nodeID, depth)
+		nodes, edges, err := QueryTraceCTE(readDB, nodeID, depth)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -301,7 +326,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		respNodes := make([]ResponseNode, 0)
 		for _, n := range nodes {
 			respNodes = append(respNodes, ResponseNode{
-				ID:            n.ID,
+				ID:            CanonicalSymbolID(n),
 				Kind:          n.Kind,
 				Type:          n.Kind,
 				Name:          n.Name,
@@ -322,8 +347,8 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		respEdges := make([]ResponseEdge, 0)
 		for _, e := range edges {
 			respEdges = append(respEdges, ResponseEdge{
-				From: e.Source,
-				To:   e.Target,
+				From: CanonicalSymbolIDForNodeID(readDB, e.Source),
+				To:   CanonicalSymbolIDForNodeID(readDB, e.Target),
 			})
 		}
 
@@ -426,7 +451,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
-		doc := synthesizeUnderstandingDoc(db, projectRoot, req.Type, req.Key)
+		doc := synthesizeUnderstandingDoc(readDB, projectRoot, req.Type, req.Key)
 		if stored, err := saveStoredDoc(projectRoot, req.Type, req.Key, doc); err == nil {
 			json.NewEncoder(w).Encode(stored)
 		} else {
@@ -459,7 +484,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		if req.SymbolID == "" {
 			req.SymbolID = r.URL.Query().Get("symbol_id")
 		}
-		metrics, err := calculateComplexityMetrics(db, projectRoot, req.FilePath, req.SymbolID)
+		metrics, err := calculateComplexityMetrics(readDB, projectRoot, req.FilePath, req.SymbolID)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -2266,10 +2291,11 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 	}
 	defer watcher.Close()
 
-	skipNames := map[string]bool{
-		".git": true, ".astramap": true, "node_modules": true,
-		"vendor": true, "build": true, "dist": true, "out": true,
+	filter, _ := LoadIndexFilter(projectRoot)
+	if filter == nil {
+		filter = &IndexFilter{}
 	}
+
 	watchExts := map[string]bool{
 		".go": true, ".py": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true,
 		".c": true, ".h": true, ".cpp": true, ".hpp": true, ".cc": true, ".cxx": true,
@@ -2286,10 +2312,15 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			return
 		}
 		for _, e := range entries {
-			if !e.IsDir() || skipNames[e.Name()] {
+			if !e.IsDir() {
 				continue
 			}
-			addDir(filepath.Join(path, e.Name()))
+			childPath := filepath.Join(path, e.Name())
+			relPath, _ := filepath.Rel(projectRoot, childPath)
+			if !filter.AllowsDir(relPath, StageTreeSitter) {
+				continue
+			}
+			addDir(childPath)
 		}
 	}
 	addDir(projectRoot)
@@ -2303,13 +2334,6 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return
-			}
-			if event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) {
-				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					if !skipNames[filepath.Base(event.Name)] {
-						watcher.Add(event.Name)
-					}
-				}
 			}
 			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) && !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 				continue
@@ -2344,6 +2368,7 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			}
 			mu.Unlock()
 
+			anyChanged := false
 			for _, name := range pending {
 				relPath, _ := filepath.Rel(projectRoot, name)
 				changed, err := SyncFileAstraMap(db, projectRoot, name)
@@ -2353,7 +2378,17 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 				}
 				if changed {
 					fmt.Fprintf(os.Stderr, "[WATCH] 已同步 %s\n", relPath)
+					anyChanged = true
 				}
+			}
+			if anyChanged {
+				fmt.Fprintf(os.Stderr, "[WATCH] 正在更新跨文件关系，请稍后...\n")
+				_ = ResolveGoInterfaces(db)
+				_ = ResolveWebRoutes(db, projectRoot)
+				if err := ResolveCrossFileCalls(db, projectRoot); err != nil {
+					fmt.Fprintf(os.Stderr, "[WATCH] 解析跨文件调用失败: %v\n", err)
+				}
+				fmt.Fprintf(os.Stderr, "[WATCH] 跨文件关系更新完毕\n")
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
