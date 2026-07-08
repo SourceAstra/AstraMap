@@ -42,6 +42,9 @@ const edgeCols = `id, source, target, kind, provenance, line, col, COALESCE(meta
 func GetCallers(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 	var edges []*AstraMapEdge
 	err := db.Select(&edges, "SELECT "+edgeCols+" FROM astramap_edges WHERE target = ? AND kind = 'calls'", symbolID)
+	for _, edge := range edges {
+		annotateConditionalMetadata(db, edge)
+	}
 	return edges, err
 }
 
@@ -49,14 +52,15 @@ func GetCallers(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 func GetCallees(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 	var edges []*AstraMapEdge
 	err := db.Select(&edges, "SELECT "+edgeCols+" FROM astramap_edges WHERE source = ? AND kind = 'calls'", symbolID)
+	for _, edge := range edges {
+		annotateConditionalMetadata(db, edge)
+	}
 	return edges, err
 }
 
 // AnalyzeImpact 变更影响分析：递归追溯所有上游调用者并计算受损系数
 func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, error) {
-	if maxDepth <= 0 {
-		maxDepth = 3
-	}
+	maxDepth = normalizeImpactDepth(maxDepth)
 
 	visited := make(map[string]int) // symbolID -> depth
 	queue := []string{symbolID}
@@ -84,8 +88,24 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 		}
 	}
 
+	// Batch resolve symbol IDs to prevent N+1 query overhead
+	symsToResolve := make([]string, 0, len(visited))
+	for sym := range visited {
+		symsToResolve = append(symsToResolve, sym)
+	}
+	canonicalMap, batchErr := BatchCanonicalSymbolIDs(db, symsToResolve)
+
+	rootCanonical := symbolID
+	if batchErr == nil {
+		if val, ok := canonicalMap[symbolID]; ok {
+			rootCanonical = val
+		}
+	} else {
+		rootCanonical = CanonicalSymbolIDForNodeID(db, symbolID)
+	}
+
 	result := &ImpactResult{
-		RootSymbolID:  CanonicalSymbolIDForNodeID(db, symbolID),
+		RootSymbolID:  rootCanonical,
 		AffectedNodes: []AffectedNodeSummary{},
 	}
 
@@ -100,8 +120,17 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 			level = "MEDIUM"
 		}
 
+		canonicalSym := sym
+		if batchErr == nil {
+			if val, ok := canonicalMap[sym]; ok {
+				canonicalSym = val
+			}
+		} else {
+			canonicalSym = CanonicalSymbolIDForNodeID(db, sym)
+		}
+
 		result.AffectedNodes = append(result.AffectedNodes, AffectedNodeSummary{
-			SymbolID:    CanonicalSymbolIDForNodeID(db, sym),
+			SymbolID:    canonicalSym,
 			ImpactLevel: level,
 			Reason:      fmt.Sprintf("在图层 %d 中通过调用链路受到影响", depth),
 		})
@@ -113,14 +142,17 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 // TracePath 查找从起始符号 A 到目标符号 B 的最短调用路径 (单向 BFS, 正向 callees 搜索)
 func TracePath(db *sqlx.DB, fromID, toID string) ([][]string, error) {
 	type PathNode struct {
-		curr string
-		path []string
+		curr  string
+		path  []string
+		depth int
 	}
 
 	var results [][]string
 	visited := make(map[string]bool)
-	queue := []PathNode{{curr: fromID, path: []string{fromID}}}
+	queue := []PathNode{{curr: fromID, path: []string{fromID}, depth: 0}}
 	visited[fromID] = true
+
+	const maxDepth = 50
 
 	for len(queue) > 0 {
 		node := queue[0]
@@ -129,6 +161,10 @@ func TracePath(db *sqlx.DB, fromID, toID string) ([][]string, error) {
 		if node.curr == toID {
 			results = append(results, node.path)
 			return results, nil
+		}
+
+		if node.depth >= maxDepth {
+			continue
 		}
 
 		callees, err := GetCallees(db, node.curr)
@@ -141,7 +177,7 @@ func TracePath(db *sqlx.DB, fromID, toID string) ([][]string, error) {
 				visited[edge.Target] = true
 				newPath := append([]string{}, node.path...)
 				newPath = append(newPath, edge.Target)
-				queue = append(queue, PathNode{curr: edge.Target, path: newPath})
+				queue = append(queue, PathNode{curr: edge.Target, path: newPath, depth: node.depth + 1})
 			}
 		}
 	}
