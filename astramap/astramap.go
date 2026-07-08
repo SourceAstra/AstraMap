@@ -3,7 +3,6 @@ package astramap
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -22,7 +21,16 @@ import (
 
 // ===== AstraMap 日志辅助 (输出到 Stderr 不污染 stdio MCP 通道) =====
 
+var quietLogging bool
+
+func SetQuietLogging(quiet bool) {
+	quietLogging = quiet
+}
+
 func logInfo(format string, v ...interface{}) {
+	if quietLogging {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "[INFO] "+format+"\n", v...)
 }
 
@@ -63,27 +71,15 @@ type AstraMapEdge struct {
 }
 
 type AstraMapFile struct {
-	Path        string `db:"path" json:"path"`
-	ContentHash string `db:"content_hash" json:"contentHash"`
-	Language    string `db:"language" json:"language"`
-	Size        int64  `db:"size" json:"size"`
-	ModifiedAt  int64  `db:"modified_at" json:"modifiedAt"`
-	IndexedAt   int64  `db:"indexed_at" json:"indexedAt"`
-	NodeCount   int    `db:"node_count" json:"nodeCount"`
-	Errors      string `db:"errors" json:"errors,omitempty"`
-}
-
-type AstraMapVerdict struct {
-	ID              int64  `db:"id" json:"id"`
-	SymbolID        string `db:"symbol_id" json:"symbolId"`
-	HasActiveDefect int    `db:"has_active_defect" json:"hasActiveDefect"`
-	Stage           string `db:"stage" json:"stage"`
-	Decision        string `db:"decision" json:"decision"`
-	RuleID          string `db:"rule_id" json:"ruleId"`
-	Description     string `db:"description" json:"description"`
-	Suggestion      string `db:"suggestion" json:"suggestion"`
-	Operator        string `db:"operator" json:"operator"`
-	UpdatedAt       int64  `db:"updated_at" json:"updatedAt"`
+	Path         string `db:"path" json:"path"`
+	ContentHash  string `db:"content_hash" json:"contentHash"`
+	Language     string `db:"language" json:"language"`
+	Size         int64  `db:"size" json:"size"`
+	ModifiedAt   int64  `db:"modified_at" json:"modifiedAt"`
+	ModifiedAtNS int64  `db:"modified_at_ns" json:"modifiedAtNs"`
+	IndexedAt    int64  `db:"indexed_at" json:"indexedAt"`
+	NodeCount    int    `db:"node_count" json:"nodeCount"`
+	Errors       string `db:"errors" json:"errors,omitempty"`
 }
 
 // ===== SCIP 索引导入器 =====
@@ -125,6 +121,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 	fileLanguages := make(map[string]string)
 
 	for _, doc := range index.Documents {
+		if strings.HasPrefix(doc.RelativePath, "..") || filepath.IsAbs(doc.RelativePath) {
+			continue
+		}
 		if !filter.Allows(doc.RelativePath, StageScip) {
 			continue
 		}
@@ -150,6 +149,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 	// 2. 遍历 Documents 提取节点和边
 	for _, doc := range index.Documents {
 		relPath := doc.RelativePath
+		if strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
+			continue
+		}
 		if !filter.Allows(relPath, StageScip) {
 			continue
 		}
@@ -250,6 +252,7 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				qname = strings.ReplaceAll(lastPart, "/", ".")
 				qname = strings.ReplaceAll(qname, "#", ".")
 				qname = strings.ReplaceAll(qname, ":", ".")
+				qname = strings.ReplaceAll(qname, "`", "")
 			}
 
 			// 缩短超长 ID 保证物理主键稳定性
@@ -349,7 +352,17 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 
 	// 清理该项目下旧的 SCIP 数据
 	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'scip'")
-	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE id LIKE 'scip:%' OR id LIKE 'go:%' OR id LIKE 'cxx:%'")
+	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE id LIKE 'scip%' OR id LIKE 'go:%' OR id LIKE 'cxx:%'")
+	conflictSeen := make(map[string]bool)
+	for _, n := range nodes {
+		key := n.FilePath + "\x00" + n.Name
+		if conflictSeen[key] {
+			continue
+		}
+		conflictSeen[key] = true
+		_, _ = tx.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND name = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND name = ? AND id NOT LIKE 'external%')", n.FilePath, n.Name, n.FilePath, n.Name)
+		_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND name = ? AND id NOT LIKE 'external%'", n.FilePath, n.Name)
+	}
 
 	// 批量插入 Nodes
 	nodeStmt, err := tx.Preparex(`
@@ -443,9 +456,6 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 		}
 	}
 
-	// 同步并解析相关的 verdicts
-	_ = syncVerdictsFromProject(tx, projectRoot)
-
 	// 提交事务
 	if err := tx.Commit(); err != nil {
 		return err
@@ -479,23 +489,41 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 
 	stat, err := os.Stat(absPath)
 	if err != nil {
-		_, _ = db.Exec("DELETE FROM astramap_nodes WHERE file_path = ?", relPath)
+		_, _ = db.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
+		_, _ = db.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
 		_, _ = db.Exec("DELETE FROM astramap_files WHERE path = ?", relPath)
 		return true, nil
+	}
+
+	mtimeNS := stat.ModTime().UnixNano()
+	var existing fileIndexFingerprint
+	if err := db.Get(&existing, "SELECT content_hash, size, modified_at_ns FROM astramap_files WHERE path = ?", relPath); err == nil {
+		if existing.ModifiedAtNS > 0 && existing.Size == stat.Size() && existing.ModifiedAtNS == mtimeNS {
+			return false, nil
+		}
 	}
 
 	contentHash, err := hashFile(absPath)
 	if err != nil {
 		return false, err
 	}
-	var existingHash string
-	_ = db.Get(&existingHash, "SELECT content_hash FROM astramap_files WHERE path = ?", relPath)
-	if existingHash == contentHash {
-		return false, nil
+	if existing.ContentHash == contentHash {
+		overlayChanged, overlayErr := ensureTreeSitterOverlay(db, projectRoot, relPath, absPath)
+		if overlayErr != nil {
+			return false, overlayErr
+		}
+		if existing.ModifiedAtNS == 0 || existing.Size != stat.Size() || existing.ModifiedAtNS != mtimeNS {
+			_, _ = db.Exec("UPDATE astramap_files SET size = ?, modified_at = ?, modified_at_ns = ?, indexed_at = ? WHERE path = ?",
+				stat.Size(), stat.ModTime().Unix(), mtimeNS, time.Now().Unix(), relPath)
+		}
+		return overlayChanged, nil
 	}
 
 	nodes, edges, _, err := ParseFileIncremental(projectRoot, relPath)
 	if err != nil {
+		return false, err
+	}
+	if err := reuseExistingIncrementalIDs(db, relPath, nodes, edges); err != nil {
 		return false, err
 	}
 
@@ -505,7 +533,8 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 	}
 	defer tx.Rollback()
 
-	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'scip%' AND id NOT LIKE 'external%'", relPath)
+	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
+	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
 
 	nodeStmt, err := tx.Preparex(`
 		INSERT INTO astramap_nodes (
@@ -513,6 +542,15 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 			start_line, end_line, start_column, end_column,
 			signature, docstring, visibility, return_type, is_exported, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			kind=excluded.kind,
+			name=excluded.name,
+			qualified_name=excluded.qualified_name,
+			start_line=excluded.start_line,
+			end_line=excluded.end_line,
+			signature=excluded.signature,
+			docstring=excluded.docstring,
+			updated_at=excluded.updated_at
 	`)
 	if err != nil {
 		return false, err
@@ -528,6 +566,19 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+	}
+
+	externalSeen := make(map[string]bool)
+	for _, e := range edges {
+		if !strings.HasPrefix(e.Target, "external:") || externalSeen[e.Target] {
+			continue
+		}
+		externalSeen[e.Target] = true
+		name := externalSymbolName(e.Target)
+		_, _ = tx.Exec(`INSERT OR IGNORE INTO astramap_nodes
+			(id, kind, name, qualified_name, file_path, language, is_exported, updated_at)
+			VALUES (?, 'external', ?, ?, '', '', 0, ?)`,
+			e.Target, name, name, time.Now().Unix())
 	}
 
 	edgeStmt, err := tx.Preparex(`
@@ -546,24 +597,227 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		}
 	}
 
+	language := ExtToLang[strings.ToLower(filepath.Ext(absPath))]
 	if len(nodes) > 0 {
-		_, _ = tx.Exec(`
-			INSERT INTO astramap_files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		language = nodes[0].Language
+	}
+	if language == "" {
+		language = "unknown"
+	}
+	_, _ = tx.Exec(`
+			INSERT INTO astramap_files (path, content_hash, language, size, modified_at, modified_at_ns, indexed_at, node_count, errors)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(path) DO UPDATE SET
 				content_hash=excluded.content_hash,
+				language=excluded.language,
 				size=excluded.size,
 				modified_at=excluded.modified_at,
+				modified_at_ns=excluded.modified_at_ns,
 				indexed_at=excluded.indexed_at,
 				node_count=excluded.node_count
-		`, relPath, contentHash, nodes[0].Language, stat.Size(), stat.ModTime().Unix(), time.Now().Unix(), len(nodes), "")
-	}
+		`, relPath, contentHash, language, stat.Size(), stat.ModTime().Unix(), mtimeNS, time.Now().Unix(), len(nodes), "")
 
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 
 	return true, nil
+}
+
+func reuseExistingIncrementalIDs(db *sqlx.DB, relPath string, nodes []*AstraMapNode, edges []*AstraMapEdge) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	var existing []*AstraMapNode
+	if err := db.Select(&existing, `
+		SELECT *
+		FROM astramap_nodes
+		WHERE file_path = ?
+		ORDER BY
+			CASE
+				WHEN id LIKE 'cxx . . $%' OR id LIKE 'scip:%' OR id LIKE 'go:%' THEN 0
+				WHEN id NOT LIKE '%:%::%' THEN 1
+				ELSE 2
+			END,
+			start_line,
+			id
+	`, relPath); err != nil {
+		return err
+	}
+	if len(existing) == 0 {
+		return reuseExistingExternalIDs(db, edges)
+	}
+
+	byKey := make(map[string]string, len(existing))
+	for _, n := range existing {
+		for _, key := range nodeMatchKeys(n) {
+			if _, exists := byKey[key]; !exists {
+				byKey[key] = n.ID
+			}
+		}
+	}
+
+	remap := make(map[string]string)
+	for _, n := range nodes {
+		for _, key := range nodeMatchKeys(n) {
+			if id, exists := byKey[key]; exists {
+				remap[n.ID] = id
+				n.ID = id
+				break
+			}
+		}
+	}
+	for _, e := range edges {
+		if id, exists := remap[e.Source]; exists {
+			e.Source = id
+		}
+		if id, exists := remap[e.Target]; exists {
+			e.Target = id
+		}
+	}
+	return reuseExistingExternalIDs(db, edges)
+}
+
+func nodeMatchKeys(n *AstraMapNode) []string {
+	if n == nil {
+		return nil
+	}
+	kind := n.Kind
+	if kind == "method" {
+		kind = "function"
+	}
+	qname := strings.TrimSpace(n.QualifiedName)
+	name := strings.TrimSpace(n.Name)
+	keys := []string{}
+	if qname != "" {
+		keys = append(keys, kind+"\x00"+qname)
+	}
+	if name != "" {
+		keys = append(keys, kind+"\x00"+name)
+	}
+	return keys
+}
+
+func reuseExistingExternalIDs(db *sqlx.DB, edges []*AstraMapEdge) error {
+	if len(edges) == 0 {
+		return nil
+	}
+	names := make(map[string]string)
+	for _, e := range edges {
+		if strings.HasPrefix(e.Target, "external:") {
+			name := externalSymbolName(e.Target)
+			if name != "" {
+				names[name] = e.Target
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	for name, currentID := range names {
+		var existingID string
+		err := db.Get(&existingID, `
+			SELECT id
+			FROM astramap_nodes
+			WHERE (kind = 'external' OR id LIKE 'external:%')
+			  AND (name = ? OR qualified_name = ? OR id LIKE ?)
+			ORDER BY
+				CASE WHEN id LIKE '%(%).%' THEN 0 ELSE 1 END,
+				id
+			LIMIT 1
+		`, name, name, "%$ "+name+"%")
+		if err != nil || existingID == "" || existingID == currentID {
+			continue
+		}
+		for _, e := range edges {
+			if e.Target == currentID {
+				e.Target = existingID
+			}
+		}
+	}
+	return nil
+}
+
+func ensureTreeSitterOverlay(db *sqlx.DB, projectRoot, relPath, absPath string) (bool, error) {
+	lang := ExtToLang[strings.ToLower(filepath.Ext(absPath))]
+	prefix := getLangPrefix(lang)
+	if prefix == "unknown" {
+		return false, nil
+	}
+	var existingTS int
+	if err := db.Get(&existingTS, "SELECT COUNT(*) FROM astramap_nodes WHERE file_path = ? AND id LIKE ?", relPath, prefix+":"+relPath+"::%"); err != nil {
+		return false, err
+	}
+	if existingTS > 0 {
+		return false, nil
+	}
+
+	nodes, _, _, err := ParseFileIncremental(projectRoot, relPath)
+	if err != nil {
+		return false, err
+	}
+	if len(nodes) == 0 {
+		return false, nil
+	}
+
+	var existingNames []string
+	if err := db.Select(&existingNames, "SELECT DISTINCT name FROM astramap_nodes WHERE file_path = ?", relPath); err != nil {
+		return false, err
+	}
+	conflicts := make(map[string]bool, len(existingNames))
+	for _, name := range existingNames {
+		conflicts[name] = true
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	nodeStmt, err := tx.Preparex(`
+		INSERT OR IGNORE INTO astramap_nodes (
+			id, kind, name, qualified_name, file_path, language,
+			start_line, end_line, start_column, end_column,
+			signature, docstring, visibility, return_type, is_exported, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return false, err
+	}
+	defer nodeStmt.Close()
+
+	inserted := 0
+	for _, n := range nodes {
+		if conflicts[n.Name] {
+			continue
+		}
+		res, err := nodeStmt.Exec(
+			n.ID, n.Kind, n.Name, n.QualifiedName, n.FilePath, n.Language,
+			n.StartLine, n.EndLine, n.StartColumn, n.EndColumn,
+			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, n.UpdatedAt,
+		)
+		if err != nil {
+			return false, err
+		}
+		if rows, rowErr := res.RowsAffected(); rowErr == nil && rows > 0 {
+			inserted++
+		}
+	}
+	if inserted == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+type fileIndexFingerprint struct {
+	ContentHash  string `db:"content_hash"`
+	Size         int64  `db:"size"`
+	ModifiedAtNS int64  `db:"modified_at_ns"`
 }
 
 func hashFile(path string) (string, error) {
@@ -675,14 +929,38 @@ var ExtToLang = func() map[string]string {
 	return m
 }()
 
+type SyncAllFilesResult struct {
+	Scanned       int
+	Updated       int
+	UpdatedFiles  []string
+	Pruned        bool
+	PrunedDeleted int
+}
+
 func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string) error {
+	_, err := SyncAllFilesAstraMapResult(db, projectRoot, langFilter...)
+	return err
+}
+
+func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...string) (SyncAllFilesResult, error) {
 	logInfo("SyncAllFilesAstraMap: 增量扫描 %s", projectRoot)
+	result := SyncAllFilesResult{}
 	filter, err := LoadIndexFilter(projectRoot)
 	if err != nil {
-		return fmt.Errorf("读取 AstraMap 配置失败: %w", err)
+		return result, fmt.Errorf("读取 AstraMap 配置失败: %w", err)
 	}
-	if err := PruneExcludedFiles(db, filter); err != nil {
-		return err
+	pruned, err := PruneExcludedFiles(db, filter)
+	if err != nil {
+		return result, err
+	}
+	result.Pruned = pruned
+
+	prunedDeleted, err := PruneDeletedFiles(db, projectRoot)
+	if err != nil {
+		logError("PruneDeletedFiles failed: %v", err)
+	} else if prunedDeleted > 0 {
+		result.PrunedDeleted = prunedDeleted
+		logInfo("PruneDeletedFiles: 清理 %d 个已删除文件的残留记录", prunedDeleted)
 	}
 
 	extensions := make(map[string]bool)
@@ -701,6 +979,7 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string)
 
 	scanned := 0
 	updated := 0
+	updatedFiles := make([]string, 0)
 	err = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -727,55 +1006,250 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string)
 		changed, err := SyncFileAstraMap(db, projectRoot, path)
 		if err == nil && changed {
 			updated++
+			updatedFiles = append(updatedFiles, relPath)
 		}
 		return nil
 	})
+	result.Scanned = scanned
+	result.Updated = updated
+	result.UpdatedFiles = updatedFiles
+
+	logInfo("SyncAllFilesAstraMap: 扫描完成 %d 文件, %d 更新, 解析变更关系", scanned, updated)
+	if updated == 0 && !pruned && prunedDeleted == 0 {
+		logInfo("SyncAllFilesAstraMap: 无变更，跳过全局关系解析")
+		return result, err
+	}
 
 	// 触发跨文件调用解析
-	logInfo("SyncAllFilesAstraMap: 扫描完成 %d 文件, %d 更新, 解析全局关系", scanned, updated)
 	_ = ResolveGoInterfaces(db)
-	_ = ResolveWebRoutes(db, projectRoot)
-	if err2 := ResolveCrossFileCalls(db, projectRoot); err2 != nil {
+	_ = ResolveWebRoutesForFiles(db, projectRoot, result.UpdatedFiles)
+	if err2 := ResolveCrossFileCallsForFiles(db, projectRoot, updatedFiles); err2 != nil {
 		logError("ResolveCrossFileCalls failed: %v", err2)
 	}
 
 	logInfo("SyncAllFilesAstraMap: 就绪, %d 文件, %d 更新", scanned, updated)
-	return err
+	return result, err
 }
 
-func PruneExcludedFiles(db *sqlx.DB, filter *IndexFilter) error {
+func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []string, langFilter ...string) (SyncAllFilesResult, error) {
+	result := SyncAllFilesResult{}
+	if len(paths) == 0 {
+		return result, nil
+	}
+
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return result, fmt.Errorf("读取 AstraMap 配置失败: %w", err)
+	}
+
+	extensions := indexExtensions(langFilter...)
+	seen := make(map[string]bool)
+	for _, rawPath := range paths {
+		if rawPath == "" {
+			continue
+		}
+		absPath := rawPath
+		if !filepath.IsAbs(absPath) {
+			absPath = filepath.Join(projectRoot, rawPath)
+		}
+		relPath, relErr := filepath.Rel(projectRoot, absPath)
+		if relErr != nil {
+			continue
+		}
+		relPath = filepath.ToSlash(relPath)
+		if seen[relPath] {
+			continue
+		}
+		seen[relPath] = true
+
+		info, statErr := os.Stat(absPath)
+		if statErr == nil && info.IsDir() {
+			if !filter.AllowsDir(relPath, StageTreeSitter) {
+				continue
+			}
+			result.PrunedDeleted += pruneDeletedUnderPath(db, projectRoot, relPath)
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(absPath))
+		if ext == "" {
+			if statErr != nil {
+				result.PrunedDeleted += pruneDeletedUnderPath(db, projectRoot, relPath)
+			}
+			continue
+		}
+		if !extensions[ext] {
+			continue
+		}
+
+		if statErr == nil && !filter.Allows(relPath, StageTreeSitter) {
+			if removed, removeErr := removeIndexedFile(db, relPath); removeErr != nil {
+				return result, removeErr
+			} else if removed {
+				result.Pruned = true
+			}
+			continue
+		}
+
+		result.Scanned++
+		changed, err := SyncFileAstraMap(db, projectRoot, absPath)
+		if err != nil {
+			return result, err
+		}
+		if changed {
+			result.Updated++
+			result.UpdatedFiles = append(result.UpdatedFiles, relPath)
+		}
+	}
+
+	if result.Updated == 0 && !result.Pruned && result.PrunedDeleted == 0 {
+		return result, nil
+	}
+
+	_ = ResolveGoInterfaces(db)
+	_ = ResolveWebRoutesForFiles(db, projectRoot, result.UpdatedFiles)
+	if err := ResolveCrossFileCallsForFiles(db, projectRoot, result.UpdatedFiles); err != nil {
+		logError("ResolveCrossFileCalls failed: %v", err)
+	}
+	return result, nil
+}
+
+func indexExtensions(langFilter ...string) map[string]bool {
+	extensions := make(map[string]bool)
+	for _, lang := range langFilter {
+		for _, ext := range LangExts[lang] {
+			extensions[ext] = true
+		}
+	}
+	if len(extensions) == 0 {
+		for ext := range allIndexExts {
+			extensions[ext] = true
+		}
+	}
+	return extensions
+}
+
+func pruneDeletedUnderPath(db *sqlx.DB, projectRoot, relPath string) int {
+	var files []string
+	if err := db.Select(&files, "SELECT path FROM astramap_files WHERE path = ? OR path LIKE ?", relPath, strings.TrimRight(relPath, "/")+"/%"); err != nil {
+		return 0
+	}
+	pruned := 0
+	for _, filePath := range files {
+		if _, err := os.Stat(filepath.Join(projectRoot, filePath)); err == nil {
+			continue
+		}
+		if removed, err := removeIndexedFile(db, filePath); err == nil && removed {
+			pruned++
+		}
+	}
+	return pruned
+}
+
+func removeIndexedFile(db *sqlx.DB, relPath string) (bool, error) {
+	res, err := db.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
+	if err != nil {
+		return false, err
+	}
+	affected := int64(0)
+	if res != nil {
+		affected, _ = res.RowsAffected()
+	}
+	res, err = db.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
+	if err != nil {
+		return false, err
+	}
+	if res != nil {
+		if rows, rowErr := res.RowsAffected(); rowErr == nil {
+			affected += rows
+		}
+	}
+	res, err = db.Exec("DELETE FROM astramap_files WHERE path = ?", relPath)
+	if err != nil {
+		return false, err
+	}
+	if res != nil {
+		if rows, rowErr := res.RowsAffected(); rowErr == nil {
+			affected += rows
+		}
+	}
+	return affected > 0, nil
+}
+
+func PruneExcludedFiles(db *sqlx.DB, filter *IndexFilter) (bool, error) {
 	var files []string
 	if err := db.Select(&files, "SELECT path FROM astramap_files"); err != nil {
-		return fmt.Errorf("query indexed files failed: %w", err)
+		return false, fmt.Errorf("query indexed files failed: %w", err)
 	}
 
 	tx, err := db.Beginx()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
 
+	pruned := false
 	for _, filePath := range files {
 		if filter.Allows(filePath, StageTreeSitter) || filter.Allows(filePath, StageScip) {
 			continue
 		}
 
 		if _, err := tx.Exec(
-			"DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ?) OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ?)",
+			"DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')",
 			filePath, filePath,
 		); err != nil {
-			return fmt.Errorf("delete edges for excluded file %s failed: %w", filePath, err)
+			return false, fmt.Errorf("delete edges for excluded file %s failed: %w", filePath, err)
 		}
 
-		if _, err := tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ?", filePath); err != nil {
-			return fmt.Errorf("delete nodes for excluded file %s failed: %w", filePath, err)
+		if _, err := tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", filePath); err != nil {
+			return false, fmt.Errorf("delete nodes for excluded file %s failed: %w", filePath, err)
 		}
 		if _, err := tx.Exec("DELETE FROM astramap_files WHERE path = ?", filePath); err != nil {
-			return fmt.Errorf("delete indexed file %s failed: %w", filePath, err)
+			return false, fmt.Errorf("delete indexed file %s failed: %w", filePath, err)
+		}
+		pruned = true
+	}
+
+	return pruned, tx.Commit()
+}
+
+// PruneDeletedFiles removes DB records for files that no longer exist on disk.
+func PruneDeletedFiles(db *sqlx.DB, projectRoot string) (int, error) {
+	var files []string
+	if err := db.Select(&files, "SELECT path FROM astramap_files"); err != nil {
+		return 0, fmt.Errorf("query indexed files failed: %w", err)
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	pruned := 0
+	for _, filePath := range files {
+		absPath := filepath.Join(projectRoot, filePath)
+		if _, err := os.Stat(absPath); err != nil && os.IsNotExist(err) {
+			if _, err := tx.Exec(
+				"DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')",
+				filePath, filePath,
+			); err != nil {
+				return pruned, fmt.Errorf("delete edges for deleted file %s failed: %w", filePath, err)
+			}
+			if _, err := tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", filePath); err != nil {
+				return pruned, fmt.Errorf("delete nodes for deleted file %s failed: %w", filePath, err)
+			}
+			if _, err := tx.Exec("DELETE FROM astramap_files WHERE path = ?", filePath); err != nil {
+				return pruned, fmt.Errorf("delete file record %s failed: %w", filePath, err)
+			}
+			pruned++
 		}
 	}
 
-	return tx.Commit()
+	if pruned > 0 {
+		return pruned, tx.Commit()
+	}
+	return 0, nil
 }
 
 // ProvenanceStats returns node counts by language and edge counts by provenance.
@@ -803,13 +1277,7 @@ func ProvenanceStats(db *sqlx.DB) (map[string]int, map[string]int, error) {
 }
 
 func shouldSkipIndexDir(name string) bool {
-	switch name {
-	case ".git", ".astramap", ".understand-anything", ".cache", ".idea", ".vscode",
-		"node_modules", "build", "dist", "vendor", "target", "out", "tmp", "temp":
-		return true
-	default:
-		return strings.HasPrefix(name, ".trash")
-	}
+	return strings.HasPrefix(name, ".") && name != "." && name != ".."
 }
 
 // ===== Heuristic Resolvers (启发式粘合解析器) =====
@@ -910,6 +1378,17 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 
 // ResolveWebRoutes Web 路由反射处理器：扫描路由绑定并建立从路由到控制层 Handler 的边
 func ResolveWebRoutes(db *sqlx.DB, projectRoot string) error {
+	return resolveWebRoutes(db, projectRoot, nil)
+}
+
+func ResolveWebRoutesForFiles(db *sqlx.DB, projectRoot string, files []string) error {
+	if len(files) == 0 {
+		return nil
+	}
+	return resolveWebRoutes(db, projectRoot, files)
+}
+
+func resolveWebRoutes(db *sqlx.DB, projectRoot string, files []string) error {
 	var handlers []struct {
 		ID            string `db:"id"`
 		Name          string `db:"name"`
@@ -917,9 +1396,41 @@ func ResolveWebRoutes(db *sqlx.DB, projectRoot string) error {
 		QualifiedName string `db:"qualified_name"`
 	}
 
-	err := db.Select(&handlers, "SELECT id, name, file_path, qualified_name FROM astramap_nodes WHERE kind IN ('function', 'method')")
-	if err != nil {
-		return err
+	if len(files) == 0 {
+		if err := db.Select(&handlers, "SELECT id, name, file_path, qualified_name FROM astramap_nodes WHERE kind IN ('function', 'method')"); err != nil {
+			return err
+		}
+	} else {
+		seen := make(map[string]bool, len(files))
+		var relFiles []string
+		for _, filePath := range files {
+			if filePath == "" {
+				continue
+			}
+			relPath := filePath
+			if filepath.IsAbs(relPath) {
+				if rel, relErr := filepath.Rel(projectRoot, relPath); relErr == nil {
+					relPath = rel
+				}
+			}
+			relPath = filepath.ToSlash(relPath)
+			if seen[relPath] {
+				continue
+			}
+			seen[relPath] = true
+			relFiles = append(relFiles, relPath)
+		}
+		if len(relFiles) == 0 {
+			return nil
+		}
+		query, args, err := sqlx.In("SELECT id, name, file_path, qualified_name FROM astramap_nodes WHERE kind IN ('function', 'method') AND file_path IN (?)", relFiles)
+		if err != nil {
+			return err
+		}
+		query = db.Rebind(query)
+		if err := db.Select(&handlers, query, args...); err != nil {
+			return err
+		}
 	}
 
 	tx, err := db.Beginx()
@@ -928,13 +1439,35 @@ func ResolveWebRoutes(db *sqlx.DB, projectRoot string) error {
 	}
 	defer tx.Rollback()
 
-	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'heuristic' AND kind = 'route'")
-	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE kind = 'route'")
+	if len(files) == 0 {
+		_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'heuristic' AND kind = 'route'")
+		_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE kind = 'route'")
+	} else {
+		for _, filePath := range files {
+			relPath := filePath
+			if filepath.IsAbs(relPath) {
+				if rel, relErr := filepath.Rel(projectRoot, relPath); relErr == nil {
+					relPath = rel
+				}
+			}
+			relPath = filepath.ToSlash(relPath)
+			_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'heuristic' AND kind = 'route' AND source IN (SELECT id FROM astramap_nodes WHERE kind = 'route' AND file_path = ?)", relPath)
+			_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE kind = 'route' AND file_path = ?", relPath)
+		}
+	}
 
 	routeRe := regexp.MustCompile(`(?:\.GET|\.POST|\.PUT|\.DELETE|@app\.[a-z]+)\(\s*["']([^"']+)["']\s*,\s*([a-zA-Z0-9_]+)`)
 
+	handlersByFile := make(map[string]map[string][]string)
 	for _, handler := range handlers {
-		absPath := filepath.Join(projectRoot, handler.FilePath)
+		if handlersByFile[handler.FilePath] == nil {
+			handlersByFile[handler.FilePath] = make(map[string][]string)
+		}
+		handlersByFile[handler.FilePath][handler.Name] = append(handlersByFile[handler.FilePath][handler.Name], handler.ID)
+	}
+
+	for filePath, handlersByName := range handlersByFile {
+		absPath := filepath.Join(projectRoot, filePath)
 		content, err := os.ReadFile(absPath)
 		if err != nil {
 			continue
@@ -945,103 +1478,23 @@ func ResolveWebRoutes(db *sqlx.DB, projectRoot string) error {
 			routePath := m[1]
 			handlerName := m[2]
 
-			if handler.Name == handlerName {
+			for _, handlerID := range handlersByName[handlerName] {
 				routeUSN := fmt.Sprintf("route:%s", routePath)
 				_, _ = tx.Exec(`
 					INSERT INTO astramap_nodes (id, kind, name, qualified_name, file_path, language, start_line, end_line, updated_at)
 					VALUES (?, 'route', ?, ?, ?, 'http', 0, 0, ?)
 					ON CONFLICT(id) DO NOTHING
-				`, routeUSN, routePath, routePath, handler.FilePath, time.Now().Unix())
+				`, routeUSN, routePath, routePath, filePath, time.Now().Unix())
 
 				_, _ = tx.Exec(`
 					INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, metadata)
 					VALUES (?, ?, 'calls', 'heuristic', '')
-				`, routeUSN, handler.ID)
+				`, routeUSN, handlerID)
 			}
 		}
 	}
 
 	return tx.Commit()
-}
-
-// ===== Verdict (审计缺陷) 缓存与入库 =====
-
-func syncVerdictsFromProject(tx *sqlx.Tx, projectRoot string) error {
-	verdictPath := filepath.Join(projectRoot, "verdict.json")
-	if _, err := os.Stat(verdictPath); os.IsNotExist(err) {
-		jobsDir := filepath.Join(projectRoot, "jobs")
-		_ = filepath.Walk(jobsDir, func(path string, info os.FileInfo, err error) error {
-			if err == nil && info.Name() == "verdict.json" {
-				verdictPath = path
-			}
-			return nil
-		})
-	}
-
-	data, err := os.ReadFile(verdictPath)
-	if err != nil {
-		return nil
-	}
-
-	type verdictItem struct {
-		RuleID      string `json:"rule_id"`
-		SymbolID    string `json:"symbol_id"`
-		Decision    string `json:"decision"`
-		Description string `json:"description"`
-		Suggestion  string `json:"suggestion"`
-		Operator    string `json:"operator"`
-	}
-
-	var items []verdictItem
-	if err := json.Unmarshal(data, &items); err != nil {
-		var dictMap map[string]interface{}
-		if err2 := json.Unmarshal(data, &dictMap); err2 == nil {
-			for k, v := range dictMap {
-				if m, ok := v.(map[string]interface{}); ok {
-					dec, _ := m["decision"].(string)
-					desc, _ := m["description"].(string)
-					sug, _ := m["suggestion"].(string)
-					op, _ := m["operator"].(string)
-					rule, _ := m["rule_id"].(string)
-					items = append(items, verdictItem{
-						SymbolID:    k,
-						RuleID:      rule,
-						Decision:    dec,
-						Description: desc,
-						Suggestion:  sug,
-						Operator:    op,
-					})
-				}
-			}
-		} else {
-			return err
-		}
-	}
-
-	_, _ = tx.Exec("DELETE FROM astramap_verdicts")
-
-	verdictStmt, err := tx.Preparex(`
-		INSERT INTO astramap_verdicts (symbol_id, has_active_defect, stage, decision, rule_id, description, suggestion, operator, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return err
-	}
-	defer verdictStmt.Close()
-
-	now := time.Now().Unix()
-	for _, item := range items {
-		hasActive := 0
-		if item.Decision == "REJECT" {
-			hasActive = 1
-		}
-		_, _ = verdictStmt.Exec(
-			item.SymbolID, hasActive, "final_verdict", item.Decision,
-			item.RuleID, item.Description, item.Suggestion, item.Operator, now,
-		)
-	}
-
-	return nil
 }
 
 // ===== SCIP 辅组函数移接 =====
@@ -1070,6 +1523,7 @@ func extractSymbolInfo(sym string, infoMap map[string]*scip.SymbolInformation) s
 				symType, isFunc = getSymbolTypeFromSuffix(parsed.Descriptors[len(parsed.Descriptors)-1].Suffix, sym)
 			}
 		}
+		symType = refineCSymbolType(sym, name, symType)
 		return scipSymbolInfo{
 			name:    name,
 			symType: symType,
@@ -1081,6 +1535,7 @@ func extractSymbolInfo(sym string, infoMap map[string]*scip.SymbolInformation) s
 	if err == nil && len(parsed.Descriptors) > 0 {
 		lastDesc := parsed.Descriptors[len(parsed.Descriptors)-1]
 		symType, isFunc := getSymbolTypeFromSuffix(lastDesc.Suffix, sym)
+		symType = refineCSymbolType(sym, lastDesc.Name, symType)
 		return scipSymbolInfo{
 			name:    lastDesc.Name,
 			symType: symType,
@@ -1103,7 +1558,11 @@ func getSymbolTypeFromKind(kind scip.SymbolInformation_Kind) (string, bool) {
 	switch kind {
 	case scip.SymbolInformation_Interface:
 		return "interface", false
-	case scip.SymbolInformation_Class, scip.SymbolInformation_Struct:
+	case scip.SymbolInformation_Class:
+		return "class", false
+	case scip.SymbolInformation_Enum:
+		return "enum", false
+	case scip.SymbolInformation_Struct:
 		return "struct", false
 	case scip.SymbolInformation_Method:
 		return "method", true
@@ -1128,7 +1587,10 @@ func getSymbolTypeFromSuffix(suffix scip.Descriptor_Suffix, sym string) (string,
 		}
 		return "variable", false
 	case scip.Descriptor_Type:
-		return "struct", false
+		if strings.HasPrefix(sym, "scip-go") {
+			return "struct", false
+		}
+		return "class", false
 	case scip.Descriptor_Macro:
 		return "macro", false
 	case scip.Descriptor_Parameter, scip.Descriptor_TypeParameter:
@@ -1136,6 +1598,20 @@ func getSymbolTypeFromSuffix(suffix scip.Descriptor_Suffix, sym string) (string,
 	default:
 		return "variable", false
 	}
+}
+
+func refineCSymbolType(sym, name, symType string) string {
+	if !strings.HasPrefix(sym, "cxx ") && !strings.HasPrefix(sym, "c ") {
+		return symType
+	}
+	if symType != "class" && symType != "type" {
+		return symType
+	}
+	lowerName := strings.ToLower(strings.TrimSuffix(name, "#"))
+	if strings.HasSuffix(lowerName, "_e") || strings.Contains(lowerName, "enum") {
+		return "enum"
+	}
+	return "struct"
 }
 
 func parseSymbolNameFallback(sym string) string {
