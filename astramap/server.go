@@ -329,6 +329,10 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			return
 		}
 
+		if resolvedID, resolveErr := resolvePrimarySymbolID(readDB, nodeID); resolveErr == nil && resolvedID != "" {
+			nodeID = resolvedID
+		}
+
 		nodes, edges, err := QueryTraceCTE(readDB, nodeID, depth)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
