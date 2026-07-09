@@ -165,13 +165,17 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			json.NewEncoder(w).Encode([]struct{}{})
 			return
 		}
-		callers, err := GetCallers(readDB, resolvedID)
+		limit := 100
+		if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
+			limit = v
+		}
+		callers, err := GetCallersLimited(readDB, resolvedID, limit)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
-		
+
 		nodeIDs := make([]string, 0, len(callers)*2)
 		for _, edge := range callers {
 			nodeIDs = append(nodeIDs, edge.Source, edge.Target)
@@ -213,7 +217,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
-		
+
 		nodeIDs := make([]string, 0, len(callees)*2)
 		for _, edge := range callees {
 			nodeIDs = append(nodeIDs, edge.Source, edge.Target)
@@ -333,7 +337,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			nodeID = resolvedID
 		}
 
-		nodes, edges, err := QueryTraceCTE(readDB, nodeID, depth)
+		nodes, edges, err := QueryTraceCTE(readDB, projectRoot, nodeID, depth)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -386,11 +390,25 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			})
 		}
 
-		respEdges := make([]ResponseEdge, 0)
+		// 利用已有的 nodes 构建 canonical ID 映射，消除 BatchCanonicalSymbolIDs 的重复 SELECT *
+		canonicalIDs := make(map[string]string, len(nodes))
+		for _, n := range nodes {
+			canonicalIDs[n.ID] = CanonicalSymbolID(n)
+		}
+
+		respEdges := make([]ResponseEdge, 0, len(edges))
 		for _, e := range edges {
+			fromID := canonicalIDs[e.Source]
+			if fromID == "" {
+				fromID = e.Source
+			}
+			toID := canonicalIDs[e.Target]
+			if toID == "" {
+				toID = e.Target
+			}
 			respEdges = append(respEdges, ResponseEdge{
-				From:     CanonicalSymbolIDForNodeID(readDB, e.Source),
-				To:       CanonicalSymbolIDForNodeID(readDB, e.Target),
+				From:     fromID,
+				To:       toID,
 				Metadata: e.Metadata,
 			})
 		}
@@ -511,8 +529,9 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 	mux.HandleFunc("/api/complexity/calculate", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req struct {
-			FilePath string `json:"file_path"`
-			SymbolID string `json:"symbol_id"`
+			FilePath  string   `json:"file_path"`
+			SymbolID  string   `json:"symbol_id"`
+			SymbolIDs []string `json:"symbol_ids"`
 		}
 		if r.Method == http.MethodPost {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -527,7 +546,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		if req.SymbolID == "" {
 			req.SymbolID = r.URL.Query().Get("symbol_id")
 		}
-		metrics, err := calculateComplexityMetrics(readDB, projectRoot, req.FilePath, req.SymbolID)
+		metrics, err := calculateComplexityMetrics(readDB, projectRoot, req.FilePath, req.SymbolID, req.SymbolIDs)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -545,12 +564,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 	}
 	staticHandler := http.FileServer(http.FS(subFS))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".min.js") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else if strings.HasSuffix(path, ".html") || path == "/" {
-			w.Header().Set("Cache-Control", "no-cache")
-		}
+		setStaticCacheHeaders(w, r.URL.Path)
 		staticHandler.ServeHTTP(w, r)
 	}))
 
@@ -576,18 +590,61 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+func setStaticCacheHeaders(w http.ResponseWriter, path string) {
+	switch {
+	case strings.HasSuffix(path, ".js"), strings.HasSuffix(path, ".css"), strings.HasSuffix(path, ".min.js"):
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	case strings.HasSuffix(path, ".html"), path == "/":
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+}
+
+func shouldGzipResponse(r *http.Request, header http.Header, path string) bool {
+	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		return false
+	}
+	if header.Get("Content-Encoding") != "" {
+		return false
+	}
+	if strings.HasPrefix(path, "/api/") {
+		return true
+	}
+	contentType := header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "text/") ||
+		strings.Contains(contentType, "application/json") ||
+		strings.Contains(contentType, "application/javascript") {
+		return true
+	}
+	return strings.HasSuffix(path, ".js") ||
+		strings.HasSuffix(path, ".css") ||
+		strings.HasSuffix(path, ".html") ||
+		strings.HasSuffix(path, ".json") ||
+		path == "/"
+}
+
 func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		if !shouldGzipResponse(r, w.Header(), r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
+		w.Header().Add("Vary", "Accept-Encoding")
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Del("Content-Length")
 		gz := gzip.NewWriter(w)
 		defer gz.Close()
 		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
 	})
+}
+
+func resetTimer(t *time.Timer, d time.Duration) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
 }
 
 func readSnippetLines(projectRoot, relFile string, start, count int) ([]string, error) {
@@ -1052,9 +1109,18 @@ type docDirStat struct {
 	nodes    []*AstraMapNode
 }
 
-func calculateComplexityMetrics(db *sqlx.DB, projectRoot, filePath, symbolID string) ([]complexityMetric, error) {
+func calculateComplexityMetrics(db *sqlx.DB, projectRoot, filePath, symbolID string, symbolIDs []string) ([]complexityMetric, error) {
 	var nodes []*AstraMapNode
-	if symbolID != "" {
+	if len(symbolIDs) > 0 {
+		query, args, err := sqlx.In("SELECT * FROM astramap_nodes WHERE id IN (?)", symbolIDs)
+		if err != nil {
+			return nil, err
+		}
+		query = db.Rebind(query)
+		if err := db.Select(&nodes, query, args...); err != nil {
+			return nil, err
+		}
+	} else if symbolID != "" {
 		var n AstraMapNode
 		if err := db.Get(&n, "SELECT * FROM astramap_nodes WHERE id = ? LIMIT 1", symbolID); err != nil {
 			return nil, err
@@ -2418,12 +2484,8 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 	mu := sync.Mutex{}
 
 	debounceTmr := time.NewTimer(2 * time.Second)
-	if !debounceTmr.Stop() {
-		select {
-		case <-debounceTmr.C:
-		default:
-		}
-	}
+	resetTimer(debounceTmr, 24*time.Hour)
+	debounceTmr.Stop()
 
 	for {
 		select {
@@ -2450,7 +2512,7 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			mu.Lock()
 			debounce[event.Name] = time.Now()
 			mu.Unlock()
-			debounceTmr.Reset(2 * time.Second)
+			resetTimer(debounceTmr, 2*time.Second)
 		case <-debounceTmr.C:
 			mu.Lock()
 			now := time.Now()
