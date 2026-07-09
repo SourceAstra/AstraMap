@@ -1,11 +1,11 @@
 /**
  * SourceAstra - Understand Module v2.0 (完全重写)
  * Design.md 3.0 规格：追踪视图 (核心攻坚区)
- * 
+ *
  * 架构：双面板布局
  *   左: D3 Canvas 追踪拓扑图 (DAG flow + 流光动画)
  *   右: C 源码预览 (语法高亮)
- * 
+ *
  * 核心能力：
  *   - 多终点路径裁剪 (Path Clipping)
  *   - 流光影响分析 (Impact Flow Animation)
@@ -20,6 +20,8 @@
     let traceNodes = [];
     let traceLinks = [];
     let traceNodeMap = new Map(); // O(1) 节点索引
+    let traceLinkMap = new Map(); // O(1) 边索引
+    let visibleNodeSet = new Set(); // O(1) 可见节点索引
     let _graphDirty = true; // 脏标记：仅数据/变换变更时全量重绘
     let _cachedNodeGrads = {}; // 缓存节点渐变，按类型复用
     let rawNodes = [];
@@ -40,6 +42,16 @@
         return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     }
 
+    function traceEndpointID(endpoint) {
+        return typeof endpoint === 'object' ? endpoint.id : endpoint;
+    }
+
+    function rebuildTraceIndexes() {
+        traceNodeMap = new Map(traceNodes.map(n => [n.id, n]));
+        traceLinkMap = new Map(traceLinks.map(l => [`${traceEndpointID(l.source)}\x00${traceEndpointID(l.target)}`, l]));
+        visibleNodeSet = new Set(traceNodes.map(n => n.id));
+    }
+
     function directoryGroupForNode(node) {
         if (!node || !node.file) {
             return node && node.type === 'unknown'
@@ -49,6 +61,90 @@
         const parts = node.file.replace(/\\/g, '/').split('/');
         const dir = parts.length > 1 && parts[0] ? parts[0] : '(root)';
         return { id: dir, name: dir, level: 3 };
+    }
+
+    function isDeclarationFile(file) {
+        if (!file) return false;
+        const f = file.toLowerCase();
+        return f.endsWith('.h') || f.endsWith('.hpp') || f.endsWith('.hh') || f.endsWith('.hxx') || f.endsWith('.inl') || f.endsWith('.ipp') || f.endsWith('.d.ts') || (window.isSourceDeclarationFile && window.isSourceDeclarationFile(file));
+    }
+
+    function isGeneratedCode(file, name) {
+        if (file) {
+            const f = file.toLowerCase();
+            if (f.endsWith('.pb.go') || f.includes('/zz_generated') || f.includes('\\zz_generated') || f.split('/').pop().startsWith('zz_generated')) {
+                return true;
+            }
+        }
+        if (name && /^(Get|Set)[A-Z]/.test(name)) {
+            return true;
+        }
+        return false;
+    }
+
+    function isWhiteListedKind(kindOrType) {
+        if (!kindOrType) return false;
+        const kt = kindOrType.toLowerCase();
+        const whiteList = ['function', 'method', 'route', 'handler', 'main', 'callback'];
+        return whiteList.some(item => kt.includes(item));
+    }
+
+    function isBlackListedKind(kindOrType) {
+        if (!kindOrType) return false;
+        const kt = kindOrType.toLowerCase();
+        const blackList = ['struct', 'class', 'interface', 'enum', 'typedef', 'variable', 'constant', 'field', 'property', 'macro', 'external'];
+        return blackList.some(item => kt.includes(item));
+    }
+
+    function traceNodeCanonicalKey(node) {
+        if (!node) return '';
+        if (node.qualifiedName) return `q:${node.qualifiedName}`;
+        const name = node.name || node.id || '';
+        const file = node.file || node.filePath || '';
+        const line = node.startLine || node.line || '';
+        return `${name}\x00${file}\x00${line}`;
+    }
+
+    function canonicalizeTraceGraph() {
+        const canonicalByKey = new Map();
+        const alias = new Map();
+        const nodes = [];
+
+        traceNodes.forEach(node => {
+            const key = traceNodeCanonicalKey(node);
+            const existing = canonicalByKey.get(key);
+            if (!existing) {
+                canonicalByKey.set(key, node);
+                alias.set(node.id, node.id);
+                nodes.push(node);
+                return;
+            }
+            if (existing.id !== rootNodeId && node.id === rootNodeId) {
+                const idx = nodes.indexOf(existing);
+                if (idx >= 0) nodes[idx] = node;
+                canonicalByKey.set(key, node);
+                alias.set(existing.id, node.id);
+                alias.set(node.id, node.id);
+                return;
+            }
+            alias.set(node.id, existing.id);
+        });
+
+        const edgeSeen = new Set();
+        const links = [];
+        traceLinks.forEach(link => {
+            const src = alias.get(traceEndpointID(link.source)) || traceEndpointID(link.source);
+            const tgt = alias.get(traceEndpointID(link.target)) || traceEndpointID(link.target);
+            if (!src || !tgt || src === tgt) return;
+            const key = `${src}\x00${tgt}`;
+            if (edgeSeen.has(key)) return;
+            edgeSeen.add(key);
+            links.push({ ...link, source: src, target: tgt });
+        });
+
+        traceNodes = nodes;
+        traceLinks = links;
+        rebuildTraceIndexes();
     }
 
     let showSystem = false;
@@ -71,7 +167,15 @@
 
     const Understand = {
         isTraceableSymbol(sym) {
-            return !!sym && (sym.type === 'function' || sym.kind === 'function' || sym.type === 'method' || sym.kind === 'method');
+            if (!sym) return false;
+            const name = sym.name || '';
+            const file = sym.file || sym.filePath || '';
+            const kind = sym.kind || sym.type || '';
+
+            if (isDeclarationFile(file)) return false;
+            if (isGeneratedCode(file, name)) return false;
+
+            return isWhiteListedKind(kind) && !isBlackListedKind(kind);
         },
 
         init(nodeOrId) {
@@ -138,6 +242,12 @@
                             </div>
                         </div>
                         <canvas id="und-canvas"></canvas>
+                        <div id="und-loading-overlay" class="und-loading-overlay">
+                            <div class="und-spinner-container">
+                                <div class="und-spinner"></div>
+                                <div class="und-loading-text">正在载入中...</div>
+                            </div>
+                        </div>
                         <div class="und-legend">
                             <div class="und-legend-item"><span class="und-dot" style="background:#f59e0b"></span>起点</div>
                             <div class="und-legend-item"><span class="und-dot" style="background:#38bdf8"></span>函数</div>
@@ -270,10 +380,10 @@
 
             // 依赖分析视图必须能独立加载函数/目录树，不能依赖探索视界先完成全局图初始化。
             if (!hasSymbols) {
-                
+
                 window._functionsLoading = true;
                 tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">正在加载函数与目录树...</div>';
-                
+
                 fetch('/api/astramap/functions')
                     .then(res => res.json())
                     .then(funcs => {
@@ -305,7 +415,7 @@
             const symbols = window.G_DATA && window.G_DATA.symbols ? Object.values(window.G_DATA.symbols) : [];
             const needle = (filterText || '').trim().toLowerCase();
             const funcs = symbols
-                .filter(s => s && (s.type === 'function' || s.kind === 'function' || s.type === 'method' || s.kind === 'method'))
+                .filter(s => Understand.isTraceableSymbol(s))
                 .filter(s => {
                     if (!needle) return true;
                     const hay = `${s.name || ''} ${s.qualifiedName || ''} ${s.file || s.filePath || ''}`.toLowerCase();
@@ -356,6 +466,16 @@
                         const id = btn.getAttribute('data-node-id');
                         const sym = window.G_DATA.symbols[id];
                         if (sym) this.startTrace(sym);
+                    };
+                    btn.oncontextmenu = (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const id = btn.getAttribute('data-node-id');
+                        const sym = (window.G_DATA && window.G_DATA.symbols && window.G_DATA.symbols[id]) || null;
+                        const target = sym || { id, name: btn.querySelector('.und-tree-function-name')?.textContent || id, type: 'function' };
+                        if (window.SourceAstra && window.SourceAstra.showContextMenu) {
+                            window.SourceAstra.showContextMenu(event.clientX, event.clientY, target.id || id, target.name || id);
+                        }
                     };
                 });
                 return;
@@ -440,14 +560,24 @@
                 const fillFunctions = () => {
                     if (!container || container.hasChildNodes()) return;
                     container.innerHTML = renderFunctionButtons(functionsByFile.get(filePath) || []);
-                    container.querySelectorAll('.und-tree-function').forEach(btn => {
-                        btn.onclick = () => {
-                            const id = btn.getAttribute('data-node-id');
-                            const sym = window.G_DATA.symbols[id];
-                            if (sym) this.startTrace(sym);
-                        };
-                    });
-                };
+                container.querySelectorAll('.und-tree-function').forEach(btn => {
+                    btn.onclick = () => {
+                        const id = btn.getAttribute('data-node-id');
+                        const sym = window.G_DATA.symbols[id];
+                        if (sym) this.startTrace(sym);
+                    };
+                    btn.oncontextmenu = (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const id = btn.getAttribute('data-node-id');
+                        const sym = (window.G_DATA && window.G_DATA.symbols && window.G_DATA.symbols[id]) || null;
+                        const target = sym || { id, name: btn.querySelector('.und-tree-function-name')?.textContent || id, type: 'function' };
+                        if (window.SourceAstra && window.SourceAstra.showContextMenu) {
+                            window.SourceAstra.showContextMenu(event.clientX, event.clientY, target.id || id, target.name || id);
+                        }
+                    };
+                });
+            };
                 if (details.open) {
                     fillFunctions();
                 }
@@ -463,11 +593,11 @@
             selectedModuleFilter = 'all';
             document.getElementById('und-empty').style.display = 'none';
             document.querySelector('.und-layout').style.display = 'flex';
-            
+
             rootNodeId = sym.id || sym.name;
             const depthSelect = document.getElementById('und-depth-select');
             const depth = depthSelect ? parseInt(depthSelect.value) : 1;
-            
+
             const fileLabel = sym.file || sym.filePath || '';
             const lineLabel = sym.startLine || sym.line || '';
             document.getElementById('und-root-label').textContent = [sym.name, fileLabel ? `${fileLabel}${lineLabel ? ':' + lineLabel : ''}` : ''].filter(Boolean).join(' · ');
@@ -476,7 +606,7 @@
             selectedNodeId = rootNodeId;
             this.showNodeInfo(sym);
             this.loadCodePreview(sym);
-            
+
             this.initCanvas();
             this.fetchTrace(rootNodeId, depth);
         },
@@ -489,7 +619,7 @@
             requestAnimationFrame(() => {
                 this.resizeTraceCanvas();
             });
-            
+
             // Also set initial size synchronously as fallback
             this.resizeTraceCanvas();
             traceCtx = traceCanvas.getContext('2d');
@@ -501,13 +631,13 @@
                     this.renderGraph();
                 });
                 d3.select(traceCanvas).call(traceZoom);
-                
+
                  // Click handler
                  d3.select(traceCanvas).on('click', (event) => {
                      const [mx, my] = d3.pointer(event, traceCanvas);
                      const sx = (mx - traceXform.x) / traceXform.k;
                      const sy = (my - traceXform.y) / traceXform.k;
- 
+
                      let closest = null;
                      traceNodes.forEach(n => {
                          if (n.x == null) return;
@@ -519,7 +649,7 @@
                              closest = n;
                          }
                      });
- 
+
                      if (closest) {
                          selectedNodeId = closest.id;
                          this.showNodeInfo(closest);
@@ -587,26 +717,17 @@
             _traceAbortCtrl = new AbortController();
             const signal = _traceAbortCtrl.signal;
 
+            const loadingOverlay = document.getElementById('und-loading-overlay');
+            if (loadingOverlay) loadingOverlay.classList.add('active');
+
             const jobId = sessionStorage.getItem('sourceastra_job_id');
             const url = `/api/trace?node_id=${encodeURIComponent(nodeId)}&depth=${depth}${jobId ? '&job=' + jobId : ''}`;
 
             try {
-                // 并行发起 trace、modules 和 complexity 三个请求
-                const [modulesRes, traceRes, compRes] = await Promise.all([
-                    fetch('/api/modules', { signal }),
-                    fetch(url, { signal }),
-                    fetch('/api/complexity/calculate', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({}),
-                        signal
-                    }).catch(() => null)
-                ]);
-                const modulesData = await modulesRes.json();
+                modulesList = [];
+                const traceRes = await fetch(url, { signal });
                 const data = await traceRes.json();
                 if (data.error) throw new Error(data.error);
-
-                modulesList = modulesData || [];
 
                 rawNodes = (data.nodes || []).map(n => ({ ...n }));
                 rawLinks = (data.links || []).map(l => ({
@@ -617,25 +738,41 @@
                 this.applyFilters();
                 this.buildGraph();
 
-                // 处理预加载的 complexity 数据
-                if (compRes && compRes.ok) {
-                    try {
-                        const results = await compRes.json();
-                        if (Array.isArray(results)) {
-                            results.forEach(metrics => {
-                                if (metrics.symbol_id) {
-                                    _cachedComplexity[metrics.symbol_id] = metrics;
-                                }
-                            });
-                            this.renderGraph();
-                        }
-                    } catch (err) {
-                        console.warn('[Understand v2] Failed to parse complexity data', err);
-                    }
-                }
+                if (loadingOverlay) loadingOverlay.classList.remove('active');
+
+                this.fetchTraceComplexity(signal);
             } catch (e) {
+                if (loadingOverlay) loadingOverlay.classList.remove('active');
                 if (e.name === 'AbortError') return;
                 console.error('[Understand v2] Trace error:', e);
+            }
+        },
+
+        async fetchTraceComplexity(signal) {
+            try {
+                const symbolIds = traceNodes.filter(n => n.id && n.type !== 'unknown').map(n => n.id);
+                if (!symbolIds.length) return;
+
+                const compRes = await fetch('/api/complexity/calculate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol_ids: symbolIds }),
+                    signal
+                });
+                if (compRes && compRes.ok) {
+                    const results = await compRes.json();
+                    if (Array.isArray(results)) {
+                        results.forEach(metrics => {
+                            if (metrics.symbol_id) {
+                                _cachedComplexity[metrics.symbol_id] = metrics;
+                            }
+                        });
+                        this.renderGraph();
+                    }
+                }
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                console.warn('[Understand v2] Failed to load complexity data', err);
             }
         },
 
@@ -645,8 +782,8 @@
             const canvas = document.getElementById('und-canvas');
             if (!canvas || !traceNodes.length) return;
 
-            // 重建 O(1) 节点索引
-            traceNodeMap = new Map(traceNodes.map(n => [n.id, n]));
+            // 重建 O(1) 图索引
+            rebuildTraceIndexes();
 
             window.SourceAstra.traceNodes = traceNodes;
             window.SourceAstra.traceLinks = traceLinks;
@@ -721,15 +858,15 @@
                 levelList.forEach(l => {
                     const mods = levelGroups[l];
                     const modIds = Object.keys(mods).sort();
-                    
+
                     modIds.forEach(mId => {
                         const nodes = mods[mId];
-                        
+
                         // 根据当前视图拥有的目录数量动态决定目标宽度和最大列数以利用大空间
                         const availableWidth = traceCanvas ? Math.max(800, traceCanvas.width - 160) : 1200;
                         const maxCols = totalModuleCount === 1 ? 8 : 4;
                         const targetWidth = totalModuleCount === 1 ? availableWidth : 820;
-                        
+
                         // 1. 按照 _layer 属性（拓扑深度）对节点进行分组以体现真实的层级关系
                         const layerMap = {};
                         nodes.forEach(n => {
@@ -739,7 +876,7 @@
                         });
 
                         const sortedLayers = Object.keys(layerMap).map(Number).sort((a, b) => a - b);
-                        
+
                         // 计算每个层级格栅的物理宽度，并求得最大宽度 innerW 以确保整个目录框整齐划一
                         const layerLayouts = [];
                         let maxLayerW = 220;
@@ -747,7 +884,7 @@
                         sortedLayers.forEach(ly => {
                             const rowNodes = layerMap[ly];
                             rowNodes.sort((a, b) => a.name.localeCompare(b.name));
-                            
+
                             const count = rowNodes.length;
                             // 动态计算该层级内卡片的平均宽度
                             let sumW = 0;
@@ -756,7 +893,7 @@
 
                             // 根据卡片平均宽度动态计算列数
                             const cols = Math.max(1, Math.min(count, Math.min(maxCols, Math.floor(targetWidth / (avgW + 40)))));
-                            
+
                             // 初始化每列的最大卡片宽度数组
                             const colMaxW = Array(cols).fill(0);
                             rowNodes.forEach((node, idx) => {
@@ -797,7 +934,7 @@
                         layerLayouts.forEach((layout, rowIdx) => {
                             const { nodes: rowNodes, cols, colCenters, layerW } = layout;
                             const layerOffset = (innerW - layerW) / 2; // 用于在目录内水平居中该层级
-                            
+
                             const startY = currentY;
                             let maxRowInLayer = 0;
 
@@ -846,7 +983,7 @@
                     const levelBoxes = moduleBoxes.filter(b => b.level === l);
                     const gapX = 60;
                     const totalW = levelBoxes.reduce((sum, b) => sum + b.boxW, 0) + (levelBoxes.length - 1) * gapX;
-                    
+
                     let startX = -totalW / 2;
                     let maxH = 0;
                     levelBoxes.forEach(b => {
@@ -871,11 +1008,11 @@
 
                 const canvasW = canvas.width || 1000;
                 const centerX = canvasW / 2;
-                
+
                 moduleBoxes.forEach(b => {
                     b.absX = centerX + b.boxX;
                     b.absY = b.boxY;
-                    
+
                     b.nodes.forEach(node => {
                         // node.relX 已经是节点中心的相对坐标，直接加偏移即为绝对中心 X
                         node.x = b.absX + b.paddingX + node.relX;
@@ -946,7 +1083,7 @@
                         for (let i = 0; i < layer.length - 1; i++) {
                             const curr = layer[i];
                             const next = layer[i+1];
-                            
+
                             const rightEdgeCurr = curr.x + (curr._nw || 220) / 2;
                             const leftEdgeNext = next.x - (next._nw || 220) / 2;
                             const actualOverlap = (rightEdgeCurr + 30) - leftEdgeNext;
@@ -1056,7 +1193,7 @@
 
             ctx.strokeStyle = isLightTheme ? 'rgba(0, 0, 0, 0.04)' : 'rgba(99, 102, 241, 0.05)';
             ctx.lineWidth = 0.8;
-            
+
             const gridSpacing = 40;
             const startGridX = Math.floor((-traceXform.x) / traceXform.k / gridSpacing) * gridSpacing - gridSpacing;
             const endGridX = startGridX + Math.ceil(w / traceXform.k / gridSpacing) * gridSpacing + gridSpacing * 2;
@@ -1090,7 +1227,7 @@
                     const radius = 12;
 
                     ctx.save();
-                    
+
                     // Glassmorphic background
                     const boxGrad = ctx.createLinearGradient(rx, ry, rx, ry + rh);
                     if (isLightTheme) {
@@ -1101,7 +1238,7 @@
                         boxGrad.addColorStop(1, 'rgba(15, 23, 42, 0.7)');
                     }
                     ctx.fillStyle = boxGrad;
-                    
+
                     const levelColors = isLightTheme ? [
                         'rgba(225, 29, 72, 0.7)',    // L0: Rose
                         'rgba(249, 115, 22, 0.75)',  // L1: Orange
@@ -1151,7 +1288,7 @@
                     ctx.lineTo(rx + 1, ry + 28);
                     ctx.closePath();
                     ctx.fill();
-                    
+
                     // Draw bottom border for title bar
                     ctx.strokeStyle = isLightTheme ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.05)';
                     ctx.lineWidth = 1;
@@ -1204,7 +1341,7 @@
 
                 const isImpact = l._impact;
                 const isSelectedPath = isImpact || tgt.id === selectedNodeId || src.id === selectedNodeId;
-                
+
                 let color;
                 if (isLightTheme) {
                     color = isSelectedPath ? '#e11d48' : 'rgba(0, 0, 0, 0.12)';
@@ -1221,7 +1358,7 @@
                 ctx.beginPath();
                 ctx.strokeStyle = color;
                 ctx.lineWidth = isSelectedPath ? 2.5 : 1.2;
-                
+
                 // Glow for active paths
                 if (isSelectedPath) {
                     ctx.shadowColor = color;
@@ -1261,7 +1398,7 @@
                     const midY = (y1 + y2) / 2;
 
                     const ct = (flowOffset + Math.random() * 0.08) % 1;
-                    
+
                     // Cubic Bezier interpolation function
                     const bezierPoint = (p0, p1, p2, p3, t) => {
                         const mt = 1 - t;
@@ -1426,7 +1563,7 @@
                     let ccColor = '#10b981';
                     if (cc > 20) ccColor = '#ef4444';
                     else if (cc > 10) ccColor = '#f59e0b';
-                    
+
                     ctx.fillStyle = ccColor;
                     ctx.beginPath();
                     ctx.rect(rx + nw - 6, ry + 10, 3, 30);
@@ -1443,15 +1580,15 @@
                     ctx.font = 'bold 9px "JetBrains Mono", monospace';
                     const badgeW = ctx.measureText(badgeText).width + 8;
                     const badgeH = 13;
-                    
+
                     const bx = rx + nw - badgeW - 12;
                     const by = ry + 8;
-                    
+
                     ctx.beginPath();
                     ctx.rect(bx, by, badgeW, badgeH);
                     ctx.fill();
                     ctx.stroke();
-                    
+
                     ctx.fillStyle = '#ef4444';
                     ctx.textAlign = 'center';
                     ctx.fillText(badgeText, bx + badgeW / 2, by + 9);
@@ -1509,7 +1646,7 @@
         fitToCanvas() {
             if (!traceCanvas || !traceNodes.length) return;
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            
+
             if (useGrouping && this.renderedModuleBoxes && this.renderedModuleBoxes.length > 0) {
                 this.renderedModuleBoxes.forEach(b => {
                     minX = Math.min(minX, b.absX);
@@ -1566,10 +1703,10 @@
             if (node.type === 'virtual_aggregate') {
                 titleLabel.textContent = '📁 ' + node.name;
                 fileLabel.textContent = '被折叠的辅助工具函数';
-                
+
                 let listHtml = `<div class="und-aggregate-list">`;
                 listHtml += `<div class="und-agg-tip">为了防止调用图连线交叉错乱，以下低入度或纯依赖性质的辅助函数已被智能折叠。点击任意函数可预览其源码：</div>`;
-                
+
                 node.foldedNodeIds.forEach(fnId => {
                     const sym = window.G_DATA && window.G_DATA.symbols[fnId];
                     const displayName = sym ? sym.name : fnId;
@@ -1785,11 +1922,19 @@
             // 声明/接口文件过滤规则：非起点节点不参与默认调用流展示。
             const isDeclarationFileNode = (n) => {
                 if (n.id === rootNodeId) return false;
-                if (!n.file) return false;
-                return window.isSourceDeclarationFile && window.isSourceDeclarationFile(n.file);
+                const file = n.file || n.filePath;
+                return isDeclarationFile(file);
+            };
+
+            const isGeneratedNode = (n) => {
+                if (n.id === rootNodeId) return false;
+                const file = n.file || n.filePath;
+                const name = n.name;
+                return isGeneratedCode(file, name);
             };
 
             if (showSystem) {
+                // 当开启 showSystem 时，显示更完整的关系，但也过滤掉声明文件节点，避免过度混乱
                 traceNodes = rawNodes.filter(n => !isDeclarationFileNode(n)).map(n => ({ ...n }));
                 const nodeIds = new Set(traceNodes.map(n => n.id));
                 traceLinks = rawLinks.filter(l => {
@@ -1798,8 +1943,16 @@
                     return nodeIds.has(src) && nodeIds.has(tgt);
                 }).map(l => ({ ...l }));
             } else {
-                // 默认只保留非未知节点且不是声明/接口文件节点的函数
-                traceNodes = rawNodes.filter(n => (n.id === rootNodeId || n.name === rootNodeId || n.type !== 'unknown') && !isDeclarationFileNode(n)).map(n => ({ ...n }));
+                // 默认仅展示控制流/调用流节点，默认隐藏无关节点与生成代码
+                traceNodes = rawNodes.filter(n => {
+                    if (n.id === rootNodeId || n.name === rootNodeId) return true;
+                    if (isDeclarationFileNode(n)) return false;
+                    if (isGeneratedNode(n)) return false;
+
+                    const kind = n.kind || n.type || '';
+                    return isWhiteListedKind(kind) && !isBlackListedKind(kind);
+                }).map(n => ({ ...n }));
+
                 const nodeIds = new Set(traceNodes.map(n => n.id));
                 traceLinks = rawLinks.filter(l => {
                     const src = typeof l.source === 'object' ? l.source.id : l.source;
@@ -1888,7 +2041,7 @@
             if (moduleSelect) {
                 const currentSelected = selectedModuleFilter || 'all';
                 moduleSelect.innerHTML = '<option value="all">全部目录</option>';
-                
+
                 const uniqueModules = new Set();
                 traceNodes.forEach(n => {
                     if (n._groupModuleId) {
@@ -1934,93 +2087,14 @@
                     return activeNodeIds.has(src) && activeNodeIds.has(tgt);
                 });
             }
+
+            canonicalizeTraceGraph();
         },
 
         pruneAndCloneGraph() {
             if (!traceNodes.length) return;
 
-            const rootId = rootNodeId;
-            const isPinnedDependency = (node) => {
-                if (!node) return false;
-                if (node.id === rootId) return true;
-                const name = (node.name || '').toLowerCase();
-                const file = (node.file || '').toLowerCase();
-                return name === 'drv_asw_api_acc' ||
-                    name === 'drv_asw_api_ioctl' ||
-                    name.includes('_api_acc') ||
-                    file.startsWith('driver/');
-            };
-
-            // 1. 统计各个过滤后节点的入度和出度
-            const inDegree = {};
-            const outDegree = {};
-            traceNodes.forEach(n => {
-                inDegree[n.id] = 0;
-                outDegree[n.id] = 0;
-            });
-            traceLinks.forEach(l => {
-                const src = typeof l.source === 'object' ? l.source.id : l.source;
-                const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-                inDegree[tgt] = (inDegree[tgt] || 0) + 1;
-                outDegree[src] = (outDegree[src] || 0) + 1;
-            });
-
-            // 2. 找出所有“公共叶子节点”（即入度 > 1，且出度 === 0 的外部依赖或辅助工具函数）
-            const commonLeaves = new Set();
-            traceNodes.forEach(n => {
-                if (n.id !== rootId && !isPinnedDependency(n) && inDegree[n.id] > 1 && outDegree[n.id] === 0) {
-                    commonLeaves.add(n.id);
-                }
-            });
-
-            // 3. 克隆公共叶子节点进行“局部化”解耦，消除大量交叉长线
-            const finalNodes = [];
-            const finalLinks = [];
-
-            const commonLeafNodesMap = {};
-            traceNodes.forEach(n => {
-                if (commonLeaves.has(n.id)) {
-                    commonLeafNodesMap[n.id] = n;
-                } else {
-                    finalNodes.push(n);
-                }
-            });
-
-            traceLinks.forEach(l => {
-                const src = typeof l.source === 'object' ? l.source.id : l.source;
-                const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-
-                if (commonLeaves.has(tgt)) {
-                    const originalLeaf = commonLeafNodesMap[tgt];
-                    if (originalLeaf) {
-                        const cloneId = originalLeaf.id + '_clone_' + src;
-                        if (!finalNodes.some(n => n.id === cloneId)) {
-                            finalNodes.push({
-                                ...originalLeaf,
-                                id: cloneId,
-                                isClone: true,
-                                originalId: originalLeaf.id
-                            });
-                        }
-                        finalLinks.push({
-                            source: src,
-                            target: cloneId,
-                            _impact: l._impact
-                        });
-                    }
-                } else {
-                    finalLinks.push({
-                        source: src,
-                        target: tgt,
-                        _impact: l._impact
-                    });
-                }
-            });
-
-            // 4. 对每个父节点的叶子节点不进行任何折叠聚合，以坚守完整调用领域及真实调用边展示的原则
-            traceNodes = finalNodes;
-            const activeNodeIds = new Set(traceNodes.map(n => n.id));
-            traceLinks = finalLinks.filter(l => activeNodeIds.has(l.source) && activeNodeIds.has(l.target));
+            canonicalizeTraceGraph();
         },
 
         saveCurrentPositions() {
@@ -2043,7 +2117,7 @@
         toggleSystemFunctions() {
             this.saveCurrentPositions();
             showSystem = !showSystem;
-            
+
             const btnDetail = document.getElementById('und-btn-detail');
             if (btnDetail) {
                 if (showSystem) btnDetail.classList.add('active');
@@ -2070,7 +2144,7 @@
                     const dx = e.clientX - startX;
                     const newW = Math.max(200, Math.min(window.innerWidth - 300, startWidth - dx));
                     codePanel.style.width = newW + 'px';
-                    
+
                     if (traceCanvas) {
                         self.resizeTraceCanvas();
                         self.renderGraph();
@@ -2120,7 +2194,7 @@
                     const collapsed = layout.classList.toggle('code-collapsed');
                     toggleBtn.textContent = collapsed ? '‹' : '›';
                     toggleBtn.title = collapsed ? '展开源码预览' : '收起源码预览';
-                    
+
                     // 重新计算并缩放画布
                     setTimeout(() => {
                         if (traceCanvas) {
@@ -2143,6 +2217,7 @@
 
     window.SourceAstra = window.SourceAstra || {};
     window.SourceAstra.initUnderstand = (nodeOrId) => Understand.init(nodeOrId);
+    window.SourceAstra.isTraceableSymbol = isTraceableSymbol;
     window.SourceAstra.loadAggregaterSource = (fnId) => {
         const sym = window.G_DATA && window.G_DATA.symbols[fnId];
         if (sym) {
@@ -2159,7 +2234,7 @@
     };
     window.SourceAstra.isolateModule = (moduleId) => {
         selectedModuleFilter = moduleId;
-        
+
         // 同步更新界面上的目录选择下拉菜单的值
         const moduleSelect = document.getElementById('und-module-select');
         if (moduleSelect) moduleSelect.value = moduleId;
@@ -2174,7 +2249,7 @@
     };
     window.SourceAstra.clearModuleIsolation = () => {
         selectedModuleFilter = 'all';
-        
+
         // 同步更新界面上的目录选择下拉菜单的值为"all"
         const moduleSelect = document.getElementById('und-module-select');
         if (moduleSelect) moduleSelect.value = 'all';
