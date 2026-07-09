@@ -40,8 +40,18 @@ const edgeCols = `id, source, target, kind, provenance, line, col, COALESCE(meta
 
 // GetCallers 查找指定符号的直接上游调用者
 func GetCallers(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
+	return GetCallersLimited(db, symbolID, 0)
+}
+
+func GetCallersLimited(db *sqlx.DB, symbolID string, limit int) ([]*AstraMapEdge, error) {
 	var edges []*AstraMapEdge
-	err := db.Select(&edges, "SELECT "+edgeCols+" FROM astramap_edges WHERE target = ? AND kind = 'calls'", symbolID)
+	query := "SELECT " + edgeCols + " FROM astramap_edges WHERE target = ? AND kind = 'calls' ORDER BY source, line, id"
+	args := []interface{}{symbolID}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	err := db.Select(&edges, query, args...)
 	for _, edge := range edges {
 		annotateConditionalMetadata(db, edge)
 	}
@@ -61,6 +71,17 @@ func GetCallees(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 // AnalyzeImpact 变更影响分析：递归追溯所有上游调用者并计算受损系数
 func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, error) {
 	maxDepth = normalizeImpactDepth(maxDepth)
+	rootCanonical := CanonicalSymbolIDForNodeID(db, symbolID)
+	if maxDepth == 0 {
+		return &ImpactResult{
+			RootSymbolID: rootCanonical,
+			AffectedNodes: []AffectedNodeSummary{{
+				SymbolID:    rootCanonical,
+				ImpactLevel: "ROOT",
+				Reason:      "根符号自身",
+			}},
+		}, nil
+	}
 
 	visited := make(map[string]int) // symbolID -> depth
 	queue := []string{symbolID}
@@ -95,7 +116,6 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 	}
 	canonicalMap, batchErr := BatchCanonicalSymbolIDs(db, symsToResolve)
 
-	rootCanonical := symbolID
 	if batchErr == nil {
 		if val, ok := canonicalMap[symbolID]; ok {
 			rootCanonical = val
