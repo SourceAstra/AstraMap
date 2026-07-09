@@ -448,7 +448,9 @@
             const old = document.getElementById('astramap-context-menu');
             if (old) old.remove();
             const sym = window.G_DATA && window.G_DATA.symbols && window.G_DATA.symbols[key];
-            const isFunction = sym && (sym.type === 'function' || sym.kind === 'function' || sym.kind === 'method');
+            const isFunction = !!(window.SourceAstra && typeof window.SourceAstra.isTraceableSymbol === 'function'
+                ? window.SourceAstra.isTraceableSymbol(sym || { id: key, name: name, type: 'function' })
+                : sym && (sym.type === 'function' || sym.kind === 'function' || sym.kind === 'method'));
             const menu = document.createElement('div');
             menu.id = 'astramap-context-menu';
             menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:4000;min-width:176px;padding:6px;background:#111827;border:1px solid rgba(148,163,184,.28);border-radius:8px;box-shadow:0 18px 40px rgba(0,0,0,.36);color:#e5e7eb;font-size:13px;`;
