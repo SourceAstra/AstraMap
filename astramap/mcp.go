@@ -179,6 +179,7 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 					Type: "object",
 					Properties: map[string]interface{}{
 						"symbol": map[string]string{"type": "string", "description": "目标符号ID"},
+						"limit":  map[string]string{"type": "integer", "description": "返回数量限制，默认 100"},
 					},
 					Required: []string{"symbol"},
 				},
@@ -304,27 +305,50 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		query, _ := argsMap["query"].(string)
 		maxFilesVal, _ := argsMap["maxFiles"].(float64)
 		maxFiles := int(maxFilesVal)
+		if maxFiles <= 0 {
+			maxFiles = 3
+		}
 
 		result, err2 := QueryExplore(db, query, projectRoot, maxFiles)
 		err = err2
 		if err == nil {
+			const outputBudget = 60000
+			truncated := false
 			var sb strings.Builder
 			sb.WriteString("### ── AstraMap 调用路径探寻与源码上下文 ──\n\n")
 			for _, fr := range result.Files {
 				for _, n := range fr.Symbols {
+					if sb.Len() >= outputBudget {
+						truncated = true
+						break
+					}
 					sb.WriteString(fmt.Sprintf("#### Symbol: %s (%s)\n", n.QualifiedName, n.Kind))
 					sb.WriteString(fmt.Sprintf("*Location*: `%s:%d-%d`\n", n.FilePath, n.StartLine, n.EndLine))
 					code, _ := ReadSourceRange(projectRoot, n.FilePath, n.StartLine, n.EndLine)
 					if code != "" {
+						if len(code) > 12000 {
+							code = code[:12000] + "\n/* ... truncated ... */"
+							truncated = true
+						}
 						sb.WriteString(fmt.Sprintf("```%s\n%s\n```\n", n.Language, code))
 					}
+				}
+				if truncated {
+					break
 				}
 			}
 			if len(result.Relationships) > 0 {
 				sb.WriteString("*Relationships*:\n")
 				for _, r := range result.Relationships {
+					if sb.Len() >= outputBudget {
+						truncated = true
+						break
+					}
 					sb.WriteString(fmt.Sprintf("  - %s\n", r))
 				}
+			}
+			if truncated {
+				sb.WriteString(fmt.Sprintf("\n_Result truncated. Pass a smaller `maxFiles` or a narrower query. Current maxFiles=%d._\n", maxFiles))
 			}
 			content = sb.String()
 		}
@@ -361,16 +385,25 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 
 	case "astramap_callers":
 		symbol, _ := argsMap["symbol"].(string)
+		limitVal, _ := argsMap["limit"].(float64)
+		limit := int(limitVal)
+		if limit <= 0 {
+			limit = 100
+		}
 		id, resolveErr := resolvePrimarySymbolID(db, symbol)
 		if resolveErr != nil || id == "" {
 			content = fmt.Sprintf("### Callers of %s:\n\nSymbol not found.\n", symbol)
 			break
 		}
-		callers, err2 := GetCallers(db, id)
+		callers, err2 := GetCallersLimited(db, id, limit+1)
 		err = err2
 		if err == nil {
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("### Callers of %s:\n\n", symbol))
+			truncated := len(callers) > limit
+			if truncated {
+				callers = callers[:limit]
+			}
 			for _, c := range callers {
 				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
 					CanonicalSymbolIDForNodeID(db, c.Source),
@@ -379,6 +412,9 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 				if c.Metadata != "" {
 					sb.WriteString(fmt.Sprintf("  - metadata: %s\n", c.Metadata))
 				}
+			}
+			if truncated {
+				sb.WriteString(fmt.Sprintf("\n_Result truncated to %d callers. Pass a higher `limit` to retrieve more._\n", limit))
 			}
 			content = sb.String()
 		}
