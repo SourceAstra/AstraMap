@@ -14,18 +14,45 @@ var (
 	filePathCache = make(map[string]string)
 	filePathMu    sync.RWMutex
 
-	fileContentCache = make(map[string][]string)
-	fileContentMu    sync.RWMutex
+	sourceLineCache = make(map[sourceCacheKey][]string)
+	sourceLineMu    sync.RWMutex
 )
+
+type sourceCacheKey struct {
+	ProjectRoot string
+	FilePath    string
+	ModTimeUnix int64
+	Size        int64
+}
 
 func InvalidateQueryHelperCache() {
 	filePathMu.Lock()
 	filePathCache = make(map[string]string)
 	filePathMu.Unlock()
 
-	fileContentMu.Lock()
-	fileContentCache = make(map[string][]string)
-	fileContentMu.Unlock()
+	sourceLineMu.Lock()
+	sourceLineCache = make(map[sourceCacheKey][]string)
+	sourceLineMu.Unlock()
+}
+
+func InvalidateQueryHelperCacheForFile(filePath string) {
+	filePath = filepath.ToSlash(strings.TrimPrefix(filepath.Clean(filePath), string(filepath.Separator)))
+
+	filePathMu.Lock()
+	for nodeID, cachedFilePath := range filePathCache {
+		if filepath.ToSlash(cachedFilePath) == filePath {
+			delete(filePathCache, nodeID)
+		}
+	}
+	filePathMu.Unlock()
+
+	sourceLineMu.Lock()
+	for key := range sourceLineCache {
+		if filepath.ToSlash(key.FilePath) == filePath {
+			delete(sourceLineCache, key)
+		}
+	}
+	sourceLineMu.Unlock()
 }
 
 var allowedSearchKinds = map[string]struct{}{
@@ -35,6 +62,8 @@ var allowedSearchKinds = map[string]struct{}{
 	"struct":    {},
 	"interface": {},
 	"enum":      {},
+	"typedef":   {},
+	"type":      {},
 	"macro":     {},
 	"variable":  {},
 	"route":     {},
@@ -52,7 +81,7 @@ func validateSearchKind(kind string) error {
 }
 
 func normalizeImpactDepth(depth int) int {
-	if depth <= 0 {
+	if depth < 0 {
 		return 1
 	}
 	return depth
@@ -70,6 +99,10 @@ func resolvePrimarySymbolID(db *sqlx.DB, symbol string) (string, error) {
 }
 
 func annotateConditionalMetadata(db *sqlx.DB, edge *AstraMapEdge) {
+	annotateConditionalMetadataWithFileMap(db, projectRootFromCwd(), nil, edge)
+}
+
+func annotateConditionalMetadataWithFileMap(db *sqlx.DB, projectRoot string, sourceFileMap map[string]string, edge *AstraMapEdge) {
 	if edge == nil || edge.Line <= 0 || edge.Source == "" {
 		return
 	}
@@ -77,11 +110,16 @@ func annotateConditionalMetadata(db *sqlx.DB, edge *AstraMapEdge) {
 		return
 	}
 
-	filePathMu.RLock()
-	filePath, ok := filePathCache[edge.Source]
-	filePathMu.RUnlock()
-
-	if !ok {
+	filePath := ""
+	if sourceFileMap != nil {
+		filePath = sourceFileMap[edge.Source]
+	}
+	if filePath == "" {
+		filePathMu.RLock()
+		filePath = filePathCache[edge.Source]
+		filePathMu.RUnlock()
+	}
+	if filePath == "" && db != nil {
 		var fp string
 		if err := db.Get(&fp, "SELECT file_path FROM astramap_nodes WHERE id = ? LIMIT 1", edge.Source); err == nil && fp != "" {
 			filePath = fp
@@ -95,17 +133,7 @@ func annotateConditionalMetadata(db *sqlx.DB, edge *AstraMapEdge) {
 		return
 	}
 
-	fileContentMu.RLock()
-	lines, ok := fileContentCache[filePath]
-	fileContentMu.RUnlock()
-
-	if !ok {
-		lines = readSourceLinesBestEffort(projectRootFromCwd(), filePath)
-		fileContentMu.Lock()
-		fileContentCache[filePath] = lines
-		fileContentMu.Unlock()
-	}
-
+	lines := cachedSourceLines(projectRoot, filePath)
 	if len(lines) == 0 {
 		return
 	}
@@ -115,6 +143,94 @@ func annotateConditionalMetadata(db *sqlx.DB, edge *AstraMapEdge) {
 		return
 	}
 	edge.Metadata = strings.Join(guards, " && ")
+}
+
+func BatchNodeFilePaths(db *sqlx.DB, ids []string) (map[string]string, error) {
+	result := make(map[string]string)
+	if len(ids) == 0 {
+		return result, nil
+	}
+	uniq := make(map[string]struct{})
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, exists := uniq[id]; exists {
+			continue
+		}
+		uniq[id] = struct{}{}
+		filePathMu.RLock()
+		filePath := filePathCache[id]
+		filePathMu.RUnlock()
+		if filePath != "" {
+			result[id] = filePath
+		}
+	}
+
+	missing := make([]string, 0, len(uniq))
+	for id := range uniq {
+		if result[id] == "" {
+			missing = append(missing, id)
+		}
+	}
+	const batchSize = 500
+	for i := 0; i < len(missing); i += batchSize {
+		end := i + batchSize
+		if end > len(missing) {
+			end = len(missing)
+		}
+		query, args, err := sqlx.In("SELECT id, file_path FROM astramap_nodes WHERE id IN (?)", missing[i:end])
+		if err != nil {
+			return nil, err
+		}
+		query = db.Rebind(query)
+		var rows []struct {
+			ID       string `db:"id"`
+			FilePath string `db:"file_path"`
+		}
+		if err := db.Select(&rows, query, args...); err != nil {
+			return nil, err
+		}
+		filePathMu.Lock()
+		for _, row := range rows {
+			if row.ID == "" || row.FilePath == "" {
+				continue
+			}
+			result[row.ID] = row.FilePath
+			filePathCache[row.ID] = row.FilePath
+		}
+		filePathMu.Unlock()
+	}
+	return result, nil
+}
+
+func cachedSourceLines(projectRoot, relPath string) []string {
+	if projectRoot == "" || relPath == "" {
+		return nil
+	}
+	stat, err := os.Stat(filepath.Join(projectRoot, relPath))
+	if err != nil {
+		return nil
+	}
+	key := sourceCacheKey{
+		ProjectRoot: projectRoot,
+		FilePath:    filepath.ToSlash(relPath),
+		ModTimeUnix: stat.ModTime().UnixNano(),
+		Size:        stat.Size(),
+	}
+
+	sourceLineMu.RLock()
+	lines, ok := sourceLineCache[key]
+	sourceLineMu.RUnlock()
+	if ok {
+		return lines
+	}
+
+	lines = readSourceLinesBestEffort(projectRoot, relPath)
+	sourceLineMu.Lock()
+	sourceLineCache[key] = lines
+	sourceLineMu.Unlock()
+	return lines
 }
 
 func projectRootFromCwd() string {
