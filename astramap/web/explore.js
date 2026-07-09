@@ -74,6 +74,45 @@
         }
     }
 
+    function isDeclarationFile(file) {
+        if (!file) return false;
+        const f = file.toLowerCase();
+        return f.endsWith('.h') || f.endsWith('.hpp') || f.endsWith('.hh') || f.endsWith('.hxx') ||
+            f.endsWith('.inl') || f.endsWith('.ipp') || f.endsWith('.d.ts') ||
+            (window.isSourceDeclarationFile && window.isSourceDeclarationFile(file));
+    }
+
+    function isGeneratedCode(file, name) {
+        if (file) {
+            const f = file.toLowerCase();
+            if (f.endsWith('.pb.go') || f.endsWith('.gen.go') || f.includes('/zz_generated') || f.includes('\\zz_generated')) {
+                return true;
+            }
+            const leaf = f.split('/').pop();
+            if (leaf && (leaf.startsWith('zz_generated') || leaf.includes('.generated.'))) {
+                return true;
+            }
+        }
+        return !!(name && /^(Get|Set)[A-Z]/.test(name));
+    }
+
+    function isTraceableSymbol(sym) {
+        if (!sym) return false;
+        const file = sym.file || sym.filePath || '';
+        const name = sym.name || '';
+        const kind = (sym.kind || sym.type || '').toLowerCase();
+        if (isDeclarationFile(file)) return false;
+        if (isGeneratedCode(file, name)) return false;
+        if (kind.includes('struct') || kind.includes('class') || kind.includes('interface') ||
+            kind.includes('enum') || kind.includes('typedef') || kind.includes('variable') ||
+            kind.includes('constant') || kind.includes('field') || kind.includes('property') ||
+            kind.includes('macro') || kind.includes('external')) {
+            return false;
+        }
+        return kind.includes('function') || kind.includes('method') || kind.includes('route') ||
+            kind.includes('handler') || kind.includes('main') || kind.includes('callback');
+    }
+
     // ── 卡片尺寸 ──
     const CARD = {
         width: 220,
@@ -442,10 +481,8 @@
             }
 
             // 兼容两种数据格式：/api/data 返回 {symbols, edges}，/api/hierarchy 返回 {nodes, links}
-            // 同时过滤声明/接口文件中的孤立节点，保持探索视图与源码星图口径一致。
-            const rawNodes = (this.rawData.symbols || this.rawData.nodes || []).filter(n => {
-                return !n.file || !window.isSourceDeclarationFile || !window.isSourceDeclarationFile(n.file);
-            });
+            // 同时过滤声明/接口文件中的孤立节点、生成代码以及非控制流节点，保持探索视图与源码星图口径一致。
+            const rawNodes = (this.rawData.symbols || this.rawData.nodes || []).filter(n => isTraceableSymbol(n));
             const rawLinks = this.rawData.edges || this.rawData.links || [];
 
             this.allNodesMap = {};
@@ -1789,7 +1826,7 @@
                     left:0;
                     margin-top:6px;
                     background:var(--panel-bg);
-                    backdrop-filter:blur(10px);
+                    backdrop-filter:blur(4px);
                     border:1px solid var(--panel-border);
                     border-radius:8px;
                     padding:6px;
@@ -1925,7 +1962,7 @@
                     let options = [];
                     if (fileData && fileData.functions) {
                         options = fileData.functions
-                            .filter(n => n.type === 'function')
+                            .filter(n => isTraceableSymbol(n))
                             .sort((a, b) => a.name.localeCompare(b.name))
                             .map(n => ({ value: n.id, label: n.name }));
                     }
@@ -2025,7 +2062,7 @@
                 let options = [];
                 if (fileData && fileData.functions) {
                     options = fileData.functions
-                        .filter(n => n.type === 'function')
+                        .filter(n => isTraceableSymbol(n))
                         .sort((a, b) => a.name.localeCompare(b.name))
                         .map(n => ({ value: n.id, label: n.name }));
                 }
@@ -2139,7 +2176,7 @@
                     let functions = [];
                     if (fileData && fileData.functions) {
                         functions = fileData.functions
-                            .filter(n => n.type === 'function')
+                            .filter(n => isTraceableSymbol(n))
                             .sort((a, b) => a.name.localeCompare(b.name));
                     }
 
@@ -2890,6 +2927,7 @@
             window._exploreView.load();
         }
     };
+    window.SourceAstra.isTraceableSymbol = isTraceableSymbol;
 
     window.SourceAstra.onLocaleChange = function (loc) {
         if (window._exploreView && window._exploreView.rawData) {
