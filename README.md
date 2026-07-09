@@ -15,6 +15,8 @@
 | **🖥️ 交互式 Dashboard** | D3.js 力导向图与关系拓扑，集成全局探索、追溯依赖和一键架构理解文档 |
 | **🔧 条件编译感知** | C/C++ `#if`/`#ifdef` 预处理守卫自动标注在调用边 metadata，图遍历直达条件分支 |
 | **🎯 单符号精准消歧** | callers/callees/trace 统一做符号消歧与主符号归一化，消除重复边与结果膨胀 |
+| **📊 callers 结果分页** | MCP `astramap_callers` 和 REST API 支持 `limit` 参数，超限截断提示，避免大项目结果膨胀 |
+| **🔗 C/C++ 函数指针与宏调用解析** | 跨文件启发式识别 `.field = &func` 函数指针初始化和 `XXXRETURN(func)` 宏展开调用模式 |
 | **🧹 脏文件低开销检测** | status 接口返回 `dirtyCount`，智能判断同步状态，免去频繁全量 hash 开销 |
 | **📄 分页与歧义过滤** | `astramap_files` 分页限制；启发式消歧自动过滤 Python dunder 并选择最窄 span 节点 |
 
@@ -24,11 +26,11 @@
 - **传输带宽优化**：引入动态 Gzip 压缩，静态资源首屏传输体积由 608KB 降至 130KB。
 - **静态资源强缓存**：为 JS/CSS 响应设置 `immutable` 缓存头，二次加载直接读取本地缓存。
 - **按需加载模块**：`trace.js`（97KB）改为动态懒加载，仅在用户进入依赖分析视图时获取，缩短首屏可交互时间（TTI）。
-- **消除 N+1 数据库查询**：设计并使用 `BatchCanonicalSymbolIDs` 批量查询，合并 callers、callees 接口中对边节点 ID 的循环单条 SQL 检索。
-- **文件读取缓存**：在预处理守卫条件匹配中，对节点路径和文件内容使用包级读写锁 Map 缓存，减少 callers/callees 查询时的重复磁盘 I/O。
+- **消除 N+1 数据库查询**：设计并使用 `BatchCanonicalSymbolIDs` 批量查询，合并 callers、callees 接口中对边节点 ID 的循环单条 SQL 检索。`QueryTraceCTE` 条件编译 metadata 标注使用 `BatchNodeFilePaths` 批量获取文件路径，消除逐边单条查询。
+- **文件读取缓存**：在预处理守卫条件匹配中，对节点路径和文件内容使用包级读写锁 Map 缓存，减少 callers/callees 查询时的重复磁盘 I/O。缓存键从路径改为 `(path, modTime, size)` 三元组，文件修改后自动失效；单文件同步/删除时精准清除该文件缓存，不再全量清空。
 - **动画与查找算法优化**：将 Canvas 帧循环以及布局算法中的 $O(N)$ 线性查找 `.find()` 全部替换为 $O(1)$ 的 Map 映射检索，消除大图下的 CPU 计算瓶颈。
 - **交互节流与防抖**：对 resizer 拖拽鼠标事件使用 `requestAnimationFrame` 节流，对 resize 和搜索框 input 增加 debounce 机制；缓存 Canvas 绘制所需的主题颜色属性以减少 `getComputedStyle` 样式重算开销；降低卡片容器模糊半径并移除 overlay 的 blur 属性以减少 GPU 合成开销。
-- **Watcher Timer 泄漏防护**：将 watch 机制中 select 循环的 `time.After` 替换为可重置的 `time.Timer`，规避高频文件变更下的 Goroutine 积压。
+- **Watcher Timer 泄漏防护**：将 watch 机制中 select 循环的 `time.After` 替换为可重置的 `time.Timer`，提取 `resetTimer` 工具函数统一重置逻辑，规避高频文件变更下的 Goroutine 积压与 `Stop/Reset` 竞态。
 
 ## 核心优势
 
@@ -185,7 +187,7 @@ AI 代理可调用以下 9 个工具：
 | `astramap_search` | "X 在哪定义" / "找一下 Y 函数" |
 | `astramap_explore` | "X 和 Y 是怎么关联的" / 业务流程描述 |
 | `astramap_node` | "X 的源码是什么" / 签名和文档 |
-| `astramap_callers` | "谁调用了 X" |
+| `astramap_callers` | "谁调用了 X"（支持 `limit` 分页） |
 | `astramap_callees` | "X 依赖什么" |
 | `astramap_impact` | "改了 X 会影响什么" |
 | `astramap_trace` | "从 A 到 B 的调用链" |
@@ -200,7 +202,8 @@ AI 代理可调用以下 9 个工具：
 | **脏文件检测** | `astramap_status` 返回 `dirtyCount` + `dirtyFiles`，AI 代理可判断图谱是否过期 |
 | **文件分页** | `astramap_files` 支持 `limit`/`offset` 参数，大项目分页查询 |
 | **单符号精确解析** | callers/callees/impact/trace 使用主符号解析，消除多定义合并导致的重复边 |
-| **搜索 kind 校验** | `astramap_search` 的 `kind` 参数校验，非法值返回错误 |
+| **搜索 kind 校验** | `astramap_search` 的 `kind` 参数校验，非法值返回错误；新增 `typedef` kind |
+| **callers 分页** | `astramap_callers` 支持 `limit` 参数，超限截断并提示 |
 
 ## REST API
 
@@ -211,7 +214,7 @@ Dashboard 同时暴露 REST JSON API：
 | `/api/astramap/status` | GET | — | 索引状态统计（含脏文件检测） |
 | `/api/astramap/search` | GET | `q`, `kind` | 符号搜索（kind 校验） |
 | `/api/astramap/node/{id}` | GET | 路径 `id` | 节点详情 |
-| `/api/astramap/callers/{id}` | GET | 路径 `id` | 上游调用者（含条件编译 metadata） |
+| `/api/astramap/callers/{id}` | GET | 路径 `id`, `limit` | 上游调用者（含条件编译 metadata，支持分页） |
 | `/api/astramap/callees/{id}` | GET | 路径 `id` | 下游被调用者（含条件编译 metadata） |
 | `/api/astramap/impact/{id}` | GET | `depth` | 影响分析 |
 | `/api/astramap/explore` | GET | `q`, `maxFiles` | 区域探索 |
@@ -273,7 +276,7 @@ astramap/
 │   ├── astramap.go           SCIP 导入 + 增量同步
 │   ├── treesitter.go         Tree-sitter 解析 + 跨文件调用启发（歧义过滤 + 最窄 span 选择）
 │   ├── service.go            共享查询服务层（MCP/REST 共用）+ 脏文件检测 + 分页
-│   ├── query_helpers.go      查询辅助：kind 校验、depth 规范化、符号解析、条件编译标注
+│   ├── query_helpers.go      查询辅助：kind 校验、depth 规范化、符号解析、条件编译标注、批量文件路径、源码缓存
 │   ├── filter.go             索引过滤配置（.astramap/config.yaml）
 │   ├── graph.go              图遍历引擎（BFS/DFS/可达性/耦合）+ 条件编译 metadata 标注
 │   ├── mcp.go                MCP JSON-RPC stdio 服务
@@ -346,6 +349,19 @@ astramap/
 | **函数树目录层级重构** | 依赖分析视图函数树从扁平单层目录改为完整多级目录树，按需展开填充函数按钮，搜索模式扁平化展示 |
 | **函数列表独立懒加载** | 依赖分析视图不再依赖探索视界先完成全局图初始化，独立从 `/api/astramap/functions` 拉取函数列表 |
 | **trace.js 懒加载加固** | Promise 去重防止重复加载、加载失败自动重置状态、缓存版本号破缓存 |
+| **callers 结果分页** | MCP `astramap_callers` 新增 `limit` 参数，REST `/api/astramap/callees/{id}` 新增 `limit` 查询参数，超限截断并提示 |
+| **C/C++ 函数指针调用解析** | 跨文件启发式新增 `.field = &func` 函数指针初始化模式识别，`->field()` / `.field()` 调用自动解析到函数指针目标 |
+| **C/C++ 宏返回调用解析** | 识别 `XXXRETURN(func)` 模式的宏展开调用，提取内部函数名建立调用边 |
+| **C/C++ typedef 分类修正** | `typedef struct/enum/class` 统一标记为 `typedef` kind；独立 `struct`/`enum` 声明正确标记为 `struct`/`enum`；搜索 `kind=struct` 含 `typedef struct`，搜索 `kind=enum` 含 `typedef enum` |
+| **搜索 kind 新增 typedef** | `astramap_search` 的 `kind` 参数新增 `typedef` 值，C/C++ typedef 类型可独立检索 |
+| **源码缓存按 ModTime 失效** | 文件内容缓存键从路径改为 `(path, modTime, size)` 三元组，文件修改后自动失效，消除条件编译 metadata 标注的脏数据 |
+| **单文件缓存精准失效** | 新增 `InvalidateQueryHelperCacheForFile`，文件同步/删除时仅清除该文件相关缓存，不再全量清空 |
+| **条件编译 metadata 批量标注** | `QueryTraceCTE` 使用 `BatchNodeFilePaths` 批量获取文件路径，消除 N+1 查询；`annotateConditionalMetadataWithFileMap` 支持预传入文件映射 |
+| **Impact depth=0 根符号返回** | `AnalyzeImpact` 在 `depth=0` 时返回根符号自身而非空结果，语义完整 |
+| **Gzip 中间件增强** | 新增 `shouldGzipResponse` 判断逻辑，API 响应和文本类静态资源统一压缩；添加 `Vary: Accept-Encoding` 头 |
+| **Watcher Timer 泄漏防护加固** | 提取 `resetTimer` 工具函数，统一 Timer 重置逻辑，消除 `Stop/Reset` 竞态 |
+| **trace.js O(1) 图索引** | 新增 `traceLinkMap`（边索引）和 `visibleNodeSet`（可见节点集合），公共叶子节点克隆去重从 `Array.some` 改为 `Set.has` |
+| **CSS blur 半径统一收敛** | 所有 `backdrop-filter: blur()` 和 `filter: blur()` 统一引用 `--panel-blur` CSS 变量或降至 4px，减少 GPU 合成开销 |
 
 ### v0.1
 
