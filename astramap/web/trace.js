@@ -262,10 +262,50 @@
             const tree = document.getElementById('und-function-tree');
             if (!tree) return;
 
+            const hasSymbols = !!(window.G_DATA && window.G_DATA.symbols && Object.keys(window.G_DATA.symbols).length > 0);
+            if (!hasSymbols && window._functionsLoading) {
+                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">正在加载函数与目录树...</div>';
+                return;
+            }
+
+            // 依赖分析视图必须能独立加载函数/目录树，不能依赖探索视界先完成全局图初始化。
+            if (!hasSymbols) {
+                
+                window._functionsLoading = true;
+                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">正在加载函数与目录树...</div>';
+                
+                fetch('/api/astramap/functions')
+                    .then(res => res.json())
+                    .then(funcs => {
+                        window._functionsLoading = false;
+                        window._functionsLoaded = true;
+                        if (funcs && !funcs.error) {
+                            if (typeof window.astraMapInstallSymbols === 'function') {
+                                window.astraMapInstallSymbols(funcs);
+                            } else {
+                                window.G_DATA = window.G_DATA || {};
+                                window.G_DATA.symbols = {};
+                                funcs.forEach(s => {
+                                    window.G_DATA.symbols[s.id] = s;
+                                });
+                            }
+                            this.renderFunctionTree(filterText);
+                        } else {
+                            tree.innerHTML = '<div class="und-tree-empty">加载函数列表失败</div>';
+                        }
+                    })
+                    .catch(err => {
+                        window._functionsLoading = false;
+                        console.error("[Trace] 懒加载函数列表失败:", err);
+                        tree.innerHTML = '<div class="und-tree-empty">加载函数列表失败</div>';
+                    });
+                return;
+            }
+
             const symbols = window.G_DATA && window.G_DATA.symbols ? Object.values(window.G_DATA.symbols) : [];
             const needle = (filterText || '').trim().toLowerCase();
             const funcs = symbols
-                .filter(s => s && (s.type === 'function' || s.kind === 'function' || s.kind === 'method'))
+                .filter(s => s && (s.type === 'function' || s.kind === 'function' || s.type === 'method' || s.kind === 'method'))
                 .filter(s => {
                     if (!needle) return true;
                     const hay = `${s.name || ''} ${s.qualifiedName || ''} ${s.file || s.filePath || ''}`.toLowerCase();
@@ -278,53 +318,144 @@
                     return (a.startLine || a.line || 0) - (b.startLine || b.line || 0);
                 });
 
-            const visibleFuncs = needle ? funcs.slice(0, 500) : funcs;
-
-            if (!visibleFuncs.length) {
+            if (!funcs.length) {
                 tree.innerHTML = '<div class="und-tree-empty">没有匹配的函数</div>';
                 return;
             }
 
-            const groups = new Map();
-            visibleFuncs.forEach(fn => {
-                const file = fn.file || fn.filePath || '(unknown file)';
-                const parts = file.replace(/\\/g, '/').split('/');
-                const dir = parts.length > 1 && parts[0] ? parts[0] : '(root)';
-                if (!groups.has(dir)) groups.set(dir, new Map());
-                const fileMap = groups.get(dir);
-                if (!fileMap.has(file)) fileMap.set(file, []);
-                fileMap.get(file).push(fn);
-            });
+            const renderFunctionButtons = (fileFuncs) => fileFuncs.map(fn => {
+                const active = fn.id === rootNodeId ? ' active' : '';
+                const line = fn.startLine || fn.line || 0;
+                return `<button class="und-tree-function${active}" data-node-id="${fn.id}" title="${this.escapeHtml(fn.qualifiedName || fn.name || fn.id)}">
+                    <span class="und-tree-function-name">${this.escapeHtml(fn.name || fn.id)}</span>
+                    <span class="und-tree-function-line">${line ? ':' + line : ''}</span>
+                </button>`;
+            }).join('');
+            const openDirPaths = new Set(Array.from(tree.querySelectorAll('.und-tree-dir[open]'))
+                .map(el => el.getAttribute('data-dir-path'))
+                .filter(Boolean));
+            const openFilePaths = new Set(Array.from(tree.querySelectorAll('.und-tree-file[open]'))
+                .map(el => el.getAttribute('data-file'))
+                .filter(Boolean));
 
-            const html = Array.from(groups.entries()).map(([dir, files]) => {
-                const fileHtml = Array.from(files.entries()).map(([file, fileFuncs]) => {
-                    const fnHtml = fileFuncs.map(fn => {
-                        const active = fn.id === rootNodeId ? ' active' : '';
-                        const line = fn.startLine || fn.line || 0;
-                        const idx = visibleFuncs.indexOf(fn);
-                        return `<button class="und-tree-function${active}" data-node-index="${idx}" title="${this.escapeHtml(fn.qualifiedName || fn.name || fn.id)}">
-                            <span class="und-tree-function-name">${this.escapeHtml(fn.name || fn.id)}</span>
-                            <span class="und-tree-function-line">${line ? ':' + line : ''}</span>
-                        </button>`;
-                    }).join('');
-                    return `<details class="und-tree-file" ${needle ? 'open' : ''}>
-                        <summary>${this.escapeHtml(file.split('/').pop() || file)} <span>${fileFuncs.length}</span></summary>
-                        ${fnHtml}
+            if (needle) {
+                const groups = new Map();
+                funcs.forEach(fn => {
+                    const file = fn.file || fn.filePath || '(unknown file)';
+                    if (!groups.has(file)) groups.set(file, []);
+                    groups.get(file).push(fn);
+                });
+                tree.innerHTML = Array.from(groups.entries()).map(([file, fileFuncs]) => {
+                    return `<details class="und-tree-file" data-file="${this.escapeHtml(file)}" open>
+                        <summary>${this.escapeHtml(file)} <span>${fileFuncs.length}</span></summary>
+                        <div class="file-funcs-container" style="padding-left:12px;">${renderFunctionButtons(fileFuncs)}</div>
                     </details>`;
                 }).join('');
-                return `<details class="und-tree-dir" open>
-                    <summary>${this.escapeHtml(dir)} <span>${Array.from(files.values()).reduce((n, arr) => n + arr.length, 0)}</span></summary>
-                    ${fileHtml}
-                </details>`;
-            }).join('');
+                tree.querySelectorAll('.und-tree-function').forEach(btn => {
+                    btn.onclick = () => {
+                        const id = btn.getAttribute('data-node-id');
+                        const sym = window.G_DATA.symbols[id];
+                        if (sym) this.startTrace(sym);
+                    };
+                });
+                return;
+            }
 
-            tree.innerHTML = html;
-            tree.querySelectorAll('.und-tree-function').forEach(btn => {
-                btn.onclick = () => {
-                    const idx = Number(btn.getAttribute('data-node-index'));
-                    const sym = Number.isInteger(idx) ? visibleFuncs[idx] : null;
-                    if (sym) this.startTrace(sym);
+            const activeSym = rootNodeId && window.G_DATA && window.G_DATA.symbols ? window.G_DATA.symbols[rootNodeId] : null;
+            const activeFilePath = activeSym ? (activeSym.file || activeSym.filePath || '') : '';
+            const activeDirPrefixes = new Set();
+            if (activeFilePath) {
+                const activeParts = activeFilePath.replace(/\\/g, '/').split('/').filter(Boolean);
+                activeParts.pop();
+                let prefix = '';
+                activeParts.forEach(part => {
+                    prefix = prefix ? `${prefix}/${part}` : part;
+                    activeDirPrefixes.add(prefix);
+                });
+                openFilePaths.add(activeFilePath);
+            }
+
+            const root = { name: '', path: '', dirs: new Map(), files: new Map(), count: 0 };
+            const getDir = (parent, name) => {
+                if (!parent.dirs.has(name)) {
+                    const path = parent.path ? `${parent.path}/${name}` : name;
+                    parent.dirs.set(name, { name, path, dirs: new Map(), files: new Map(), count: 0 });
+                }
+                return parent.dirs.get(name);
+            };
+            funcs.forEach(fn => {
+                const file = fn.file || fn.filePath || '(unknown file)';
+                const parts = file.replace(/\\/g, '/').split('/').filter(Boolean);
+                const fileName = parts.pop() || file;
+                let node = root;
+                node.count++;
+                parts.forEach(part => {
+                    node = getDir(node, part);
+                    node.count++;
+                });
+                const fileKey = file || fileName;
+                if (!node.files.has(fileKey)) {
+                    node.files.set(fileKey, { name: fileName, path: fileKey, funcs: [] });
+                }
+                node.files.get(fileKey).funcs.push(fn);
+            });
+
+            const renderDir = (dirNode, depth = 0) => {
+                const childDirs = Array.from(dirNode.dirs.values()).sort((a, b) => a.name.localeCompare(b.name));
+                const files = Array.from(dirNode.files.values()).sort((a, b) => a.name.localeCompare(b.name));
+                const childrenHtml = [
+                    ...childDirs.map(child => renderDir(child, depth + 1)),
+                    ...files.map(file => `<details class="und-tree-file" data-file="${this.escapeHtml(file.path)}" ${openFilePaths.has(file.path) ? 'open' : ''} style="margin-left:${Math.min(depth + 1, 6) * 8}px">
+                        <summary>${this.escapeHtml(file.name)} <span>${file.funcs.length}</span></summary>
+                        <div class="file-funcs-container" style="padding-left:12px;"></div>
+                    </details>`)
+                ].join('');
+                const open = openDirPaths.has(dirNode.path) || activeDirPrefixes.has(dirNode.path);
+                return `<details class="und-tree-dir" data-dir-path="${this.escapeHtml(dirNode.path)}" ${open ? 'open' : ''} style="margin-left:${Math.min(depth, 6) * 8}px">
+                    <summary>${this.escapeHtml(dirNode.name)} <span>${dirNode.count}</span></summary>
+                    ${childrenHtml}
+                </details>`;
+            };
+
+            tree.innerHTML = Array.from(root.dirs.values())
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(dir => renderDir(dir, 0))
+                .concat(Array.from(root.files.values()).sort((a, b) => a.name.localeCompare(b.name)).map(file => {
+                    return `<details class="und-tree-file" data-file="${this.escapeHtml(file.path)}" ${openFilePaths.has(file.path) ? 'open' : ''}>
+                        <summary>${this.escapeHtml(file.name)} <span>${file.funcs.length}</span></summary>
+                        <div class="file-funcs-container" style="padding-left:12px;"></div>
+                    </details>`;
+                }))
+                .join('');
+
+            const functionsByFile = new Map();
+            funcs.forEach(fn => {
+                const file = fn.file || fn.filePath || '(unknown file)';
+                if (!functionsByFile.has(file)) functionsByFile.set(file, []);
+                functionsByFile.get(file).push(fn);
+            });
+            tree.querySelectorAll('.und-tree-file').forEach(details => {
+                const filePath = details.getAttribute('data-file');
+                const container = details.querySelector('.file-funcs-container');
+                const fillFunctions = () => {
+                    if (!container || container.hasChildNodes()) return;
+                    container.innerHTML = renderFunctionButtons(functionsByFile.get(filePath) || []);
+                    container.querySelectorAll('.und-tree-function').forEach(btn => {
+                        btn.onclick = () => {
+                            const id = btn.getAttribute('data-node-id');
+                            const sym = window.G_DATA.symbols[id];
+                            if (sym) this.startTrace(sym);
+                        };
+                    });
                 };
+                if (details.open) {
+                    fillFunctions();
+                }
+                details.addEventListener('toggle', () => {
+                    if (details.open) {
+                        fillFunctions();
+                    }
+                });
             });
         },
 
@@ -1886,62 +2017,8 @@
                 }
             });
 
-            // 4. 对每个父节点的叶子节点进行“智能收敛聚合” (叶子数 > 3 时折叠)
-            const parentToLeaves = {};
-            const currentOutDegree = {};
-            finalNodes.forEach(n => { currentOutDegree[n.id] = 0; });
-            finalLinks.forEach(l => {
-                currentOutDegree[l.source] = (currentOutDegree[l.source] || 0) + 1;
-            });
-
-            finalLinks.forEach(l => {
-                const parent = l.source;
-                const child = l.target;
-                const childNode = finalNodes.find(n => n.id === child);
-                
-                if (childNode && child !== rootId && currentOutDegree[child] === 0) {
-                    if (!parentToLeaves[parent]) parentToLeaves[parent] = [];
-                    parentToLeaves[parent].push(childNode);
-                }
-            });
-
-            const nodesToKeep = new Set(finalNodes.map(n => n.id));
-            const nodesToRemove = new Set();
-            const virtualAggregates = [];
-
-            Object.keys(parentToLeaves).forEach(parentId => {
-                const leaves = parentToLeaves[parentId];
-                const foldableLeaves = leaves.filter(leaf => !isPinnedDependency(leaf));
-                if (foldableLeaves.length > 3) {
-                    const keepCount = 2;
-                    const leavesToRemove = foldableLeaves.slice(keepCount);
-                    leavesToRemove.forEach(leaf => {
-                        nodesToRemove.add(leaf.id);
-                        nodesToKeep.delete(leaf.id);
-                    });
-
-                    const aggregateId = parentId + '_folded_leaves';
-                    const foldedCount = leavesToRemove.length;
-                    virtualAggregates.push({
-                        id: aggregateId,
-                        name: `${foldedCount} 个辅助函数`,
-                        type: 'virtual_aggregate',
-                        file: '',
-                        line: 0,
-                        _nw: 180,
-                        parentId: parentId,
-                        foldedNodeIds: leavesToRemove.map(l => l.originalId || l.id)
-                    });
-                    
-                    finalLinks.push({
-                        source: parentId,
-                        target: aggregateId,
-                        _impact: false
-                    });
-                }
-            });
-
-            traceNodes = finalNodes.filter(n => nodesToKeep.has(n.id)).concat(virtualAggregates);
+            // 4. 对每个父节点的叶子节点不进行任何折叠聚合，以坚守完整调用领域及真实调用边展示的原则
+            traceNodes = finalNodes;
             const activeNodeIds = new Set(traceNodes.map(n => n.id));
             traceLinks = finalLinks.filter(l => activeNodeIds.has(l.source) && activeNodeIds.has(l.target));
         },
