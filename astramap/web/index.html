@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AstraMap - 源码星空独立控制台</title>
+    <title>AstraMap - 星辰地图独立控制台</title>
     <script src="d3.min.js" defer></script>
     <link rel="stylesheet" href="index.css">
     <link rel="stylesheet" href="explore.css">
@@ -272,7 +272,7 @@
 </head>
 <body class="view-explore">
     <header>
-        <h1>AstraMap 源码星空</h1>
+        <h1>AstraMap 星辰地图</h1>
         <div style="width: 24px;"></div>
         <button id="btn-explore" class="tab-btn active">探索视界</button>
         <button id="btn-trace" class="tab-btn">依赖分析</button>
@@ -560,19 +560,28 @@
         });
     </script>
 
-    <script src="explore.js"></script>
+    <script src="explore.js" defer></script>
     <script>
         let _traceLoaded = false;
+        let _traceLoadPromise = null;
+        const ASTRAMAP_ASSET_VERSION = '20260709-trace-dir-state';
         async function loadTraceModule() {
             if (_traceLoaded) return;
-            _traceLoaded = true;
-            await new Promise((resolve, reject) => {
+            if (_traceLoadPromise) return _traceLoadPromise;
+            _traceLoadPromise = new Promise((resolve, reject) => {
                 const s = document.createElement('script');
-                s.src = 'trace.js';
-                s.onload = resolve;
-                s.onerror = reject;
+                s.src = `trace.js?v=${ASTRAMAP_ASSET_VERSION}`;
+                s.onload = () => {
+                    _traceLoaded = true;
+                    resolve();
+                };
+                s.onerror = () => {
+                    _traceLoadPromise = null;
+                    reject(new Error('failed to load trace.js'));
+                };
                 document.head.appendChild(s);
             });
+            return _traceLoadPromise;
         }
     </script>
     <script>
@@ -693,7 +702,10 @@
                 if (overview.error) throw new Error(overview.error);
                 window.G_PROJECTED_GRAPH = overview;
                 window.G_MODULES = (overview.nodes || []).map(n => ({ id: n.id, name: n.name || n.id }));
-                astraMapInstallSymbols([]);
+                const hasLoadedSymbols = window.G_DATA && window.G_DATA.symbols && Object.keys(window.G_DATA.symbols).length > 0;
+                if (!hasLoadedSymbols) {
+                    astraMapInstallSymbols([]);
+                }
             } catch(e) {
                 console.warn("加载 AstraMap 轻量初始化数据失败，回退全量图: ", e);
                 try {
