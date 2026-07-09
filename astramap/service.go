@@ -517,14 +517,16 @@ func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*As
 	params := []interface{}{"%" + query + "%", "%" + query + "%"}
 	if kind != "" {
 		if kind == "struct" {
-			q += "AND (kind = ? OR (kind = 'class' AND language IN ('c', 'cpp') AND name NOT LIKE '%_e')) "
-			params = append(params, kind)
+			q += "AND ((kind = 'struct' AND signature NOT LIKE 'typedef enum%') OR (kind = 'class' AND language IN ('c', 'cpp') AND name NOT LIKE '%_e') OR (kind IN ('typedef', 'type') AND language IN ('c', 'cpp') AND signature LIKE 'typedef struct%')) "
 		} else if kind == "enum" {
-			q += "AND (kind = ? OR (kind = 'class' AND language IN ('c', 'cpp') AND (name LIKE '%_e' OR name LIKE '%enum%'))) "
-			params = append(params, kind)
+			q += "AND (kind = 'enum' OR (kind = 'class' AND language IN ('c', 'cpp') AND (name LIKE '%_e' OR name LIKE '%enum%')) OR (kind IN ('typedef', 'type', 'struct') AND language IN ('c', 'cpp') AND signature LIKE 'typedef enum%')) "
 		} else {
-			q += "AND kind = ? "
-			params = append(params, kind)
+			if kind == "typedef" || kind == "type" {
+				q += "AND (kind IN ('typedef', 'type') OR (language IN ('c', 'cpp') AND signature LIKE 'typedef %')) "
+			} else {
+				q += "AND kind = ? "
+				params = append(params, kind)
+			}
 		}
 	}
 	q += " ORDER BY file_path, start_line, name LIMIT ? OFFSET ?"
@@ -532,10 +534,24 @@ func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*As
 	err := db.Select(&nodes, q, params...)
 	if err == nil {
 		for _, node := range nodes {
+			normalizeTypedefNodeKind(node)
 			node.ID = CanonicalSymbolID(node)
 		}
 	}
 	return nodes, err
+}
+
+func normalizeTypedefNodeKind(node *AstraMapNode) {
+	if node == nil {
+		return
+	}
+	if node.Language != "c" && node.Language != "cpp" {
+		return
+	}
+	signature := strings.TrimSpace(node.Signature)
+	if strings.HasPrefix(signature, "typedef ") {
+		node.Kind = "type"
+	}
 }
 
 func CanonicalSymbolID(n *AstraMapNode) string {
@@ -784,7 +800,7 @@ func externalSymbolName(id string) string {
 // Handles both symbol queries and natural language task descriptions.
 func QueryExplore(db *sqlx.DB, query, projectRoot string, maxFiles int) (*ExploreResult, error) {
 	if maxFiles <= 0 {
-		maxFiles = 10
+		maxFiles = 3
 	}
 
 	terms := cleanQueryTerms(query)
@@ -807,6 +823,9 @@ func QueryExplore(db *sqlx.DB, query, projectRoot string, maxFiles int) (*Explor
 	}
 	if err != nil {
 		return nil, err
+	}
+	for _, n := range matchedNodes {
+		normalizeTypedefNodeKind(n)
 	}
 
 	// Group by file
@@ -862,11 +881,21 @@ func QueryNodeBySymbol(db *sqlx.DB, symbol, file string) ([]*AstraMapNode, error
 		}
 		q += " ORDER BY file_path, start_line, name"
 		err := db.Select(&nodes, q, params...)
+		if err == nil {
+			for _, node := range nodes {
+				normalizeTypedefNodeKind(node)
+			}
+		}
 		return nodes, err
 	}
 	if file != "" {
 		q := "SELECT * FROM astramap_nodes WHERE " + nodeFileFilterSQL() + nonSyntheticAnonymousNodeSQL + " LIMIT 10"
 		err := db.Select(&nodes, q, nodeFileFilterParams(file)...)
+		if err == nil {
+			for _, node := range nodes {
+				normalizeTypedefNodeKind(node)
+			}
+		}
 		return nodes, err
 	}
 	return nodes, nil
@@ -1041,10 +1070,13 @@ func ReadSourceRange(projectRoot, filePath string, startLine, endLine int) (stri
 	return strings.Join(matched, "\n"), scanner.Err()
 }
 
-// QueryTraceCTE returns the call neighborhood centered on startNodeID.
-// Depth controls ancestor and descendant generations. Siblings are direct
-// callees of visible ancestor nodes and are included as one-hop context only.
-func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNode, []*AstraMapEdge, error) {
+// QueryTraceCTE returns the direct call star centered on startNodeID.
+// The dashboard keeps depth for UI compatibility; this query is intentionally
+// one-hop to keep click-to-trace latency bounded.
+func QueryTraceCTE(db *sqlx.DB, projectRoot string, startNodeID string, maxDepth int) ([]*AstraMapNode, []*AstraMapEdge, error) {
+	_ = projectRoot
+	_ = maxDepth
+
 	var startID string
 	err := db.Get(&startID, "SELECT id FROM astramap_nodes WHERE id = ? LIMIT 1", startNodeID)
 	if err != nil {
@@ -1054,142 +1086,29 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 		}
 	}
 	startID = resolveCanonicalTraceStart(db, startID)
-	if maxDepth <= 0 {
-		maxDepth = 3
-	}
 
-	visited := map[string]int{startID: 0}
-	edgeMap := make(map[string]*AstraMapEdge)
-	addEdge := func(e *AstraMapEdge) {
-		if e == nil || e.Source == "" || e.Target == "" || e.Source == e.Target {
-			return
-		}
-		key := e.Source + "\x00" + e.Target
-		if _, exists := edgeMap[key]; !exists {
-			edgeMap[key] = e
-		}
-	}
-
-	queryEdges := func(direction string, nodeIDs []string) ([]*AstraMapEdge, error) {
-		if len(nodeIDs) == 0 {
-			return nil, nil
-		}
-		var edges []*AstraMapEdge
-		var sql string
-		if direction == "up" {
-			sql = `SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
-				FROM astramap_edges WHERE kind = 'calls' AND target IN (?)
-				ORDER BY provenance = 'scip' DESC, line, id`
-		} else {
-			sql = `SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
-				FROM astramap_edges WHERE kind = 'calls' AND source IN (?)
-				ORDER BY provenance = 'scip' DESC, line, id`
-		}
-		q, args, err := sqlx.In(sql, nodeIDs)
-		if err != nil {
-			return nil, err
-		}
-		q = db.Rebind(q)
-		err = db.Select(&edges, q, args...)
-		return edges, err
-	}
-
-	upDepth := map[string]int{startID: 0}
-
-	walkUp := func() error {
-		currentLevel := []string{startID}
-		seen := map[string]bool{startID: true}
-		for depth := 0; depth < maxDepth; depth++ {
-			if len(currentLevel) == 0 {
-				break
-			}
-			nextEdges, err := queryEdges("up", currentLevel)
-			if err != nil {
-				return err
-			}
-			var nextLevel []string
-			for _, edge := range nextEdges {
-				nextID := edge.Source
-				if nextID == "" {
-					continue
-				}
-				addEdge(edge)
-				if !seen[nextID] {
-					seen[nextID] = true
-					upDepth[nextID] = depth + 1
-					visited[nextID] = depth + 1
-					nextLevel = append(nextLevel, nextID)
-				}
-			}
-			currentLevel = nextLevel
-		}
-		return nil
-	}
-
-	walkDown := func() error {
-		currentLevel := []string{startID}
-		seen := map[string]bool{startID: true}
-		for depth := 0; depth < maxDepth; depth++ {
-			if len(currentLevel) == 0 {
-				break
-			}
-			nextEdges, err := queryEdges("down", currentLevel)
-			if err != nil {
-				return err
-			}
-			var nextLevel []string
-			for _, edge := range nextEdges {
-				nextID := edge.Target
-				if nextID == "" {
-					continue
-				}
-				addEdge(edge)
-				if !seen[nextID] {
-					seen[nextID] = true
-					visited[nextID] = depth + 1
-					nextLevel = append(nextLevel, nextID)
-				}
-			}
-			currentLevel = nextLevel
-		}
-		return nil
-	}
-
-	addSiblingEdgesFromAncestors := func() error {
-		for ancestorID, depth := range upDepth {
-			if ancestorID == startID || depth <= 0 || depth > maxDepth {
-				continue
-			}
-			siblingEdges, err := queryEdges("down", []string{ancestorID})
-			if err != nil {
-				return err
-			}
-			for _, edge := range siblingEdges {
-				if edge.Target == "" {
-					continue
-				}
-				addEdge(edge)
-				if _, exists := visited[edge.Target]; !exists {
-					visited[edge.Target] = depth
-				}
-			}
-		}
-		return nil
-	}
-
-	if err := walkUp(); err != nil {
-		return nil, nil, err
-	}
-	if err := walkDown(); err != nil {
-		return nil, nil, err
-	}
-	if err := addSiblingEdgesFromAncestors(); err != nil {
+	var rawEdges []*AstraMapEdge
+	if err := db.Select(&rawEdges, `
+		SELECT id, source, target, kind, provenance, line, col, COALESCE(metadata, '') AS metadata
+		FROM astramap_edges
+		WHERE kind = 'calls' AND (source = ? OR target = ?)
+		ORDER BY source, target, line, id
+	`, startID, startID); err != nil {
 		return nil, nil, err
 	}
 
 	nodeSet := make(map[string]bool)
 	nodeSet[startID] = true
-	for _, edge := range edgeMap {
+	edgeMap := make(map[string]*AstraMapEdge, len(rawEdges))
+	for _, edge := range rawEdges {
+		if edge == nil || edge.Source == "" || edge.Target == "" || edge.Source == edge.Target {
+			continue
+		}
+		key := edge.Source + "\x00" + edge.Target
+		if _, exists := edgeMap[key]; exists {
+			continue
+		}
+		edgeMap[key] = edge
 		nodeSet[edge.Source] = true
 		nodeSet[edge.Target] = true
 	}
@@ -1217,9 +1136,11 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 
 	filteredEdges := make([]*AstraMapEdge, 0, len(edgeMap))
 	for _, edge := range edgeMap {
-		annotateConditionalMetadata(db, edge)
 		filteredEdges = append(filteredEdges, edge)
 	}
+
+	nodes, filteredEdges = canonicalizeDuplicateFunctionNodes(nodes, filteredEdges)
+
 	sort.Slice(filteredEdges, func(i, j int) bool {
 		if filteredEdges[i].Source != filteredEdges[j].Source {
 			return filteredEdges[i].Source < filteredEdges[j].Source
@@ -1238,32 +1159,42 @@ func QueryTraceCTE(db *sqlx.DB, startNodeID string, maxDepth int) ([]*AstraMapNo
 
 func resolveCanonicalTraceStart(db *sqlx.DB, nodeID string) string {
 	var node AstraMapNode
-	if err := db.Get(&node, "SELECT * FROM astramap_nodes WHERE id = ? LIMIT 1", nodeID); err != nil {
+	if err := db.Get(&node, "SELECT id, kind, name, file_path FROM astramap_nodes WHERE id = ? LIMIT 1", nodeID); err != nil {
 		return nodeID
 	}
 	if node.Kind != "function" && node.Kind != "method" {
 		return nodeID
 	}
 
-	var candidates []struct {
+	// 使用覆盖索引快速查找同名同文件的候选符号，以边数最多者作为规范起点
+	var candidates []string
+	if err := db.Select(&candidates, `
+		SELECT id FROM astramap_nodes
+		WHERE kind = ? AND file_path = ? AND name = ?
+		ORDER BY id
+	`, node.Kind, node.FilePath, node.Name); err != nil || len(candidates) <= 1 {
+		return nodeID
+	}
+
+	// 仅当存在多个同名候选时才计算度数
+	type idDegree struct {
 		ID     string `db:"id"`
 		Degree int    `db:"degree"`
 	}
-	if err := db.Select(&candidates, `
+	var ranked []idDegree
+	q, args, err := sqlx.In(`
 		SELECT n.id,
-		       (
-		         SELECT COUNT(*)
-		         FROM astramap_edges e
-		         WHERE e.kind = 'calls' AND (e.source = n.id OR e.target = n.id)
-		       ) AS degree
+		       (SELECT COUNT(*) FROM astramap_edges e WHERE e.kind = 'calls' AND (e.source = n.id OR e.target = n.id)) AS degree
 		FROM astramap_nodes n
-		WHERE n.kind = ? AND n.file_path = ? AND n.name = ?
+		WHERE n.id IN (?)
 		ORDER BY degree DESC, n.id
-	`, node.Kind, node.FilePath, node.Name); err != nil {
+	`, candidates)
+	if err != nil {
 		return nodeID
 	}
-	if len(candidates) == 0 || candidates[0].Degree == 0 {
+	q = db.Rebind(q)
+	if err := db.Select(&ranked, q, args...); err != nil || len(ranked) == 0 || ranked[0].Degree == 0 {
 		return nodeID
 	}
-	return candidates[0].ID
+	return ranked[0].ID
 }
