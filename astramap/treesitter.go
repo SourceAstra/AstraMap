@@ -24,7 +24,9 @@ import (
 
 var (
 	// callRe holds light regex pattern for cross-file call heuristics
-	callRe = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+	callRe              = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+	functionPointerInit = regexp.MustCompile(`\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*&?\s*([a-zA-Z_][a-zA-Z0-9_]*)`)
+	macroReturnCallRe   = regexp.MustCompile(`\b[A-Z][A-Z0-9_]*RETURN\s*\(([^,\)]+)`)
 )
 
 // ParseFileIncremental parses a single file incrementally using Tree-sitter.
@@ -216,16 +218,20 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 				typeNode := n.ChildByFieldName("type")
 				switch {
 				case containsNodeKind(typeNode, "class_specifier"):
-					nodeKind = "class"
+					nodeKind = "type"
 				case containsNodeKind(typeNode, "struct_specifier"):
-					nodeKind = "struct"
+					nodeKind = "type"
+				case containsNodeKind(typeNode, "enum_specifier"):
+					nodeKind = "type"
 				default:
 					nodeKind = "type"
 				}
 				isDef = nodeName != ""
-			} else if nodeType == "class_specifier" || nodeType == "struct_specifier" {
+			} else if nodeType == "class_specifier" || nodeType == "struct_specifier" || nodeType == "enum_specifier" {
 				if nodeType == "class_specifier" {
 					nodeKind = "class"
+				} else if nodeType == "enum_specifier" {
+					nodeKind = "enum"
 				} else {
 					nodeKind = "struct"
 				}
@@ -698,6 +704,7 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 		shortMap[fn.Name] = append(shortMap[fn.Name], fn.ID)
 		qualifiedMap[fn.QualifiedName] = append(qualifiedMap[fn.QualifiedName], fn.ID)
 	}
+	fieldFunctionMap := buildFunctionPointerFieldMap(projectRoot, shortMap)
 
 	var files []string
 	if len(changedFiles) == 0 {
@@ -830,6 +837,13 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 				continue
 			}
 
+			for _, macroTarget := range macroReturnCallTargets(line, shortMap, fieldFunctionMap) {
+				if macroTarget == callerID {
+					continue
+				}
+				_, _ = insertStmt.Exec(callerID, macroTarget, lineNum, 1)
+			}
+
 			for _, m := range matches {
 				if len(m) < 4 {
 					continue
@@ -847,6 +861,16 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 
 				beforeCallee := line[:m[2]]
 				dotIndex := strings.LastIndex(beforeCallee, ".")
+				arrowIndex := strings.LastIndex(beforeCallee, "->")
+				memberIndex := dotIndex
+				if arrowIndex > memberIndex {
+					memberIndex = arrowIndex
+				}
+				if memberIndex != -1 {
+					if fieldTargets := fieldFunctionMap[calleeName]; len(fieldTargets) > 0 {
+						targets = fieldTargets
+					}
+				}
 				if calleeName == "main" && dotIndex == -1 {
 					var filtered []string
 					for _, tID := range targets {
@@ -874,7 +898,7 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 						}
 					}
 				}
-				if isAmbiguousHeuristicCall(calleeName, targets, dotIndex) {
+				if isAmbiguousHeuristicCall(calleeName, targets, memberIndex) {
 					continue
 				}
 
@@ -889,6 +913,108 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 	}
 
 	return tx.Commit()
+}
+
+func buildFunctionPointerFieldMap(projectRoot string, shortMap map[string][]string) map[string][]string {
+	fieldMap := make(map[string][]string)
+	seen := make(map[string]map[string]struct{})
+	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if shouldSkipIndexDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".c" && ext != ".h" && ext != ".cpp" && ext != ".cc" && ext != ".cxx" && ext != ".hpp" && ext != ".hxx" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		matches := functionPointerInit.FindAllStringSubmatch(string(data), -1)
+		for _, match := range matches {
+			if len(match) < 3 {
+				continue
+			}
+			fieldName := match[1]
+			funcName := match[2]
+			for _, targetID := range shortMap[funcName] {
+				if seen[fieldName] == nil {
+					seen[fieldName] = make(map[string]struct{})
+				}
+				if _, exists := seen[fieldName][targetID]; exists {
+					continue
+				}
+				seen[fieldName][targetID] = struct{}{}
+				fieldMap[fieldName] = append(fieldMap[fieldName], targetID)
+			}
+		}
+		return nil
+	})
+	return fieldMap
+}
+
+func macroReturnCallTargets(line string, shortMap, fieldFunctionMap map[string][]string) []string {
+	var targets []string
+	seen := make(map[string]struct{})
+	matches := macroReturnCallRe.FindAllStringSubmatch(line, -1)
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		expr := strings.TrimSpace(match[1])
+		for _, targetID := range targetsForCallExpression(expr, shortMap, fieldFunctionMap) {
+			if _, exists := seen[targetID]; exists {
+				continue
+			}
+			seen[targetID] = struct{}{}
+			targets = append(targets, targetID)
+		}
+	}
+	return targets
+}
+
+func targetsForCallExpression(expr string, shortMap, fieldFunctionMap map[string][]string) []string {
+	name := trailingIdentifier(expr)
+	if name == "" {
+		return nil
+	}
+	if strings.Contains(expr, "->") || strings.Contains(expr, ".") {
+		if targets := fieldFunctionMap[name]; len(targets) > 0 {
+			return targets
+		}
+	}
+	return shortMap[name]
+}
+
+func trailingIdentifier(expr string) string {
+	expr = strings.TrimSpace(strings.TrimPrefix(expr, "&"))
+	end := len(expr)
+	for end > 0 {
+		c := expr[end-1]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			break
+		}
+		end--
+	}
+	start := end
+	for start > 0 {
+		c := expr[start-1]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			start--
+		} else {
+			break
+		}
+	}
+	if start == end {
+		return ""
+	}
+	return expr[start:end]
 }
 
 func isAmbiguousHeuristicCall(calleeName string, targets []string, dotIndex int) bool {
