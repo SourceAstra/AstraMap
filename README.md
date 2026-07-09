@@ -341,6 +341,11 @@ astramap/
 | **Dashboard 增强** | `--host` 参数、自动端口探测、LAN IP 显示、后台启动、请求日志 |
 | **install 增强** | 探测式注册（仅写入已安装客户端），支持 Antigravity/Windsurf/Cline，注册核验 |
 | **CLI 精简** | `--project` 全局参数，移除未实现命令 |
+| **Trace API 符号消歧** | REST `/api/astramap/trace/{id}` 增加 `resolvePrimarySymbolID`，消除多定义导致的重复路径 |
+| **Dashboard 头文件降噪** | 图谱查询、模块聚合图、函数列表统一排除 `.h`/`.hpp`/`.hh` 头文件节点，减少 C/C++ 项目噪声 |
+| **函数树目录层级重构** | 依赖分析视图函数树从扁平单层目录改为完整多级目录树，按需展开填充函数按钮，搜索模式扁平化展示 |
+| **函数列表独立懒加载** | 依赖分析视图不再依赖探索视界先完成全局图初始化，独立从 `/api/astramap/functions` 拉取函数列表 |
+| **trace.js 懒加载加固** | Promise 去重防止重复加载、加载失败自动重置状态、缓存版本号破缓存 |
 
 ### v0.1
 
