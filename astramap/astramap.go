@@ -493,6 +493,7 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		_, _ = db.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
 		_, _ = db.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
 		_, _ = db.Exec("DELETE FROM astramap_files WHERE path = ?", relPath)
+		InvalidateQueryHelperCacheForFile(relPath)
 		return true, nil
 	}
 
@@ -621,8 +622,8 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	
-	InvalidateOverviewCache()
+
+	InvalidateQueryHelperCacheForFile(relPath)
 	return true, nil
 }
 
@@ -1018,8 +1019,7 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 
 	logInfo("SyncAllFilesAstraMap: 扫描完成 %d 文件, %d 更新, 解析变更关系", scanned, updated)
 	if updated == 0 && !pruned && prunedDeleted == 0 {
-		logInfo("SyncAllFilesAstraMap: 无变更，跳过全局关系解析")
-		return result, err
+		logInfo("SyncAllFilesAstraMap: 文件无变更，刷新启发式调用关系")
 	}
 
 	// 触发跨文件调用解析
@@ -1028,6 +1028,7 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 	if err2 := ResolveCrossFileCallsForFiles(db, projectRoot, updatedFiles); err2 != nil {
 		logError("ResolveCrossFileCalls failed: %v", err2)
 	}
+	InvalidateOverviewCache()
 
 	logInfo("SyncAllFilesAstraMap: 就绪, %d 文件, %d 更新", scanned, updated)
 	return result, err
@@ -1113,6 +1114,7 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 	if err := ResolveCrossFileCallsForFiles(db, projectRoot, result.UpdatedFiles); err != nil {
 		logError("ResolveCrossFileCalls failed: %v", err)
 	}
+	InvalidateOverviewCache()
 	return result, nil
 }
 
@@ -1175,6 +1177,7 @@ func removeIndexedFile(db *sqlx.DB, relPath string) (bool, error) {
 			affected += rows
 		}
 	}
+	InvalidateQueryHelperCacheForFile(relPath)
 	return affected > 0, nil
 }
 
