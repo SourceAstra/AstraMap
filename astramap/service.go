@@ -146,7 +146,8 @@ func QueryGraphData(db *sqlx.DB) (*GraphDataResult, error) {
 	if err := db.Select(&nodes, `
 		SELECT *
 		FROM astramap_nodes
-		WHERE kind IN ('function', 'method', 'class', 'struct', 'interface', 'route', 'external')
+		WHERE kind IN ('function', 'method', 'route', 'external')
+		  AND file_path NOT LIKE '%.h' AND file_path NOT LIKE '%.hpp' AND file_path NOT LIKE '%.hh'
 		`+nonSyntheticAnonymousNodeSQL+`
 		ORDER BY file_path, start_line, name
 	`); err != nil {
@@ -191,7 +192,8 @@ func QueryProjectedGraph(db *sqlx.DB) (*ProjectedGraphResult, error) {
 	if err := db.Select(&nodeRows, `
 		SELECT id, name, file_path
 		FROM astramap_nodes
-		WHERE kind IN ('function', 'method', 'class', 'struct', 'interface', 'route')
+		WHERE kind IN ('function', 'method', 'route')
+		  AND file_path NOT LIKE '%.h' AND file_path NOT LIKE '%.hpp' AND file_path NOT LIKE '%.hh'
 		`+nonSyntheticAnonymousNodeSQL+`
 	`); err != nil {
 		return nil, err
@@ -216,8 +218,10 @@ func QueryProjectedGraph(db *sqlx.DB) (*ProjectedGraphResult, error) {
 		JOIN astramap_nodes n1 ON e.source = n1.id
 		JOIN astramap_nodes n2 ON e.target = n2.id
 		WHERE e.kind IN ('calls','imports','implements','route')
-		  AND n1.kind IN ('function','method','class','struct','interface','route')
-		  AND n2.kind IN ('function','method','class','struct','interface','route')
+		  AND n1.kind IN ('function','method','route')
+		  AND n2.kind IN ('function','method','route')
+		  AND n1.file_path NOT LIKE '%.h' AND n1.file_path NOT LIKE '%.hpp' AND n1.file_path NOT LIKE '%.hh'
+		  AND n2.file_path NOT LIKE '%.h' AND n2.file_path NOT LIKE '%.hpp' AND n2.file_path NOT LIKE '%.hh'
 		GROUP BY n1.file_path, n2.file_path
 	`); err != nil {
 		return nil, err
@@ -268,6 +272,7 @@ func QueryFunctionList(db *sqlx.DB) ([]ModuleGraphNode, error) {
 		SELECT id, kind, name, file_path, start_line
 		FROM astramap_nodes
 		WHERE kind IN ('function', 'method')
+		  AND file_path NOT LIKE '%.h' AND file_path NOT LIKE '%.hpp' AND file_path NOT LIKE '%.hh'
 		`+nonSyntheticAnonymousNodeSQL+`
 		ORDER BY file_path, start_line, name
 	`); err != nil {
@@ -287,7 +292,8 @@ func QueryModuleGraph(db *sqlx.DB, moduleID string) (*ModuleGraphResult, error) 
 		       start_column, end_column, signature, docstring, visibility, return_type,
 		       is_exported, updated_at
 		FROM astramap_nodes
-		WHERE kind IN ('function', 'method', 'class', 'struct', 'interface', 'route')
+		WHERE kind IN ('function', 'method', 'route')
+		  AND file_path NOT LIKE '%.h' AND file_path NOT LIKE '%.hpp' AND file_path NOT LIKE '%.hh'
 		` + nonSyntheticAnonymousNodeSQL
 	var nodeArgs []interface{}
 	if moduleID == "(root)" {
