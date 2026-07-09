@@ -14,7 +14,7 @@
     /* 玻璃拟态面板 */
     --panel-bg: rgba(30, 41, 59, 0.75);
     --panel-border: rgba(255, 255, 255, 0.1);
-    --panel-blur: blur(12px);
+    --panel-blur: blur(4px);
     
     /* 文本色 */
     --text-main: #f8fafc;
@@ -506,7 +506,7 @@ body.panel-active.panel-collapsed #right-panel-toggle {
 /* ===== 导入向导优化 ===== */
 #import-overlay {
     position: fixed; inset: 0; background: rgba(15, 23, 42, 0.8);
-    backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center;
+    backdrop-filter: var(--panel-blur); display: flex; align-items: center; justify-content: center;
     z-index: 9999;
 }
 #import-card {
@@ -681,7 +681,7 @@ body.panel-active.panel-collapsed #right-panel-toggle {
     position: fixed;
     z-index: 20000;
     background: rgba(15, 23, 42, 0.95);
-    backdrop-filter: blur(12px);
+    backdrop-filter: var(--panel-blur);
     border: 1px solid rgba(99, 102, 241, 0.3);
     border-radius: 8px;
     padding: 6px 0;
@@ -842,7 +842,7 @@ body.theme-light {
     --bg-gradient: linear-gradient(135deg, #e2e8f0 0%, #d8dee9 100%);
     --panel-bg: rgba(255, 255, 255, 0.95);     /* 纯净磨砂玻璃白 */
     --panel-border: rgba(100, 116, 139, 0.14); /* 蓝灰边框，冷静而精确 */
-    --panel-blur: blur(20px);
+    --panel-blur: blur(4px);
     --accent-primary: #6366f1;                 /* 靛紫，与冷白背景完美协调 */
     --accent-secondary: #818cf8;               /* 亮靛蓝辅助，渐变自然 */
     --text-main: #1e293b;                      /* 深蓝灰，比纯黑更精致护眼 */
