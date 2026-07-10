@@ -56,6 +56,8 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 		return nil, nil, "", err
 	}
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
+	sourceLines := strings.Split(string(codeBytes), "\n")
+
 
 	// 2. Identify Language and load corresponding Tree-sitter grammar
 	ext := strings.ToLower(filepath.Ext(filePath))
@@ -228,28 +230,44 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 				}
 				isDef = nodeName != ""
 			} else if nodeType == "class_specifier" || nodeType == "struct_specifier" || nodeType == "enum_specifier" {
-				if nodeType == "class_specifier" {
-					nodeKind = "class"
-				} else if nodeType == "enum_specifier" {
-					nodeKind = "enum"
+				if n.Parent() != nil && n.Parent().Kind() == "type_definition" {
+					isDef = false
 				} else {
-					nodeKind = "struct"
+					if nodeType == "class_specifier" {
+						nodeKind = "class"
+					} else if nodeType == "enum_specifier" {
+						nodeKind = "enum"
+					} else {
+						nodeKind = "struct"
+					}
+					if nameNode := n.ChildByFieldName("name"); nameNode != nil {
+						nodeName = nodeText(nameNode, codeBytes)
+					}
+					isDef = true
 				}
+			} else if nodeType == "function_definition" || nodeType == "declaration" {
+				declNode := n.ChildByFieldName("declarator")
+				isFuncDecl := false
+				if declNode != nil {
+					if containsNodeKind(declNode, "parameter_list") {
+						isFuncDecl = true
+						nodeName, container = extractCppFuncNameAndContainer(declNode, codeBytes)
+					}
+				}
+				if isFuncDecl {
+					if lang == "cpp" && container != "" {
+						nodeKind = "method"
+					} else {
+						nodeKind = "function"
+					}
+					isDef = true
+				}
+			} else if nodeType == "preproc_def" || nodeType == "preproc_function_def" {
 				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
 					nodeName = nodeText(nameNode, codeBytes)
 				}
-				isDef = true
-			} else if nodeType == "function_definition" {
-				declNode := n.ChildByFieldName("declarator")
-				if declNode != nil {
-					nodeName, container = extractCppFuncNameAndContainer(declNode, codeBytes)
-				}
-				if lang == "cpp" && container != "" {
-					nodeKind = "method"
-				} else {
-					nodeKind = "function"
-				}
-				isDef = true
+				nodeKind = "macro"
+				isDef = nodeName != ""
 			}
 
 		case "java":
@@ -289,6 +307,10 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 			}
 
 			usn := fmt.Sprintf("%s:%s::%s", getLangPrefix(lang), relPath, qname)
+			doc := ""
+			if len(sourceLines) > 0 {
+				doc = findLeadingComments(sourceLines, int(n.StartPosition().Row)+1)
+			}
 			amNode := &AstraMapNode{
 				ID:            usn,
 				Kind:          nodeKind,
@@ -299,8 +321,10 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 				StartLine:     int(n.StartPosition().Row) + 1,
 				EndLine:       int(n.EndPosition().Row) + 1,
 				Signature:     sig,
+				Docstring:     doc,
 				UpdatedAt:     now,
 			}
+
 			nodes = append(nodes, amNode)
 			definedSymbols[nodeName] = amNode
 
@@ -347,6 +371,74 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 	}
 
 	collect(rootNode, initialContainer)
+
+
+	if lang == "c" || lang == "cpp" {
+		// 仅捕获具有显式声明、定义、初始化或注册意图的大写宏
+		heuristicMacroRegex := regexp.MustCompile(`\b((?:(?:DECLARE|DEF|CREATE|IMPLEMENT)_[A-Z0-9_]+)|(?:[A-Z0-9_]+_(?:INIT|FUNC|REGISTER|ENTRY|HANDLER|CALLBACK)))\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)`)
+		inBlockComment := false
+		for lineIdx, line := range sourceLines {
+			trimmed := strings.TrimSpace(line)
+			// 1. 跳过块注释的边界以及行内注释行
+			if strings.HasPrefix(trimmed, "/*") {
+				inBlockComment = true
+			}
+			if inBlockComment {
+				if strings.Contains(trimmed, "*/") {
+					inBlockComment = false
+				}
+				continue
+			}
+			if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "*") {
+				continue // 过滤空行、单行注释、预处理宏定义本身以及块注释内部行
+			}
+
+			matches := heuristicMacroRegex.FindStringSubmatch(line)
+			if len(matches) == 3 {
+				macroName := matches[1]
+				symName := matches[2]
+
+				// 2. 检查匹配项左侧是否有单行注释或块注释标记
+				matchIdx := strings.Index(line, matches[0])
+				if matchIdx > 0 {
+					prefix := line[:matchIdx]
+					if strings.Contains(prefix, "//") || strings.Contains(prefix, "/*") {
+						continue
+					}
+				}
+
+				if _, exists := definedSymbols[symName]; !exists {
+					usn := fmt.Sprintf("%s:%s::%s", getLangPrefix(lang), relPath, symName)
+					amNode := &AstraMapNode{
+						ID:            usn,
+						Kind:          "function",
+						Name:          symName,
+						QualifiedName: symName,
+						FilePath:      relPath,
+						Language:      lang,
+						StartLine:     lineIdx + 1,
+						EndLine:       lineIdx + 1,
+						Signature:     strings.TrimSpace(line),
+						Docstring:     fmt.Sprintf("由宏 %s 隐式生成的函数定义", macroName),
+						UpdatedAt:     now,
+					}
+					nodes = append(nodes, amNode)
+					definedSymbols[symName] = amNode
+
+					parentID := fmt.Sprintf("file:%s", relPath)
+					edges = append(edges, &AstraMapEdge{
+						Source:     parentID,
+						Target:     usn,
+						Kind:       "contains",
+						Provenance: "tree-sitter",
+					})
+				}
+			}
+		}
+	}
+
+
+
 
 	// 5. Traverse AST to collect 'calls' inside the same file
 	getEnclosingFunc := func(line int) *AstraMapNode {
@@ -947,6 +1039,15 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 func buildFunctionPointerFieldMap(projectRoot string, shortMap map[string][]string) map[string][]string {
 	fieldMap := make(map[string][]string)
 	seen := make(map[string]map[string]struct{})
+
+	structFieldsMap := make(map[string][]string)
+	typedefMap := make(map[string]string)
+
+	structRe := regexp.MustCompile(`struct\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{([\s\S]*?)\}`)
+	funcPtrFieldRe := regexp.MustCompile(`\(\s*\*\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)`)
+	typedefRe := regexp.MustCompile(`typedef\s+struct\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;`)
+
+	// Pass 1: Parse all structs & typedefs
 	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -965,7 +1066,61 @@ func buildFunctionPointerFieldMap(projectRoot string, shortMap map[string][]stri
 		if err != nil {
 			return nil
 		}
-		matches := functionPointerInit.FindAllStringSubmatch(string(data), -1)
+		content := string(data)
+
+		structMatches := structRe.FindAllStringSubmatch(content, -1)
+		for _, m := range structMatches {
+			structName := m[1]
+			body := m[2]
+			var fields []string
+			lines := strings.Split(body, "\n")
+			for _, line := range lines {
+				fSub := funcPtrFieldRe.FindStringSubmatch(line)
+				if len(fSub) > 1 {
+					fields = append(fields, fSub[1])
+				}
+			}
+			if len(fields) > 0 {
+				structFieldsMap[structName] = fields
+			}
+		}
+
+		typedefMatches := typedefRe.FindAllStringSubmatch(content, -1)
+		for _, m := range typedefMatches {
+			typedefMap[m[2]] = m[1]
+		}
+		return nil
+	})
+
+	for alias, realName := range typedefMap {
+		if fields, ok := structFieldsMap[realName]; ok {
+			structFieldsMap[alias] = fields
+		}
+	}
+
+	// Pass 2: Extract assignments
+	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if shouldSkipIndexDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".c" && ext != ".h" && ext != ".cpp" && ext != ".cc" && ext != ".cxx" && ext != ".hpp" && ext != ".hxx" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		content := string(data)
+
+		// 2.1 Designated initializer mode (.init = func)
+		matches := functionPointerInit.FindAllStringSubmatch(content, -1)
 		for _, match := range matches {
 			if len(match) < 3 {
 				continue
@@ -983,9 +1138,103 @@ func buildFunctionPointerFieldMap(projectRoot string, shortMap map[string][]stri
 				fieldMap[fieldName] = append(fieldMap[fieldName], targetID)
 			}
 		}
+
+		// 2.2 Sequential initialization mode (fireflys_api_t api = { func1, func2 })
+		initVarRe := regexp.MustCompile(`(?:const\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([\s\S]*?)\}`)
+		initVarMatches := initVarRe.FindAllStringSubmatch(content, -1)
+		for _, m := range initVarMatches {
+			typeName := m[1]
+			fields, hasFields := structFieldsMap[typeName]
+			if !hasFields {
+				if realType, ok := typedefMap[typeName]; ok {
+					fields, hasFields = structFieldsMap[realType]
+				}
+			}
+
+			if hasFields && len(fields) > 0 {
+				body := m[3]
+				bodyClean := removeCComments(body)
+				items := splitCInitList(bodyClean)
+				for idx, item := range items {
+					if idx >= len(fields) {
+						break
+					}
+					fieldName := fields[idx]
+					funcName := strings.TrimSpace(item)
+					funcName = strings.TrimPrefix(funcName, "&")
+					funcName = strings.TrimSpace(funcName)
+					if funcName == "" || funcName == "NULL" || funcName == "0" || funcName == "nullptr" {
+						continue
+					}
+					if !isValidCIdentifier(funcName) {
+						continue
+					}
+					for _, targetID := range shortMap[funcName] {
+						if seen[fieldName] == nil {
+							seen[fieldName] = make(map[string]struct{})
+						}
+						if _, exists := seen[fieldName][targetID]; exists {
+							continue
+						}
+						seen[fieldName][targetID] = struct{}{}
+						fieldMap[fieldName] = append(fieldMap[fieldName], targetID)
+					}
+				}
+			}
+		}
 		return nil
 	})
 	return fieldMap
+}
+
+func removeCComments(s string) string {
+	mlRe := regexp.MustCompile(`/\*[\s\S]*?\*/`)
+	s = mlRe.ReplaceAllString(s, "")
+	slRe := regexp.MustCompile(`//.*`)
+	s = slRe.ReplaceAllString(s, "")
+	return s
+}
+
+func splitCInitList(s string) []string {
+	var items []string
+	var current strings.Builder
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '{' {
+			depth++
+			current.WriteByte(c)
+		} else if c == '}' {
+			depth--
+			current.WriteByte(c)
+		} else if c == ',' && depth == 0 {
+			items = append(items, strings.TrimSpace(current.String()))
+			current.Reset()
+		} else {
+			current.WriteByte(c)
+		}
+	}
+	if current.Len() > 0 {
+		items = append(items, strings.TrimSpace(current.String()))
+	}
+	return items
+}
+
+func isValidCIdentifier(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	first := s[0]
+	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_') {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func macroReturnCallTargets(line string, shortMap, fieldFunctionMap map[string][]string) []string {
