@@ -437,7 +437,7 @@
                 const active = fn.id === rootNodeId ? ' active' : '';
                 const line = fn.startLine || fn.line || 0;
                 return `<button class="und-tree-function${active}" data-node-id="${fn.id}" title="${this.escapeHtml(fn.qualifiedName || fn.name || fn.id)}">
-                    <span class="und-tree-function-name">${this.escapeHtml(fn.name || fn.id)}</span>
+                    <span class="und-tree-function-name">${this.escapeHtml(fn.qualifiedName || fn.name || fn.id)}</span>
                     <span class="und-tree-function-line">${line ? ':' + line : ''}</span>
                 </button>`;
             }).join('');
@@ -600,7 +600,7 @@
 
             const fileLabel = sym.file || sym.filePath || '';
             const lineLabel = sym.startLine || sym.line || '';
-            document.getElementById('und-root-label').textContent = [sym.name, fileLabel ? `${fileLabel}${lineLabel ? ':' + lineLabel : ''}` : ''].filter(Boolean).join(' · ');
+            document.getElementById('und-root-label').textContent = [sym.qualifiedName || sym.name, fileLabel ? `${fileLabel}${lineLabel ? ':' + lineLabel : ''}` : ''].filter(Boolean).join(' · ');
             this.renderFunctionTree(document.getElementById('und-function-search')?.value || '');
 
             selectedNodeId = rootNodeId;
@@ -1528,7 +1528,8 @@
                     ctx.fillStyle = isLightTheme ? '#1f2937' : ((isRoot || isSelected) ? '#ffffff' : '#e2e8f0');
                     ctx.textAlign = 'left';
                     ctx.font = 'bold 12px "Inter", "Outfit", sans-serif';
-                    let displayName = n.name.length > 40 ? n.name.substring(0, 37) + '...' : n.name;
+                    const nameToDisplay = n.qualifiedName || n.name;
+                    let displayName = nameToDisplay.length > 40 ? nameToDisplay.substring(0, 37) + '...' : nameToDisplay;
                     if (n.isClone) {
                         displayName += ' 🔗';
                     }
@@ -1709,7 +1710,7 @@
 
                 node.foldedNodeIds.forEach(fnId => {
                     const sym = window.G_DATA && window.G_DATA.symbols[fnId];
-                    const displayName = sym ? sym.name : fnId;
+                    const displayName = sym ? (sym.qualifiedName || sym.name) : fnId;
                     const displayFile = (sym && sym.file) ? sym.file.split('/').pop() : '外部符号';
                     listHtml += `<div class="und-agg-item" onclick="window.SourceAstra.loadAggregaterSource('${fnId}')">` +
                         `<span>fn</span><strong>${displayName}</strong>` +
@@ -1726,7 +1727,7 @@
                 return;
             }
 
-            titleLabel.textContent = '📄 ' + node.name;
+            titleLabel.textContent = '📄 ' + (node.qualifiedName || node.name);
             fileLabel.textContent = node.file + ':' + (node.line || '?');
             body.innerHTML = '<div class="und-code-loading">加载源码中...</div>';
 
