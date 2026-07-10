@@ -390,58 +390,78 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		if limit <= 0 {
 			limit = 100
 		}
-		id, resolveErr := resolvePrimarySymbolID(db, symbol)
-		if resolveErr != nil || id == "" {
+		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
+		if resolveErr != nil || len(ids) == 0 {
 			content = fmt.Sprintf("### Callers of %s:\n\nSymbol not found.\n", symbol)
 			break
 		}
-		callers, err2 := GetCallersLimited(db, id, limit+1)
-		err = err2
-		if err == nil {
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("### Callers of %s:\n\n", symbol))
-			truncated := len(callers) > limit
-			if truncated {
-				callers = callers[:limit]
-			}
-			for _, c := range callers {
-				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
-					CanonicalSymbolIDForNodeID(db, c.Source),
-					CanonicalSymbolIDForNodeID(db, c.Target),
-					c.Line))
-				if c.Metadata != "" {
-					sb.WriteString(fmt.Sprintf("  - metadata: %s\n", c.Metadata))
+		var allEdges []*AstraMapEdge
+		seenEdges := make(map[string]bool)
+		for _, id := range ids {
+			callers, err2 := GetCallersLimited(db, id, limit+1)
+			if err2 == nil {
+				for _, c := range callers {
+					edgeKey := fmt.Sprintf("%s->%s:%d", c.Source, c.Target, c.Line)
+					if !seenEdges[edgeKey] {
+						seenEdges[edgeKey] = true
+						allEdges = append(allEdges, c)
+					}
 				}
 			}
-			if truncated {
-				sb.WriteString(fmt.Sprintf("\n_Result truncated to %d callers. Pass a higher `limit` to retrieve more._\n", limit))
-			}
-			content = sb.String()
 		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("### Callers of %s:\n\n", symbol))
+		truncated := len(allEdges) > limit
+		if truncated {
+			allEdges = allEdges[:limit]
+		}
+		for _, c := range allEdges {
+			sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
+				CanonicalSymbolIDForNodeID(db, c.Source),
+				CanonicalSymbolIDForNodeID(db, c.Target),
+				c.Line))
+			if c.Metadata != "" {
+				sb.WriteString(fmt.Sprintf("  - metadata: %s\n", c.Metadata))
+			}
+		}
+		if truncated {
+			sb.WriteString(fmt.Sprintf("\n_Result truncated to %d callers. Pass a higher `limit` to retrieve more._\n", limit))
+		}
+		content = sb.String()
 
 	case "astramap_callees":
 		symbol, _ := argsMap["symbol"].(string)
-		id, resolveErr := resolvePrimarySymbolID(db, symbol)
-		if resolveErr != nil || id == "" {
+		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
+		if resolveErr != nil || len(ids) == 0 {
 			content = fmt.Sprintf("### Callees of %s:\n\nSymbol not found.\n", symbol)
 			break
 		}
-		callees, err2 := GetCallees(db, id)
-		err = err2
-		if err == nil {
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("### Callees of %s:\n\n", symbol))
-			for _, c := range callees {
-				sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
-					CanonicalSymbolIDForNodeID(db, c.Source),
-					CanonicalSymbolIDForNodeID(db, c.Target),
-					c.Line))
-				if c.Metadata != "" {
-					sb.WriteString(fmt.Sprintf("  - metadata: %s\n", c.Metadata))
+		var allEdges []*AstraMapEdge
+		seenEdges := make(map[string]bool)
+		for _, id := range ids {
+			callees, err2 := GetCallees(db, id)
+			if err2 == nil {
+				for _, c := range callees {
+					edgeKey := fmt.Sprintf("%s->%s:%d", c.Source, c.Target, c.Line)
+					if !seenEdges[edgeKey] {
+						seenEdges[edgeKey] = true
+						allEdges = append(allEdges, c)
+					}
 				}
 			}
-			content = sb.String()
 		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("### Callees of %s:\n\n", symbol))
+		for _, c := range allEdges {
+			sb.WriteString(fmt.Sprintf("- %s → %s (Line %d)\n",
+				CanonicalSymbolIDForNodeID(db, c.Source),
+				CanonicalSymbolIDForNodeID(db, c.Target),
+				c.Line))
+			if c.Metadata != "" {
+				sb.WriteString(fmt.Sprintf("  - metadata: %s\n", c.Metadata))
+			}
+		}
+		content = sb.String()
 
 	case "astramap_impact":
 		symbol, _ := argsMap["symbol"].(string)
@@ -449,18 +469,42 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		if depthVal, ok := argsMap["depth"].(float64); ok {
 			depth = normalizeImpactDepth(int(depthVal))
 		}
-
-		id, resolveErr := resolvePrimarySymbolID(db, symbol)
-		if resolveErr != nil || id == "" {
+		ids, resolveErr := ResolveSymbolToIDs(db, symbol)
+		if resolveErr != nil || len(ids) == 0 {
 			content = fmt.Sprintf("Symbol not found: %s", symbol)
 			isErr = true
 			break
 		}
-		res, err2 := AnalyzeImpact(db, id, depth)
-		err = err2
-		if err == nil {
-			data, _ := json.MarshalIndent(res, "", "  ")
+		var allAffected []AffectedNodeSummary
+		seenNodes := make(map[string]bool)
+		var lastErr error
+		for _, id := range ids {
+			res, err2 := AnalyzeImpact(db, id, depth)
+			if err2 != nil {
+				lastErr = err2
+				continue
+			}
+			for _, node := range res.AffectedNodes {
+				nodeKey := node.SymbolID
+				if !seenNodes[nodeKey] {
+					seenNodes[nodeKey] = true
+					allAffected = append(allAffected, node)
+				}
+			}
+		}
+		if len(allAffected) > 0 || lastErr == nil {
+			err = nil
+			resCombined := &ImpactResult{
+				RootSymbolID:  symbol,
+				AffectedNodes: allAffected,
+			}
+			if len(ids) > 0 {
+				resCombined.RootSymbolID = CanonicalSymbolIDForNodeID(db, ids[0])
+			}
+			data, _ := json.MarshalIndent(resCombined, "", "  ")
 			content = string(data)
+		} else {
+			err = lastErr
 		}
 
 	case "astramap_status":
@@ -489,20 +533,21 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		from, _ := argsMap["from"].(string)
 		to, _ := argsMap["to"].(string)
 
-		fromID, resolveErr := resolvePrimarySymbolID(db, from)
-		if resolveErr != nil || fromID == "" {
+		fromIDs, resolveErr := ResolveSymbolToIDs(db, from)
+		if resolveErr != nil || len(fromIDs) == 0 {
 			content = fmt.Sprintf("From symbol not found: %s", from)
 			isErr = true
 			break
 		}
-		toID, resolveErr := resolvePrimarySymbolID(db, to)
-		if resolveErr != nil || toID == "" {
+		toIDs, resolveErr := ResolveSymbolToIDs(db, to)
+		if resolveErr != nil || len(toIDs) == 0 {
 			content = fmt.Sprintf("To symbol not found: %s", to)
 			isErr = true
 			break
 		}
 
-		paths, err2 := TracePath(db, fromID, toID)
+		paths, err2 := TracePath(db, fromIDs, toIDs)
+
 		err = err2
 		if err == nil {
 			var sb strings.Builder
