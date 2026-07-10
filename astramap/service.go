@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -51,13 +52,27 @@ var stopWords = map[string]bool{
 	"yours": true, "yourself": true, "yourselves": true,
 }
 
+var chStopWords = map[string]bool{
+	"的": true, "了": true, "和": true, "是": true, "在": true, "有": true, "个": true,
+	"到": true, "之": true, "与": true, "或": true, "及": true, "等": true, "去": true,
+	"层": true, "从": true, "链": true, "路": true, "径": true,
+}
+
 func cleanQueryTerms(query string) []string {
+	re := regexp.MustCompile(`[a-zA-Z0-9_]+|[\p{Han}]`)
+	matches := re.FindAllString(query, -1)
+
 	var clean []string
-	for _, term := range strings.Fields(query) {
+	seen := make(map[string]bool)
+	for _, term := range matches {
 		termLower := strings.ToLower(term)
-		if stopWords[termLower] {
+		if stopWords[termLower] || chStopWords[term] {
 			continue
 		}
+		if seen[termLower] {
+			continue
+		}
+		seen[termLower] = true
 		clean = append(clean, term)
 	}
 	return clean
@@ -362,6 +377,12 @@ func canonicalEdgeEndpoint(idMap map[string]string, id string) string {
 	if strings.HasPrefix(id, "external:") {
 		return "external:" + externalSymbolName(id)
 	}
+	if strings.Contains(id, "::") {
+		parts := strings.SplitN(id, ":", 2)
+		if len(parts) == 2 && !strings.Contains(parts[0], "/") && !strings.Contains(parts[0], "\\") {
+			return parts[1]
+		}
+	}
 	return id
 }
 
@@ -503,6 +524,9 @@ func QuerySearch(db *sqlx.DB, query, kind string, limit int) ([]*AstraMapNode, e
 }
 
 func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*AstraMapNode, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, fmt.Errorf("empty query is not allowed")
+	}
 	if limit <= 0 {
 		limit = 20
 	}
@@ -517,9 +541,9 @@ func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*As
 	params := []interface{}{"%" + query + "%", "%" + query + "%"}
 	if kind != "" {
 		if kind == "struct" {
-			q += "AND ((kind = 'struct' AND signature NOT LIKE 'typedef enum%') OR (kind = 'class' AND language IN ('c', 'cpp') AND name NOT LIKE '%_e') OR (kind IN ('typedef', 'type') AND language IN ('c', 'cpp') AND signature LIKE 'typedef struct%')) "
+			q += "AND ((kind = 'struct' AND signature NOT LIKE 'enum %' AND signature NOT LIKE 'typedef %') OR (kind = 'class' AND language IN ('c', 'cpp') AND signature NOT LIKE 'enum %' AND signature NOT LIKE 'typedef %' AND name NOT LIKE '%_e') OR (kind IN ('typedef', 'type') AND language IN ('c', 'cpp') AND signature LIKE 'typedef struct%')) "
 		} else if kind == "enum" {
-			q += "AND (kind = 'enum' OR (kind = 'class' AND language IN ('c', 'cpp') AND (name LIKE '%_e' OR name LIKE '%enum%')) OR (kind IN ('typedef', 'type', 'struct') AND language IN ('c', 'cpp') AND signature LIKE 'typedef enum%')) "
+			q += "AND (kind = 'enum' OR (kind IN ('class', 'struct') AND language IN ('c', 'cpp') AND (signature LIKE 'enum %' OR signature LIKE 'typedef enum%' OR name LIKE '%_e' OR name LIKE '%enum%')) OR (kind IN ('typedef', 'type') AND language IN ('c', 'cpp') AND signature LIKE 'typedef enum%')) "
 		} else {
 			if kind == "typedef" || kind == "type" {
 				q += "AND (kind IN ('typedef', 'type') OR (language IN ('c', 'cpp') AND signature LIKE 'typedef %')) "
@@ -534,11 +558,37 @@ func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*As
 	err := db.Select(&nodes, q, params...)
 	if err == nil {
 		for _, node := range nodes {
-			normalizeTypedefNodeKind(node)
+			normalizeSearchNodeKind(node, kind)
 			node.ID = CanonicalSymbolID(node)
 		}
 	}
 	return nodes, err
+}
+
+func normalizeSearchNodeKind(node *AstraMapNode, requestedKind string) {
+	normalizeTypedefNodeKind(node)
+	if node == nil || (node.Language != "c" && node.Language != "cpp") {
+		return
+	}
+	signature := strings.TrimSpace(node.Signature)
+	switch requestedKind {
+	case "typedef":
+		if strings.HasPrefix(signature, "typedef ") {
+			node.Kind = "typedef"
+		}
+	case "type":
+		if strings.HasPrefix(signature, "typedef ") {
+			node.Kind = "type"
+		}
+	case "enum":
+		if strings.HasPrefix(signature, "enum ") || strings.HasPrefix(signature, "typedef enum ") {
+			node.Kind = "enum"
+		}
+	case "struct":
+		if strings.HasPrefix(signature, "struct ") || strings.HasPrefix(signature, "typedef struct ") {
+			node.Kind = "struct"
+		}
+	}
 }
 
 func normalizeTypedefNodeKind(node *AstraMapNode) {
@@ -550,7 +600,13 @@ func normalizeTypedefNodeKind(node *AstraMapNode) {
 	}
 	signature := strings.TrimSpace(node.Signature)
 	if strings.HasPrefix(signature, "typedef ") {
-		node.Kind = "type"
+		if strings.Contains(signature, "struct") {
+			node.Kind = "struct"
+		} else if strings.Contains(signature, "enum") {
+			node.Kind = "enum"
+		} else {
+			node.Kind = "type"
+		}
 	}
 }
 
