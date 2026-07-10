@@ -296,19 +296,20 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			json.NewEncoder(w).Encode(map[string]string{"error": "parameters from and to required"})
 			return
 		}
-		fromID, resolveErr := resolvePrimarySymbolID(readDB, from)
-		if resolveErr != nil || fromID == "" {
+		fromIDs, resolveErr := ResolveSymbolToIDs(readDB, from)
+		if resolveErr != nil || len(fromIDs) == 0 {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "from symbol not found"})
 			return
 		}
-		toID, resolveErr := resolvePrimarySymbolID(readDB, to)
-		if resolveErr != nil || toID == "" {
+		toIDs, resolveErr := ResolveSymbolToIDs(readDB, to)
+		if resolveErr != nil || len(toIDs) == 0 {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "to symbol not found"})
 			return
 		}
-		paths, err := TracePath(readDB, fromID, toID)
+		paths, err := TracePath(readDB, fromIDs, toIDs)
+
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
