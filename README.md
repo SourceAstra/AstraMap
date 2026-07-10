@@ -14,11 +14,11 @@
 | **⚡ 按哈希增量索引更新** | 跳过未变动文件，仅对变更部分进行 AST 与 SCIP 增量导入 |
 | **🖥️ 交互式 Dashboard** | D3.js 力导向图与关系拓扑，集成全局探索、追溯依赖和一键架构理解文档 |
 | **🔧 条件编译感知** | C/C++ `#if`/`#ifdef` 预处理守卫自动标注在调用边 metadata，图遍历直达条件分支 |
-| **🎯 单符号精准消歧** | callers/callees/trace 统一做符号消歧与主符号归一化，消除重复边与结果膨胀 |
+| **🎯 多定义合并消歧** | callers/callees/impact/trace 统一做 `ResolveSymbolToIDs` 多符号解析与结果合并去重，消除单符号选择导致的信息丢失 |
 | **📊 callers 结果分页** | MCP `astramap_callers` 和 REST API 支持 `limit` 参数，超限截断提示，避免大项目结果膨胀 |
-| **🔗 C/C++ 函数指针与宏调用解析** | 跨文件启发式识别 `.field = &func` 函数指针初始化和 `XXXRETURN(func)` 宏展开调用模式 |
+| **🔗 C/C++ 函数指针与宏调用解析** | 跨文件启发式识别 `.field = &func` 指定初始化、`struct var = { func1, func2 }` 顺序初始化、`XXXRETURN(func)` 宏展开调用、`DECLARE_xxx(func)` 宏隐式函数定义模式 |
 | **🧹 脏文件低开销检测** | status 接口返回 `dirtyCount`，智能判断同步状态，免去频繁全量 hash 开销 |
-| **📄 分页与歧义过滤** | `astramap_files` 分页限制；启发式消歧自动过滤 Python dunder 并选择最窄 span 节点 |
+| **📄 分页与歧义过滤** | `astramap_files` 分页限制；启发式消歧自动过滤 Python dunder 并选择最窄 span 节点；中文查询单字分词与停用词过滤 |
 
 ### 2. 性能重构与指标优化
 
@@ -201,7 +201,7 @@ AI 代理可调用以下 9 个工具：
 | **条件编译 metadata** | callers/callees/trace/impact 结果中，C/C++ 调用边自动携带 `metadata` 字段，标注 `#if`/`#ifdef`/`#ifndef` 守卫条件 |
 | **脏文件检测** | `astramap_status` 返回 `dirtyCount` + `dirtyFiles`，AI 代理可判断图谱是否过期 |
 | **文件分页** | `astramap_files` 支持 `limit`/`offset` 参数，大项目分页查询 |
-| **单符号精确解析** | callers/callees/impact/trace 使用主符号解析，消除多定义合并导致的重复边 |
+| **单符号精确解析** | callers/callees/impact/trace 使用 `ResolveSymbolToIDs` 多符号解析，重载/多定义结果自动合并去重 |
 | **搜索 kind 校验** | `astramap_search` 的 `kind` 参数校验，非法值返回错误；新增 `typedef` kind |
 | **callers 分页** | `astramap_callers` 支持 `limit` 参数，超限截断并提示 |
 
@@ -274,7 +274,7 @@ astramap/
 ├── astramap/
 │   ├── schema.go             SQLite DDL
 │   ├── astramap.go           SCIP 导入 + 增量同步
-│   ├── treesitter.go         Tree-sitter 解析 + 跨文件调用启发（歧义过滤 + 最窄 span 选择）
+│   ├── treesitter.go         Tree-sitter 解析 + 跨文件调用启发（歧义过滤 + 最窄 span 选择 + 宏隐式函数定义 + 顺序初始化函数指针）
 │   ├── service.go            共享查询服务层（MCP/REST 共用）+ 脏文件检测 + 分页
 │   ├── query_helpers.go      查询辅助：kind 校验、depth 规范化、符号解析、条件编译标注、批量文件路径、源码缓存
 │   ├── filter.go             索引过滤配置（.astramap/config.yaml）
@@ -325,7 +325,8 @@ astramap/
 | 变更 | 说明 |
 |------|------|
 | **条件编译 metadata 标注** | C/C++ 预处理器守卫（`#if`/`#ifdef`/`#ifndef`）自动标注到调用边 metadata，GetCallers/GetCallees/TracePath/AnalyzeImpact 结果直接暴露条件编译上下文 |
-| **单符号精确解析** | callers/callees/impact/trace 统一使用 `resolvePrimarySymbolID`，消除多定义合并导致的重复边与结果膨胀 |
+| **多定义合并查询** | callers/callees/impact/trace 统一使用 `ResolveSymbolToIDs` 多符号解析，重载/多定义结果自动合并去重，消除单符号选择导致的信息丢失 |
+| **TracePath 多起点多终点** | `TracePath` 支持多 from/to ID 集合 BFS，重载符号间路径一次查询全部返回 |
 | **脏文件检测** | `QueryDirtyFiles`/`QueryDirtyFilesWithCount`，status 查询返回 `dirtyCount` + `dirtyFiles`，AI 代理可判断图谱是否与磁盘一致 |
 | **文件列表分页** | `QueryFilesPaged` + MCP `astramap_files` 支持 `limit`/`offset` 参数 |
 | **搜索 kind 校验** | `validateSearchKind` 校验 kind 参数，非法值返回错误（REST 400 / MCP error） |
@@ -337,22 +338,22 @@ astramap/
 | **模块级聚合图** | `/api/astramap/overview` 项目级聚合 + `/api/graph/module` 模块内钻取 |
 | **理解文档生成** | `/api/documents/generate` 一键生成函数/文件/模块/项目级理解文档，含 Mermaid 依赖图、复杂度风险表、架构边界违规检测 |
 | **C 语言独立支持** | `tree-sitter-c` 独立绑定，`.h` 文件智能 C/C++ 判定 |
-| **MCP 符号消歧** | callers/callees/impact/trace 支持模糊符号解析，重载/多定义自动合并 |
+| **MCP 符号消歧** | callers/callees/impact/trace 支持模糊符号解析，重载/多定义自动合并去重 |
 | **Trace 邻域重构** | 兄弟感知邻域模型，修复跨文件自调用过滤 |
 | **SCIP 边丢失修复** | 全局符号映射修复跨文档引用丢失 |
 | **静态链接构建** | musl 静态编译，无 GLIBC 依赖 |
 | **Dashboard 增强** | `--host` 参数、自动端口探测、LAN IP 显示、后台启动、请求日志 |
 | **install 增强** | 探测式注册（仅写入已安装客户端），支持 Antigravity/Windsurf/Cline，注册核验 |
 | **CLI 精简** | `--project` 全局参数，移除未实现命令 |
-| **Trace API 符号消歧** | REST `/api/astramap/trace/{id}` 增加 `resolvePrimarySymbolID`，消除多定义导致的重复路径 |
+| **Trace API 多定义路径** | REST `/api/astramap/trace` 和 MCP `astramap_trace` 使用 `ResolveSymbolToIDs` 多符号解析 + `TracePath(fromIDs, toIDs)` 多起点多终点 BFS |
 | **Dashboard 头文件降噪** | 图谱查询、模块聚合图、函数列表统一排除 `.h`/`.hpp`/`.hh` 头文件节点，减少 C/C++ 项目噪声 |
 | **函数树目录层级重构** | 依赖分析视图函数树从扁平单层目录改为完整多级目录树，按需展开填充函数按钮，搜索模式扁平化展示 |
 | **函数列表独立懒加载** | 依赖分析视图不再依赖探索视界先完成全局图初始化，独立从 `/api/astramap/functions` 拉取函数列表 |
 | **trace.js 懒加载加固** | Promise 去重防止重复加载、加载失败自动重置状态、缓存版本号破缓存 |
 | **callers 结果分页** | MCP `astramap_callers` 新增 `limit` 参数，REST `/api/astramap/callees/{id}` 新增 `limit` 查询参数，超限截断并提示 |
-| **C/C++ 函数指针调用解析** | 跨文件启发式新增 `.field = &func` 函数指针初始化模式识别，`->field()` / `.field()` 调用自动解析到函数指针目标 |
+| **C/C++ 函数指针调用解析** | 跨文件启发式新增 `.field = &func` 指定初始化模式 + `struct_name var = { func1, func2 }` 顺序初始化模式识别，`->field()` / `.field()` 调用自动解析到函数指针目标 |
 | **C/C++ 宏返回调用解析** | 识别 `XXXRETURN(func)` 模式的宏展开调用，提取内部函数名建立调用边 |
-| **C/C++ typedef 分类修正** | `typedef struct/enum/class` 统一标记为 `type` kind；独立 `struct`/`enum` 声明正确标记为 `struct`/`enum`；查询时 `normalizeTypedefNodeKind` 将 C/C++ `typedef xxx` 签名节点归一为 `type`；搜索 `kind=struct` 含 `typedef struct`，搜索 `kind=enum` 含 `typedef enum` |
+| **C/C++ typedef 分类修正** | `typedef struct` → `struct`，`typedef enum` → `enum`，纯 `typedef` → `type`；搜索 `kind=struct` 含 `typedef struct`，搜索 `kind=enum` 含 `typedef enum`；`normalizeSearchNodeKind` 按请求 kind 精确归一 |
 | **搜索 kind 新增 typedef/type** | `astramap_search` 的 `kind` 参数新增 `typedef` 和 `type` 值，C/C++ typedef 类型可独立检索；`typedef`/`type` 搜索自动合并两种 kind |
 | **源码缓存按 ModTime 失效** | 文件内容缓存键从路径改为 `(path, modTime, size)` 三元组，文件修改后自动失效，消除条件编译 metadata 标注的脏数据 |
 | **单文件缓存精准失效** | 新增 `InvalidateQueryHelperCacheForFile`，文件同步/删除时仅清除该文件相关缓存，不再全量清空 |
@@ -365,6 +366,14 @@ astramap/
 | **explore 输出截断** | MCP `astramap_explore` 输出设 60KB 总量预算，单段源码 12KB 上限，超限截断并提示缩小 `maxFiles` 或收窄查询 |
 | **explore 默认 maxFiles 收敛** | `QueryExplore` 默认 `maxFiles` 从 10 降为 3，减少 AI 代理 Token 消耗，用户可显式传参扩大 |
 | **SyncAllFiles 启发式刷新** | 即使文件无变更也执行跨文件启发式调用关系解析，确保函数指针/宏调用等新增启发式边在首次 `amap index` 后生效 |
+| **C/C++ 宏隐式函数定义** | 识别 `DECLARE_xxx(func)` / `xxx_INIT(func)` / `xxx_REGISTER(func)` 等声明式宏模式，自动创建函数节点并标注来源宏名 |
+| **C/C++ `#define` 宏节点** | Tree-sitter 捕获 `preproc_def`/`preproc_function_def` 为 `macro` kind 节点 |
+| **C/C++ 前向声明过滤** | `declaration` 节点仅当含 `parameter_list` 时识别为函数，过滤纯前向声明噪声 |
+| **SCIP C/C++ 签名与文档还原** | SCIP 索引中 C/C++ 节点自动提取首行代码作为签名、前导注释作为 docstring |
+| **Tree-sitter 文档注释提取** | 所有语言节点自动提取前导 `//`/`/* */` 注释作为 docstring，含块注释与空行容忍 |
+| **中文查询分词** | explore/search 支持中文单字分词，过滤中文停用词（的/了/和/是/在…），中英混合查询无缝工作 |
+| **空查询拒绝** | `QuerySearchPaged` 拒绝空字符串查询，避免全表扫描 |
+| **`::` 分隔符规范化** | 边端点显示时正确处理 C++ `namespace::symbol` 格式，不再错误截断 |
 
 ### v0.1
 
