@@ -329,7 +329,24 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 		}
 	}
 
-	collect(rootNode, "")
+	initialContainer := ""
+	if lang == "go" {
+		for i := uint(0); i < rootNode.ChildCount(); i++ {
+			child := rootNode.Child(i)
+			if child.Kind() == "package_clause" {
+				pkgText := strings.TrimSpace(nodeText(child, codeBytes))
+				if strings.HasPrefix(pkgText, "package ") {
+					initialContainer = strings.TrimSpace(strings.TrimPrefix(pkgText, "package "))
+				}
+				break
+			}
+		}
+	} else if lang == "python" {
+		base := filepath.Base(filePath)
+		initialContainer = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+
+	collect(rootNode, initialContainer)
 
 	// 5. Traverse AST to collect 'calls' inside the same file
 	getEnclosingFunc := func(line int) *AstraMapNode {
@@ -860,18 +877,27 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 				targets := shortMap[calleeName]
 
 				beforeCallee := line[:m[2]]
-				dotIndex := strings.LastIndex(beforeCallee, ".")
-				arrowIndex := strings.LastIndex(beforeCallee, "->")
-				memberIndex := dotIndex
-				if arrowIndex > memberIndex {
-					memberIndex = arrowIndex
+				sepIndex := -1
+				lastDot := strings.LastIndex(beforeCallee, ".")
+				lastArrow := strings.LastIndex(beforeCallee, "->")
+				lastColon := strings.LastIndex(beforeCallee, "::")
+
+				if lastDot > sepIndex {
+					sepIndex = lastDot
 				}
-				if memberIndex != -1 {
+				if lastArrow > sepIndex {
+					sepIndex = lastArrow
+				}
+				if lastColon > sepIndex {
+					sepIndex = lastColon
+				}
+
+				if sepIndex != -1 {
 					if fieldTargets := fieldFunctionMap[calleeName]; len(fieldTargets) > 0 {
 						targets = fieldTargets
 					}
 				}
-				if calleeName == "main" && dotIndex == -1 {
+				if calleeName == "main" && sepIndex == -1 {
 					var filtered []string
 					for _, tID := range targets {
 						if strings.Contains(tID, ":"+fp+"::") {
@@ -880,8 +906,8 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 					}
 					targets = filtered
 				}
-				if dotIndex != -1 {
-					leftBound := dotIndex
+				if sepIndex != -1 {
+					leftBound := sepIndex
 					for leftBound > 0 {
 						c := beforeCallee[leftBound-1]
 						if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
@@ -890,15 +916,18 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 							break
 						}
 					}
-					prefix := beforeCallee[leftBound:dotIndex]
+					prefix := beforeCallee[leftBound:sepIndex]
 					if prefix != "" {
-						possibleQualified := prefix + "." + calleeName
-						if qTargets, exists := qualifiedMap[possibleQualified]; exists {
+						possibleQualified1 := prefix + "." + calleeName
+						possibleQualified2 := prefix + "::" + calleeName
+						if qTargets, exists := qualifiedMap[possibleQualified1]; exists {
+							targets = qTargets
+						} else if qTargets, exists := qualifiedMap[possibleQualified2]; exists {
 							targets = qTargets
 						}
 					}
 				}
-				if isAmbiguousHeuristicCall(calleeName, targets, memberIndex) {
+				if isAmbiguousHeuristicCall(targets) {
 					continue
 				}
 
@@ -1017,12 +1046,6 @@ func trailingIdentifier(expr string) string {
 	return expr[start:end]
 }
 
-func isAmbiguousHeuristicCall(calleeName string, targets []string, dotIndex int) bool {
-	if len(targets) <= 1 {
-		return false
-	}
-	if strings.HasPrefix(calleeName, "__") && strings.HasSuffix(calleeName, "__") {
-		return true
-	}
-	return dotIndex == -1
+func isAmbiguousHeuristicCall(targets []string) bool {
+	return len(targets) > 1
 }
