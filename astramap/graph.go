@@ -129,6 +129,7 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 		AffectedNodes: []AffectedNodeSummary{},
 	}
 
+
 	for sym, depth := range visited {
 		if sym == symbolID {
 			continue
@@ -160,7 +161,7 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 }
 
 // TracePath 查找从起始符号 A 到目标符号 B 的最短调用路径 (单向 BFS, 正向 callees 搜索)
-func TracePath(db *sqlx.DB, fromID, toID string) ([][]string, error) {
+func TracePath(db *sqlx.DB, fromIDs, toIDs []string) ([][]string, error) {
 	type PathNode struct {
 		curr  string
 		path  []string
@@ -169,8 +170,17 @@ func TracePath(db *sqlx.DB, fromID, toID string) ([][]string, error) {
 
 	var results [][]string
 	visited := make(map[string]bool)
-	queue := []PathNode{{curr: fromID, path: []string{fromID}, depth: 0}}
-	visited[fromID] = true
+	queue := make([]PathNode, 0, len(fromIDs))
+
+	toSet := make(map[string]bool)
+	for _, id := range toIDs {
+		toSet[id] = true
+	}
+
+	for _, id := range fromIDs {
+		queue = append(queue, PathNode{curr: id, path: []string{id}, depth: 0})
+		visited[id] = true
+	}
 
 	const maxDepth = 50
 
@@ -178,7 +188,7 @@ func TracePath(db *sqlx.DB, fromID, toID string) ([][]string, error) {
 		node := queue[0]
 		queue = queue[1:]
 
-		if node.curr == toID {
+		if toSet[node.curr] {
 			results = append(results, node.path)
 			return results, nil
 		}
@@ -204,6 +214,7 @@ func TracePath(db *sqlx.DB, fromID, toID string) ([][]string, error) {
 
 	return results, nil
 }
+
 
 // FindDeadCode 死代码分析：基于已知入口点对整个符号图进行可达性扫描
 func FindDeadCode(db *sqlx.DB, entryPoints []string) ([]*AstraMapNode, error) {
