@@ -235,6 +235,16 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				}
 			}
 
+			if signature == "" && (docLang == "c" || docLang == "cpp") && len(sourceLines) >= startLine && startLine > 0 {
+				signature = strings.TrimSpace(sourceLines[startLine-1])
+			}
+
+			if docstring == "" && len(sourceLines) > 0 {
+				docstring = findLeadingComments(sourceLines, startLine)
+			}
+
+
+
 			// isExported: Go 语言按首字母大写判断; 其他语言默认 0
 			if docLang == "go" {
 				r, _ := utf8.DecodeRuneInString(info.name)
@@ -261,9 +271,14 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				usn = fmt.Sprintf("scip:%s::%s", relPath, info.name)
 			}
 
+			nodeKind := info.symType
+			if docLang == "c" || docLang == "cpp" {
+				nodeKind = normalizeCDeclarationKind(nodeKind, signature)
+			}
+
 			node := &AstraMapNode{
 				ID:            usn,
-				Kind:          info.symType,
+				Kind:          nodeKind,
 				Name:          info.name,
 				QualifiedName: qname,
 				FilePath:      relPath,
@@ -1651,4 +1666,91 @@ func normalizeLanguage(lang, filePath string) string {
 		return "java"
 	}
 	return "cxx"
+}
+
+func normalizeCDeclarationKind(kind, signature string) string {
+	signature = strings.TrimSpace(signature)
+	switch {
+	case strings.HasPrefix(signature, "typedef "):
+		return "type"
+	case strings.HasPrefix(signature, "enum "):
+		return "enum"
+	case strings.HasPrefix(signature, "struct "), strings.HasPrefix(signature, "union "):
+		return "struct"
+	default:
+		return kind
+	}
+}
+
+func findLeadingComments(lines []string, startLine int) string {
+	if len(lines) == 0 || startLine <= 1 || startLine > len(lines) {
+		return ""
+	}
+	var commentLines []string
+	inBlock := false
+	emptyLineCount := 0
+	for i := startLine - 2; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			if inBlock {
+				commentLines = append([]string{line}, commentLines...)
+				continue
+			}
+			emptyLineCount++
+			if emptyLineCount > 2 { // 允许最多 2 个空行
+				break
+			}
+			continue
+		}
+		if !inBlock && !strings.HasPrefix(line, "//") && !strings.HasSuffix(line, "*/") && !strings.HasPrefix(line, "/*") {
+			break
+		}
+
+		if strings.HasPrefix(line, "//") {
+			if inBlock {
+				break
+			}
+			commentLines = append([]string{strings.TrimPrefix(line, "//")}, commentLines...)
+			emptyLineCount = 0
+			continue
+		}
+		if strings.HasSuffix(line, "*/") {
+			inBlock = true
+			lineContent := strings.TrimSuffix(line, "*/")
+			if strings.HasPrefix(lineContent, "/*") {
+				inBlock = false
+				lineContent = strings.TrimPrefix(lineContent, "/*")
+				commentLines = append([]string{lineContent}, commentLines...)
+				break
+			}
+			commentLines = append([]string{lineContent}, commentLines...)
+			emptyLineCount = 0
+			continue
+		}
+		if strings.HasPrefix(line, "/*") {
+			if !inBlock {
+				break
+			}
+			inBlock = false
+			lineContent := strings.TrimPrefix(line, "/*")
+			commentLines = append([]string{lineContent}, commentLines...)
+			break
+		}
+		if inBlock {
+			lineContent := line
+			if strings.HasPrefix(line, "*") {
+				lineContent = strings.TrimPrefix(line, "*")
+			}
+			commentLines = append([]string{lineContent}, commentLines...)
+			emptyLineCount = 0
+			continue
+		}
+		break
+	}
+	var cleaned []string
+	for _, l := range commentLines {
+		t := strings.TrimSpace(l)
+		cleaned = append(cleaned, t)
+	}
+	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
