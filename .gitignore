@@ -5,8 +5,8 @@
 CLAUDE.md
 
 # docs 目录存在但内容不提交
-docs/*
-!docs/.gitkeep
+# docs/*
+# !docs/.gitkeep
 
 # AI editor configs
 .agents/
