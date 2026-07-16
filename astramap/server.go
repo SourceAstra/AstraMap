@@ -24,9 +24,9 @@ import (
 //go:embed web/*
 var WebStatic embed.FS
 
-// StartStandaloneServer starts a decoupled HTTP server serving both mock-free APIs and AstraMap standalone Web UI.
+// StartStandaloneServer starts the standalone Web service with built-in Dashboard, supporting HTTP requests and Graph API.
 func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) error {
-	// 读写分离：readDB 用于 Dashboard 查询
+	// Read-write separation: readDB is used for Dashboard queries
 	var readDB *sqlx.DB
 	readDBPath := filepath.Join(projectRoot, ".astramap", "astramap.db")
 	if rdb, err := sqlx.Open("sqlite", readDBPath+"?mode=ro"); err == nil {
@@ -60,14 +60,15 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			statusStr = "indexing"
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":             statusStr,
-			"database":           "SQLite",
-			"totalFiles":         status.FileCount,
-			"indexedNodes":       status.NodeCount,
-			"indexedEdges":       status.EdgeCount,
-			"dirtyCount":         status.DirtyCount,
-			"dirtyFiles":         status.DirtyFiles,
-			"supportedLanguages": []string{"go", "c", "cpp", "python", "typescript", "java"},
+			"status":               statusStr,
+			"database":             "SQLite",
+			"totalFiles":           status.FileCount,
+			"indexedNodes":         status.NodeCount,
+			"indexedEdges":         status.EdgeCount,
+			"dirtyCount":           status.DirtyCount,
+			"dirtyFiles":           status.DirtyFiles,
+			"supportedLanguages":   SupportedLanguageIDs(),
+			"languageCapabilities": SupportedLanguageCapabilities(),
 		})
 	})
 
@@ -570,7 +571,7 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 	}))
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	fmt.Fprintf(os.Stderr, "[INFO] AstraMap Dashboard 启动 http://%s\n", addr)
+	fmt.Fprintf(os.Stderr, "[INFO] AstraMap Dashboard started at http://%s\n", addr)
 
 	srv := &http.Server{
 		Addr:         addr,
@@ -807,19 +808,19 @@ func synthesizeUnderstandingDoc(db *sqlx.DB, projectRoot, docType, key string) s
 // inferRole infers architectural role from symbol names, docstrings, and exported ratio.
 func inferRole(nodes []*AstraMapNode) string {
 	roles := map[string]int{
-		"请求处理层": 0, "业务服务层": 0, "数据访问层": 0,
-		"数据模型层": 0, "通用工具层": 0, "配置管理层": 0,
-		"中间件层": 0, "测试辅助层": 0,
+		"RequestHandler": 0, "BusinessService": 0, "DataAccess": 0,
+		"DataModel": 0, "Utility": 0, "Configuration": 0,
+		"Middleware": 0, "TestHelper": 0,
 	}
 	keywordMap := map[string][]string{
-		"请求处理层": {"handler", "controller", "router", "route", "serve", "endpoint", "action"},
-		"业务服务层": {"service", "query", "process", "execute", "compute", "analyze", "transform"},
-		"数据访问层": {"repo", "store", "db", "sql", "dal", "database", "persist", "cache", "dao"},
-		"数据模型层": {"model", "entity", "dto", "vo", "schema", "struct", "type", "message"},
-		"通用工具层": {"util", "helper", "common", "shared", "format", "convert", "parse", "marshal"},
-		"配置管理层": {"config", "setting", "option", "flag", "env", "init", "setup"},
-		"中间件层":  {"middleware", "interceptor", "filter", "guard", "auth", "logging"},
-		"测试辅助层": {"test", "mock", "stub", "fake", "fixture"},
+		"RequestHandler": {"handler", "controller", "router", "route", "serve", "endpoint", "action"},
+		"BusinessService": {"service", "query", "process", "execute", "compute", "analyze", "transform"},
+		"DataAccess": {"repo", "store", "db", "sql", "dal", "database", "persist", "cache", "dao"},
+		"DataModel": {"model", "entity", "dto", "vo", "schema", "struct", "type", "message"},
+		"Utility": {"util", "helper", "common", "shared", "format", "convert", "parse", "marshal"},
+		"Configuration": {"config", "setting", "option", "flag", "env", "init", "setup"},
+		"Middleware":  {"middleware", "interceptor", "filter", "guard", "auth", "logging"},
+		"TestHelper": {"test", "mock", "stub", "fake", "fixture"},
 	}
 
 	exportedCount := 0
@@ -850,16 +851,16 @@ func inferRole(nodes []*AstraMapNode) string {
 		return bestRole
 	}
 	if len(nodes) == 0 {
-		return "未知"
+		return "Unknown"
 	}
 	exportedRatio := float64(exportedCount) / float64(len(nodes))
 	if exportedRatio > 0.7 {
-		return "对外接口层"
+		return "PublicInterface"
 	}
 	if exportedRatio < 0.3 {
-		return "内部实现层"
+		return "InternalImplementation"
 	}
-	return "混合模块"
+	return "MixedModule"
 }
 
 // inferRoleForFile infers role for a single file's nodes.
@@ -886,9 +887,9 @@ func inferBriefSummary(nodes []*AstraMapNode) string {
 		summaries = summaries[:3]
 	}
 	if len(summaries) == 0 {
-		return "该文件定义了若干符号，具体职责需结合调用关系进一步分析。"
+		return "This file defines several symbols; further analysis of call relationships is needed to determine its specific responsibilities."
 	}
-	return strings.Join(summaries, "；") + "。"
+	return strings.Join(summaries, "; ") + "."
 }
 
 // buildMermaidDepGraph builds a mermaid flowchart from dependency map.
@@ -1373,30 +1374,30 @@ func graphRiskInputs(db *sqlx.DB, n *AstraMapNode) (int, int, int) {
 func complexityReasons(cc, loc, depth, returns, fanIn, fanOut, cross int, public bool) []string {
 	reasons := make([]string, 0, 6)
 	if cc > 20 {
-		reasons = append(reasons, fmt.Sprintf("圈复杂度极高：%d 个独立路径", cc))
+		reasons = append(reasons, fmt.Sprintf("Extremely high cyclomatic complexity: %d independent paths", cc))
 	} else if cc > 10 {
-		reasons = append(reasons, fmt.Sprintf("圈复杂度偏高：%d 个独立路径", cc))
+		reasons = append(reasons, fmt.Sprintf("High cyclomatic complexity: %d independent paths", cc))
 	}
 	if loc > 120 {
-		reasons = append(reasons, fmt.Sprintf("函数体过长：%d 行有效代码", loc))
+		reasons = append(reasons, fmt.Sprintf("Excessively long function body: %d lines of effective code", loc))
 	}
 	if depth > 4 {
-		reasons = append(reasons, fmt.Sprintf("嵌套过深：最大深度 %d", depth))
+		reasons = append(reasons, fmt.Sprintf("Deep nesting: maximum depth %d", depth))
 	}
 	if returns > 5 {
-		reasons = append(reasons, fmt.Sprintf("返回点较多：%d 个 return", returns))
+		reasons = append(reasons, fmt.Sprintf("Multiple return points: %d return statements", returns))
 	}
 	if fanIn > 10 || fanOut > 10 {
-		reasons = append(reasons, fmt.Sprintf("调用面大：扇入 %d，扇出 %d", fanIn, fanOut))
+		reasons = append(reasons, fmt.Sprintf("Large call surface: fan-in %d, fan-out %d", fanIn, fanOut))
 	}
 	if cross > 0 {
-		reasons = append(reasons, fmt.Sprintf("跨目录耦合：%d 条跨目录调用", cross))
+		reasons = append(reasons, fmt.Sprintf("Cross-directory coupling: %d cross-directory calls", cross))
 	}
 	if public {
-		reasons = append(reasons, "公共接口变更影响面更大")
+		reasons = append(reasons, "Public interface changes have broader impact")
 	}
 	if len(reasons) == 0 {
-		reasons = append(reasons, "复杂度、长度和调用面均处于低风险区间")
+		reasons = append(reasons, "Complexity, length, and call surface are all in low-risk range")
 	}
 	return reasons
 }
@@ -1444,7 +1445,7 @@ func renderRiskTable(b *strings.Builder, title string, metrics []complexityMetri
 		return
 	}
 	fmt.Fprintf(b, "\n## %s\n\n", title)
-	fmt.Fprintf(b, "| 函数 | 风险分 | 圈复杂度 | LOC | 嵌套 | 扇入 | 扇出 | 主要原因 |\n|------|--------|----------|-----|------|------|------|----------|\n")
+	fmt.Fprintf(b, "| Function | Risk Score | Cyclomatic Complexity | LOC | Nesting | Fan-in | Fan-out | Main Reason |\n|------|--------|----------|-----|------|------|------|----------|\n")
 	for _, m := range metrics {
 		reason := ""
 		if len(m.ComplexityReasons) > 0 {
@@ -1468,7 +1469,7 @@ func renderDynamicDispatchSection(b *strings.Builder, metrics []complexityMetric
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "\n## 函数指针与动态分发线索\n\n")
+	fmt.Fprintf(b, "\n## Function Pointer and Dynamic Dispatch Signals\n\n")
 	limit := len(rows)
 	if limit > 8 {
 		limit = 8
@@ -1509,9 +1510,9 @@ func symmetryRisks(nodes []*AstraMapNode) []string {
 		}
 		if leftSeen != rightSeen {
 			if leftSeen {
-				risks = append(risks, fmt.Sprintf("发现 `%s` 语义但未发现对应 `%s`：示例 `%s`", pair[0], pair[1], leftName))
+				risks = append(risks, fmt.Sprintf("Found `%s` semantic but no corresponding `%s`: example `%s`", pair[0], pair[1], leftName))
 			} else {
-				risks = append(risks, fmt.Sprintf("发现 `%s` 语义但未发现对应 `%s`：示例 `%s`", pair[1], pair[0], rightName))
+				risks = append(risks, fmt.Sprintf("Found `%s` semantic but no corresponding `%s`: example `%s`", pair[1], pair[0], rightName))
 			}
 		}
 	}
@@ -1525,7 +1526,7 @@ func symmetryRisks(nodes []*AstraMapNode) []string {
 func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 	var nodes []*AstraMapNode
 	if err := db.Select(&nodes, "SELECT * FROM astramap_nodes WHERE file_path = ? ORDER BY start_line", filePath); err != nil || len(nodes) == 0 {
-		return fmt.Sprintf("# 文件理解文档\n\n目标：`%s`\n\n该文件尚未索引或无符号数据。\n", filePath)
+		return fmt.Sprintf("# File Understanding Document\n\nTarget: `%s`\n\nThis file has not been indexed or contains no symbol data.\n", filePath)
 	}
 
 	var exported, internal []*AstraMapNode
@@ -1600,30 +1601,30 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 	fileRisk := topComplexityMetrics(db, projectRoot, nodes, 10)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# 文件理解文档：`%s`\n\n", filePath)
+	fmt.Fprintf(&b, "# File Understanding Document: `%s`\n\n", filePath)
 
-	// 职责定位
-	fmt.Fprintf(&b, "## 职责定位\n\n")
+	// Responsibility
+	fmt.Fprintf(&b, "## Responsibility\n\n")
 	fmt.Fprintf(&b, "**%s** — %s\n\n", role, inferBriefSummary(exported))
 
-	// 概览统计
-	fmt.Fprintf(&b, "## 概览统计\n\n")
-	fmt.Fprintf(&b, "| 指标 | 值 |\n|------|----|\n")
-	fmt.Fprintf(&b, "| 语言 | %s |\n", lang)
-	fmt.Fprintf(&b, "| 符号总数 | %d |\n", len(nodes))
-	fmt.Fprintf(&b, "| 公共接口 | %d |\n", len(exported))
-	fmt.Fprintf(&b, "| 内部函数 | %d |\n", len(internal))
-	fmt.Fprintf(&b, "| 数据结构 | %d |\n", len(dataStructs))
-	fmt.Fprintf(&b, "| 对外依赖文件 | %d |\n", len(extDepFiles))
-	fmt.Fprintf(&b, "| 被依赖文件 | %d |\n", len(incomingDepFiles))
+	// Overview Statistics
+	fmt.Fprintf(&b, "## Overview Statistics\n\n")
+	fmt.Fprintf(&b, "| Metric | Value |\n|------|----|\n")
+	fmt.Fprintf(&b, "| Language | %s |\n", lang)
+	fmt.Fprintf(&b, "| Total Symbols | %d |\n", len(nodes))
+	fmt.Fprintf(&b, "| Public Interfaces | %d |\n", len(exported))
+	fmt.Fprintf(&b, "| Internal Functions | %d |\n", len(internal))
+	fmt.Fprintf(&b, "| Data Structures | %d |\n", len(dataStructs))
+	fmt.Fprintf(&b, "| External Dependencies | %d |\n", len(extDepFiles))
+	fmt.Fprintf(&b, "| Dependent By | %d |\n", len(incomingDepFiles))
 	if len(fileRisk) > 0 {
-		fmt.Fprintf(&b, "| 最高风险函数 | `%s`（%.1f） |\n", fileRisk[0].Name, fileRisk[0].RiskScore)
+		fmt.Fprintf(&b, "| Highest Risk Function | `%s` (%.1f) |\n", fileRisk[0].Name, fileRisk[0].RiskScore)
 	}
 
-	renderRiskTable(&b, "高复杂度与高风险函数", fileRisk)
+	renderRiskTable(&b, "High Complexity and High Risk Functions", fileRisk)
 
 	if risks := symmetryRisks(nodes); len(risks) > 0 {
-		fmt.Fprintf(&b, "\n## 资源与状态对称性风险\n\n")
+		fmt.Fprintf(&b, "\n## Resource and State Symmetry Risks\n\n")
 		for _, risk := range risks {
 			fmt.Fprintf(&b, "- %s\n", risk)
 		}
@@ -1631,9 +1632,9 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 
 	renderDynamicDispatchSection(&b, fileRisk)
 
-	// 公共接口详解
+	// Public Interface Details
 	if len(exportedInfo) > 0 {
-		fmt.Fprintf(&b, "\n## 公共接口详解\n\n")
+		fmt.Fprintf(&b, "\n## Public Interface Details\n\n")
 		limit := len(exportedInfo)
 		if limit > 15 {
 			limit = 15
@@ -1646,26 +1647,26 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 			if sig == "" {
 				sig = n.Name + "()"
 			}
-			fmt.Fprintf(&b, "- **签名**：`%s`\n", sig)
+			fmt.Fprintf(&b, "- **Signature**: `%s`\n", sig)
 			if n.ReturnType != "" {
-				fmt.Fprintf(&b, "- **返回类型**：`%s`\n", n.ReturnType)
+				fmt.Fprintf(&b, "- **Return Type**: `%s`\n", n.ReturnType)
 			}
 			if n.Docstring != "" {
 				ds := n.Docstring
 				if len(ds) > 200 {
 					ds = ds[:197] + "..."
 				}
-				fmt.Fprintf(&b, "- **文档注释**：%s\n", ds)
+				fmt.Fprintf(&b, "- **Docstring**: %s\n", ds)
 			}
-			fmt.Fprintf(&b, "- **扇入**：%d", info.fanIn)
+			fmt.Fprintf(&b, "- **Fan-in**: %d", info.fanIn)
 			if len(info.callerNames) > 0 {
-				fmt.Fprintf(&b, " — 调用方：%s", strings.Join(info.callerNames, "、"))
+				fmt.Fprintf(&b, " — Callers: %s", strings.Join(info.callerNames, ", "))
 			}
 			fmt.Fprintf(&b, "\n")
 
 			chains := extractCallChains(db, n.ID, 2, 8)
 			if len(chains) > 0 {
-				fmt.Fprintf(&b, "- **调用链**：\n")
+				fmt.Fprintf(&b, "- **Call Chains**:\n")
 				for _, ch := range chains {
 					fmt.Fprintf(&b, "  - `%s`\n", ch)
 				}
@@ -1674,9 +1675,9 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 		}
 	}
 
-	// 数据结构定义
+	// Data Structure Definitions
 	if len(dataStructs) > 0 {
-		fmt.Fprintf(&b, "## 数据结构定义\n\n")
+		fmt.Fprintf(&b, "## Data Structure Definitions\n\n")
 		limit := len(dataStructs)
 		if limit > 8 {
 			limit = 8
@@ -1696,10 +1697,10 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 		}
 	}
 
-	// 内部函数
+	// Internal Functions
 	if len(internal) > 0 {
-		fmt.Fprintf(&b, "## 内部函数\n\n")
-		fmt.Fprintf(&b, "| 函数 | 行号 | 简要签名 |\n|------|------|----------|\n")
+		fmt.Fprintf(&b, "## Internal Functions\n\n")
+		fmt.Fprintf(&b, "| Function | Line | Brief Signature |\n|------|------|----------|\n")
 		for _, n := range internal {
 			sig := n.Signature
 			if sig == "" {
@@ -1712,7 +1713,7 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 		}
 	}
 
-	// 依赖关系图 (mermaid)
+	// Dependency Diagram (mermaid)
 	if len(extDepFiles) > 0 || len(incomingDepFiles) > 0 {
 		deps := make(map[string][]string)
 		nodeShort := make(map[string]string)
@@ -1725,13 +1726,13 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 			deps[inc] = append(deps[inc], filePath)
 			nodeShort[inc] = filepath.Base(inc)
 		}
-		mermaid := buildMermaidDepGraph(deps, nodeShort, "依赖关系")
+		mermaid := buildMermaidDepGraph(deps, nodeShort, "Dependencies")
 		if mermaid != "" {
-			fmt.Fprintf(&b, "\n## 依赖关系图\n\n%s\n", mermaid)
+			fmt.Fprintf(&b, "\n## Dependency Diagram\n\n%s\n", mermaid)
 		}
 	}
 
-	// 对外依赖
+	// External Dependencies
 	if len(extDepFiles) > 0 {
 		type depInfo struct {
 			file    string
@@ -1744,40 +1745,40 @@ func synthesizeFileDoc(db *sqlx.DB, projectRoot, filePath string) string {
 			deps = append(deps, depInfo{file: f, count: c, callers: callers})
 		}
 		sort.Slice(deps, func(i, j int) bool { return deps[i].count > deps[j].count })
-		fmt.Fprintf(&b, "\n## 对外依赖\n\n")
-		fmt.Fprintf(&b, "| 文件 | 调用次数 | 主要调用方 |\n|------|----------|------------|\n")
+		fmt.Fprintf(&b, "\n## External Dependencies\n\n")
+		fmt.Fprintf(&b, "| File | Call Count | Main Callers |\n|------|----------|------------|\n")
 		for _, d := range deps {
 			topCallers := d.callers
 			if len(topCallers) > 3 {
 				topCallers = topCallers[:3]
 			}
-			fmt.Fprintf(&b, "| `%s` | %d | %s |\n", filepath.Base(d.file), d.count, strings.Join(topCallers, "、"))
+			fmt.Fprintf(&b, "| `%s` | %d | %s |\n", filepath.Base(d.file), d.count, strings.Join(topCallers, ", "))
 		}
 	}
 
-	// 阅读路径
-	fmt.Fprintf(&b, "\n## 阅读路径\n\n")
+	// Reading Path
+	fmt.Fprintf(&b, "\n## Reading Path\n\n")
 	step := 1
 	if len(fileRisk) > 0 {
 		top := fileRisk[0]
-		fmt.Fprintf(&b, "%d. 先读 **`%s`** — 风险分最高（%.1f），原因：%s\n", step, top.Name, top.RiskScore, strings.Join(top.ComplexityReasons, "；"))
+		fmt.Fprintf(&b, "%d. Read **`%s`** first — highest risk score (%.1f), reasons: %s\n", step, top.Name, top.RiskScore, strings.Join(top.ComplexityReasons, "; "))
 		step++
 	}
 	if len(exportedInfo) > 0 {
 		top := exportedInfo[0].node
-		fmt.Fprintf(&b, "%d. 从 **`%s`** 开始 — 该函数扇入最高（%d），是本文件的核心入口\n", step, top.Name, exportedInfo[0].fanIn)
+		fmt.Fprintf(&b, "%d. Start with **`%s`** — this function has the highest fan-in (%d), making it the core entry point of this file\n", step, top.Name, exportedInfo[0].fanIn)
 		step++
 		if len(exportedInfo) > 1 {
-			fmt.Fprintf(&b, "%d. 关注 **`%s`** — 第二高扇入接口，理解次要职责\n", step, exportedInfo[1].node.Name)
+			fmt.Fprintf(&b, "%d. Focus on **`%s`** — second highest fan-in interface, understand secondary responsibilities\n", step, exportedInfo[1].node.Name)
 			step++
 		}
 	}
 	if len(dataStructs) > 0 {
-		fmt.Fprintf(&b, "%d. 理解 **`%s`** — 核心数据结构，掌握数据模型\n", step, dataStructs[0].Name)
+		fmt.Fprintf(&b, "%d. Understand **`%s`** — core data structure, master the data model\n", step, dataStructs[0].Name)
 		step++
 	}
 	if len(extDepFiles) > 0 {
-		fmt.Fprintf(&b, "%d. 检查依赖图中的外部耦合点 — 共依赖 %d 个外部文件\n", step, len(extDepFiles))
+		fmt.Fprintf(&b, "%d. Check external coupling points in the dependency graph — depends on %d external files\n", step, len(extDepFiles))
 	}
 
 	return b.String()
@@ -1787,7 +1788,7 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 	prefix := dirPath + "/"
 	var nodes []*AstraMapNode
 	if err := db.Select(&nodes, "SELECT * FROM astramap_nodes WHERE file_path LIKE ? ORDER BY file_path, start_line", prefix+"%"); err != nil || len(nodes) == 0 {
-		return fmt.Sprintf("# 目录理解文档\n\n目标：`%s`\n\n该目录尚未索引或无符号数据。\n", dirPath)
+		return fmt.Sprintf("# Directory Understanding Document\n\nTarget: `%s`\n\nThis directory has not been indexed or contains no symbol data.\n", dirPath)
 	}
 
 	type fileInfo struct {
@@ -1891,34 +1892,34 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 	moduleRisk := topComplexityMetrics(db, projectRoot, nodes, 15)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# 目录理解文档：`%s`\n\n", dirPath)
+	fmt.Fprintf(&b, "# Directory Understanding Document: `%s`\n\n", dirPath)
 
-	// 职责定位
-	fmt.Fprintf(&b, "## 职责定位\n\n")
-	fmt.Fprintf(&b, "**%s** — 包含 %d 个文件，%d 个符号，%d 个公共接口\n\n", role, len(fileMap), len(nodes), countExported(nodes))
+	// Responsibility
+	fmt.Fprintf(&b, "## Responsibility\n\n")
+	fmt.Fprintf(&b, "**%s** — contains %d files, %d symbols, %d public interfaces\n\n", role, len(fileMap), len(nodes), countExported(nodes))
 
-	// 概览统计
-	fmt.Fprintf(&b, "## 概览统计\n\n")
-	fmt.Fprintf(&b, "| 指标 | 值 |\n|------|----|\n")
-	fmt.Fprintf(&b, "| 文件数 | %d |\n", len(fileMap))
-	fmt.Fprintf(&b, "| 符号总数 | %d |\n", len(nodes))
-	fmt.Fprintf(&b, "| 公共接口 | %d |\n", countExported(nodes))
-	fmt.Fprintf(&b, "| 外部扇入 | %d |\n", totalFanIn)
-	fmt.Fprintf(&b, "| 外部扇出 | %d |\n", totalFanOut)
+	// Overview Statistics
+	fmt.Fprintf(&b, "## Overview Statistics\n\n")
+	fmt.Fprintf(&b, "| Metric | Value |\n|------|----|\n")
+	fmt.Fprintf(&b, "| File Count | %d |\n", len(fileMap))
+	fmt.Fprintf(&b, "| Total Symbols | %d |\n", len(nodes))
+	fmt.Fprintf(&b, "| Public Interfaces | %d |\n", countExported(nodes))
+	fmt.Fprintf(&b, "| External Fan-in | %d |\n", totalFanIn)
+	fmt.Fprintf(&b, "| External Fan-out | %d |\n", totalFanOut)
 	instabilityDenominator := totalFanIn + totalFanOut
 	instability := 0.0
 	if instabilityDenominator > 0 {
 		instability = float64(totalFanOut) / float64(instabilityDenominator)
 	}
-	fmt.Fprintf(&b, "| 不稳定度 I=Ce/(Ca+Ce) | %.2f |\n", instability)
+	fmt.Fprintf(&b, "| Instability I=Ce/(Ca+Ce) | %.2f |\n", instability)
 	if len(moduleRisk) > 0 {
-		fmt.Fprintf(&b, "| 最高风险函数 | `%s`（%.1f） |\n", moduleRisk[0].Name, moduleRisk[0].RiskScore)
+		fmt.Fprintf(&b, "| Highest Risk Function | `%s` (%.1f) |\n", moduleRisk[0].Name, moduleRisk[0].RiskScore)
 	}
 
-	renderRiskTable(&b, "高复杂度与高风险函数", moduleRisk)
+	renderRiskTable(&b, "High Complexity and High Risk Functions", moduleRisk)
 
 	if risks := symmetryRisks(nodes); len(risks) > 0 {
-		fmt.Fprintf(&b, "\n## 资源与状态对称性风险\n\n")
+		fmt.Fprintf(&b, "\n## Resource and State Symmetry Risks\n\n")
 		for _, risk := range risks {
 			fmt.Fprintf(&b, "- %s\n", risk)
 		}
@@ -1926,20 +1927,20 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 
 	renderDynamicDispatchSection(&b, moduleRisk)
 
-	// 核心文件
+	// Core Files
 	if len(fileOrder) > 0 {
-		fmt.Fprintf(&b, "\n## 核心文件\n\n")
-		fmt.Fprintf(&b, "| 文件 | 符号数 | 公共接口 | 被调用 | 职责 |\n|------|--------|----------|--------|------|\n")
+		fmt.Fprintf(&b, "\n## Core Files\n\n")
+		fmt.Fprintf(&b, "| File | Symbols | Public Interfaces | Called By | Responsibility |\n|------|--------|----------|--------|------|\n")
 		for _, fp := range fileOrder {
 			fi := fileMap[fp]
 			fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %s |\n", filepath.Base(fp), fi.symbolCnt, fi.exportedCnt, fi.callerCnt, fi.role)
 		}
 	}
 
-	// 对外接口（外部调用方）
+	// External Interfaces (External Callers)
 	if len(externalInterfaces) > 0 {
-		fmt.Fprintf(&b, "\n## 对外接口（外部调用方）\n\n")
-		fmt.Fprintf(&b, "| 接口函数 | 调用方目录 | 调用方符号 |\n|----------|-----------|------------|\n")
+		fmt.Fprintf(&b, "\n## External Interfaces (External Callers)\n\n")
+		fmt.Fprintf(&b, "| Interface Function | Caller Directory | Caller Symbols |\n|----------|-----------|------------|\n")
 		limit := len(externalInterfaces)
 		if limit > 15 {
 			limit = 15
@@ -1950,11 +1951,11 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 			if len(names) > 3 {
 				names = names[:3]
 			}
-			fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", e.name, e.callerDir, strings.Join(names, "、"))
+			fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", e.name, e.callerDir, strings.Join(names, ", "))
 		}
 	}
 
-	// 跨目录调用链 (mermaid)
+	// Cross-directory call chains (mermaid)
 	if len(extCallers) > 0 || len(extDeps) > 0 {
 		deps := make(map[string][]string)
 		nodeShort := make(map[string]string)
@@ -1968,13 +1969,13 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 			deps[dirPath] = append(deps[dirPath], extDir)
 			nodeShort[extDir] = filepath.Base(extDir)
 		}
-		mermaid := buildMermaidDepGraph(deps, nodeShort, "跨目录依赖")
+		mermaid := buildMermaidDepGraph(deps, nodeShort, "Cross-directory Dependencies")
 		if mermaid != "" {
-			fmt.Fprintf(&b, "\n## 跨目录调用链\n\n%s\n", mermaid)
+			fmt.Fprintf(&b, "\n## Cross-directory Call Chains\n\n%s\n", mermaid)
 		}
 	}
 
-	// 外部依赖
+	// External Dependencies
 	if len(extDeps) > 0 {
 		type depInfo struct {
 			dir     string
@@ -1987,14 +1988,14 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 			deps = append(deps, depInfo{dir: d, count: c, callers: callers})
 		}
 		sort.Slice(deps, func(i, j int) bool { return deps[i].count > deps[j].count })
-		fmt.Fprintf(&b, "\n## 外部依赖\n\n")
-		fmt.Fprintf(&b, "| 依赖目录 | 调用次数 | 主要调用方 |\n|----------|----------|------------|\n")
+		fmt.Fprintf(&b, "\n## External Dependencies\n\n")
+		fmt.Fprintf(&b, "| Dependency Directory | Call Count | Main Callers |\n|----------|----------|------------|\n")
 		for _, d := range deps {
 			topCallers := d.callers
 			if len(topCallers) > 3 {
 				topCallers = topCallers[:3]
 			}
-			fmt.Fprintf(&b, "| `%s` | %d | %s |\n", d.dir, d.count, strings.Join(topCallers, "、"))
+			fmt.Fprintf(&b, "| `%s` | %d | %s |\n", d.dir, d.count, strings.Join(topCallers, ", "))
 		}
 	}
 
@@ -2018,8 +2019,8 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 			couplings = append(couplings, couplingInfo{dir: d, ca: ca, ce: ce, total: ca + ce})
 		}
 		sort.Slice(couplings, func(i, j int) bool { return couplings[i].total > couplings[j].total })
-		fmt.Fprintf(&b, "\n## 最强耦合目录\n\n")
-		fmt.Fprintf(&b, "| 目录 | Ca 外部扇入 | Ce 外部扇出 | 合计 |\n|------|--------------|--------------|------|\n")
+		fmt.Fprintf(&b, "\n## Strongest Coupled Directories\n\n")
+		fmt.Fprintf(&b, "| Directory | Ca External Fan-in | Ce External Fan-out | Total |\n|------|--------------|--------------|------|\n")
 		limit := len(couplings)
 		if limit > 10 {
 			limit = 10
@@ -2030,7 +2031,7 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 		}
 	}
 
-	// 内部文件依赖 (mermaid)
+	// Internal file dependencies (mermaid)
 	if len(internalDeps) > 0 {
 		deps := make(map[string][]string)
 		nodeShort := make(map[string]string)
@@ -2041,32 +2042,32 @@ func synthesizeModuleDoc(db *sqlx.DB, projectRoot, dirPath string) string {
 				nodeShort[tgt] = filepath.Base(tgt)
 			}
 		}
-		mermaid := buildMermaidDepGraph(deps, nodeShort, "内部依赖")
+		mermaid := buildMermaidDepGraph(deps, nodeShort, "Internal Dependencies")
 		if mermaid != "" {
-			fmt.Fprintf(&b, "\n## 内部文件依赖\n\n%s\n", mermaid)
+			fmt.Fprintf(&b, "\n## Internal File Dependencies\n\n%s\n", mermaid)
 		}
 	}
 
-	// 阅读路径
-	fmt.Fprintf(&b, "\n## 阅读路径\n\n")
+	// Reading Path
+	fmt.Fprintf(&b, "\n## Reading Path\n\n")
 	step := 1
 	if len(moduleRisk) > 0 {
 		top := moduleRisk[0]
-		fmt.Fprintf(&b, "%d. 先读 **`%s`** — 模块内风险分最高（%.1f），原因：%s\n", step, top.Name, top.RiskScore, strings.Join(top.ComplexityReasons, "；"))
+		fmt.Fprintf(&b, "%d. Read **`%s`** first — highest risk score within module (%.1f), reasons: %s\n", step, top.Name, top.RiskScore, strings.Join(top.ComplexityReasons, "; "))
 		step++
 	}
 	if len(fileOrder) > 0 {
 		fi := fileMap[fileOrder[0]]
-		fmt.Fprintf(&b, "%d. 从 **`%s`** 理解模块主入口 — %s，被调用 %d 次\n", step, filepath.Base(fi.path), fi.role, fi.callerCnt)
+		fmt.Fprintf(&b, "%d. Understand module main entry from **`%s`** — %s, called %d times\n", step, filepath.Base(fi.path), fi.role, fi.callerCnt)
 		step++
 	}
 	if len(fileOrder) > 1 {
 		fi := fileMap[fileOrder[1]]
-		fmt.Fprintf(&b, "%d. 阅读 **`%s`** 理解核心逻辑 — %s\n", step, filepath.Base(fi.path), fi.role)
+		fmt.Fprintf(&b, "%d. Read **`%s`** to understand core logic — %s\n", step, filepath.Base(fi.path), fi.role)
 		step++
 	}
 	if len(externalInterfaces) > 0 {
-		fmt.Fprintf(&b, "%d. 参考 **`%s`** 理解对外契约 — 被 `%s` 等外部模块调用\n", step, externalInterfaces[0].name, externalInterfaces[0].callerDir)
+		fmt.Fprintf(&b, "%d. Reference **`%s`** to understand external contracts — called by external modules like `%s`\n", step, externalInterfaces[0].name, externalInterfaces[0].callerDir)
 	}
 
 	return b.String()
@@ -2086,7 +2087,7 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 	status, _ := QueryStatus(db)
 	var nodes []*AstraMapNode
 	if err := db.Select(&nodes, "SELECT * FROM astramap_nodes ORDER BY file_path, start_line"); err != nil || len(nodes) == 0 {
-		return "# 项目理解文档\n\n项目尚未索引或无符号数据。\n"
+		return "# Project Understanding Document\n\nProject has not been indexed or contains no symbol data.\n"
 	}
 
 	dirStats := make(map[string]*docDirStat)
@@ -2155,12 +2156,12 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 	}
 	langParts := make([]string, 0, len(langCount))
 	for lang, cnt := range langCount {
-		langParts = append(langParts, fmt.Sprintf("%s: %d 文件", lang, cnt))
+		langParts = append(langParts, fmt.Sprintf("%s: %d files", lang, cnt))
 	}
 	sort.Strings(langParts)
 	langStr := strings.Join(langParts, ", ")
 	if langStr == "" {
-		langStr = "未知"
+		langStr = "Unknown"
 	}
 
 	dirs := make([]string, 0, len(dirStats))
@@ -2189,26 +2190,26 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# 项目理解文档\n\n")
+	fmt.Fprintf(&b, "# Project Understanding Document\n\n")
 
-	// 项目概览
-	fmt.Fprintf(&b, "## 项目概览\n\n")
-	fmt.Fprintf(&b, "| 指标 | 值 |\n|------|----|\n")
+	// Project Overview
+	fmt.Fprintf(&b, "## Project Overview\n\n")
+	fmt.Fprintf(&b, "| Metric | Value |\n|------|----|\n")
 	if status != nil {
-		fmt.Fprintf(&b, "| 总节点数 | %d |\n", status.NodeCount)
-		fmt.Fprintf(&b, "| 总边数 | %d |\n", status.EdgeCount)
-		fmt.Fprintf(&b, "| 文件数 | %d |\n", status.FileCount)
+		fmt.Fprintf(&b, "| Total Nodes | %d |\n", status.NodeCount)
+		fmt.Fprintf(&b, "| Total Edges | %d |\n", status.EdgeCount)
+		fmt.Fprintf(&b, "| File Count | %d |\n", status.FileCount)
 	}
-	fmt.Fprintf(&b, "| 目录数 | %d |\n", len(dirStats))
-	fmt.Fprintf(&b, "| 语言分布 | %s |\n", langStr)
+	fmt.Fprintf(&b, "| Directory Count | %d |\n", len(dirStats))
+	fmt.Fprintf(&b, "| Language Distribution | %s |\n", langStr)
 	if len(projectRisk) > 0 {
-		fmt.Fprintf(&b, "| 最高风险函数 | `%s`（%.1f） |\n", projectRisk[0].Name, projectRisk[0].RiskScore)
+		fmt.Fprintf(&b, "| Highest Risk Function | `%s` (%.1f) |\n", projectRisk[0].Name, projectRisk[0].RiskScore)
 	}
 
-	renderRiskTable(&b, "项目级高复杂度与高风险函数", projectRisk)
+	renderRiskTable(&b, "Project-level High Complexity and High Risk Functions", projectRisk)
 
 	if risks := symmetryRisks(nodes); len(risks) > 0 {
-		fmt.Fprintf(&b, "\n## 全局资源与状态对称性风险\n\n")
+		fmt.Fprintf(&b, "\n## Global Resource and State Symmetry Risks\n\n")
 		for _, risk := range risks {
 			fmt.Fprintf(&b, "- %s\n", risk)
 		}
@@ -2216,26 +2217,26 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 
 	renderDynamicDispatchSection(&b, projectRisk)
 
-	// 架构分层
-	fmt.Fprintf(&b, "\n## 架构分层\n\n")
+	// Architecture Layering
+	fmt.Fprintf(&b, "\n## Architecture Layering\n\n")
 	printLayerTable := func(title string, entries []layerEntry) {
 		if len(entries) == 0 {
 			return
 		}
 		fmt.Fprintf(&b, "### %s\n\n", title)
-		fmt.Fprintf(&b, "| 目录 | 职责 | 符号数 | 公共接口 | 外部扇入 | 外部扇出 |\n|------|------|--------|----------|----------|----------|\n")
+		fmt.Fprintf(&b, "| Directory | Responsibility | Symbols | Public Interfaces | External Fan-in | External Fan-out |\n|------|------|--------|----------|----------|----------|\n")
 		for _, e := range entries {
 			fmt.Fprintf(&b, "| `%s` | %s | %d | %d | %d | %d |\n", e.dir, e.role, e.st.symbols, e.st.exported, e.st.fanIn, e.st.fanOut)
 		}
 		fmt.Fprintf(&b, "\n")
 	}
-	printLayerTable("入口层（扇入=0，提供项目入口）", entryLayer)
-	printLayerTable("业务层（核心业务逻辑）", bizLayer)
-	printLayerTable("基础设施层（高扇出，提供通用能力）", infraLayer)
+	printLayerTable("Entry Layer (Fan-in=0, provides project entry points)", entryLayer)
+	printLayerTable("Business Layer (Core business logic)", bizLayer)
+	printLayerTable("Infrastructure Layer (High fan-out, provides common capabilities)", infraLayer)
 
-	// 模块概览
-	fmt.Fprintf(&b, "## 模块概览\n\n")
-	fmt.Fprintf(&b, "| 目录 | 符号数 | 公共接口 | Ca 外部扇入 | Ce 外部扇出 | I | 职责 |\n|------|--------|----------|--------------|--------------|---|------|\n")
+	// Module Overview
+	fmt.Fprintf(&b, "## Module Overview\n\n")
+	fmt.Fprintf(&b, "| Directory | Symbols | Public Interfaces | Ca External Fan-in | Ce External Fan-out | I | Responsibility |\n|------|--------|----------|--------------|--------------|---|------|\n")
 	for _, d := range dirs {
 		st := dirStats[d]
 		denominator := st.fanIn + st.fanOut
@@ -2248,15 +2249,15 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 
 	violations := architectureBoundaryViolations(dirDeps, dirStats)
 	if len(violations) > 0 {
-		fmt.Fprintf(&b, "\n## 违反分层的调用\n\n")
+		fmt.Fprintf(&b, "\n## Architecture Boundary Violations\n\n")
 		for _, violation := range violations {
 			fmt.Fprintf(&b, "- %s\n", violation)
 		}
 	} else {
-		fmt.Fprintf(&b, "\n## 违反分层的调用\n\n未发现明显的高层直接穿透底层或底层反向调用上层。\n")
+		fmt.Fprintf(&b, "\n## Architecture Boundary Violations\n\nNo obvious high-level direct penetration to low-level or low-level reverse calls to high-level detected.\n")
 	}
 
-	// 模块依赖拓扑 (mermaid)
+	// Module Dependency Topology (mermaid)
 	if len(dirDeps) > 0 {
 		deps := make(map[string][]string)
 		nodeShort := make(map[string]string)
@@ -2267,13 +2268,13 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 				nodeShort[tgtDir] = filepath.Base(tgtDir)
 			}
 		}
-		mermaid := buildMermaidDepGraph(deps, nodeShort, "模块依赖")
+		mermaid := buildMermaidDepGraph(deps, nodeShort, "Module Dependencies")
 		if mermaid != "" {
-			fmt.Fprintf(&b, "\n## 模块依赖拓扑\n\n%s\n", mermaid)
+			fmt.Fprintf(&b, "\n## Module Dependency Topology\n\n%s\n", mermaid)
 		}
 	}
 
-	// 关键调用链路
+	// Key Call Chains
 	var keyChains []string
 	for _, e := range entryLayer {
 		for _, n := range e.st.nodes {
@@ -2291,7 +2292,7 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 		}
 	}
 	if len(keyChains) > 0 {
-		fmt.Fprintf(&b, "\n## 关键调用链路\n\n")
+		fmt.Fprintf(&b, "\n## Key Call Chains\n\n")
 		if len(keyChains) > 5 {
 			keyChains = keyChains[:5]
 		}
@@ -2300,13 +2301,13 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 		}
 	}
 
-	// 循环依赖检测
+	// Cycle Detection
 	cycles, err := FindCycles(db, "package")
-	fmt.Fprintf(&b, "\n## 循环依赖检测\n\n")
+	fmt.Fprintf(&b, "\n## Cycle Detection\n\n")
 	if err != nil || len(cycles) == 0 {
-		fmt.Fprintf(&b, "未检测到包级循环依赖 ✓\n")
+		fmt.Fprintf(&b, "No package-level cyclic dependencies detected ✓\n")
 	} else {
-		fmt.Fprintf(&b, "检测到 %d 条包级循环依赖：\n\n", len(cycles))
+		fmt.Fprintf(&b, "Detected %d package-level cyclic dependencies:\n\n", len(cycles))
 		limit := len(cycles)
 		if limit > 10 {
 			limit = 10
@@ -2316,34 +2317,34 @@ func synthesizeProjectDoc(db *sqlx.DB, projectRoot string) string {
 		}
 	}
 
-	// 阅读路径
-	fmt.Fprintf(&b, "\n## 阅读路径\n\n")
+	// Reading Path
+	fmt.Fprintf(&b, "\n## Reading Path\n\n")
 	step := 1
 	if len(projectRisk) > 0 {
 		top := projectRisk[0]
-		fmt.Fprintf(&b, "%d. 先读 **`%s`** — 项目风险分最高（%.1f），原因：%s\n", step, top.Name, top.RiskScore, strings.Join(top.ComplexityReasons, "；"))
+		fmt.Fprintf(&b, "%d. Read **`%s`** first — highest project risk score (%.1f), reasons: %s\n", step, top.Name, top.RiskScore, strings.Join(top.ComplexityReasons, "; "))
 		step++
 	}
 	if len(entryLayer) > 0 {
 		e := entryLayer[0]
 		mainFunc := findMainFunc(db, e.dir)
 		if mainFunc != "" {
-			fmt.Fprintf(&b, "%d. 入口：从 **`%s`** 的 **`%s`** 理解请求入口\n", step, e.dir, mainFunc)
+			fmt.Fprintf(&b, "%d. Entry: Understand request entry from **`%s`**'s **`%s`**\n", step, e.dir, mainFunc)
 		} else {
-			fmt.Fprintf(&b, "%d. 入口：从 **`%s`** 理解项目入口 — %s\n", step, e.dir, e.role)
+			fmt.Fprintf(&b, "%d. Entry: Understand project entry from **`%s`** — %s\n", step, e.dir, e.role)
 		}
 		step++
 	}
 	if len(keyChains) > 0 {
-		fmt.Fprintf(&b, "%d. 主流程：追踪 **`%s`** 调用链，理解核心业务逻辑\n", step, keyChains[0])
+		fmt.Fprintf(&b, "%d. Main flow: Trace **`%s`** call chain to understand core business logic\n", step, keyChains[0])
 		step++
 	}
 	if len(infraLayer) > 0 {
-		fmt.Fprintf(&b, "%d. 基础设施：**`%s`** 提供通用能力，按需查阅\n", step, infraLayer[0].dir)
+		fmt.Fprintf(&b, "%d. Infrastructure: **`%s`** provides common capabilities, consult as needed\n", step, infraLayer[0].dir)
 		step++
 	}
 	if len(cycles) > 0 {
-		fmt.Fprintf(&b, "%d. 注意：存在 %d 条循环依赖，建议优先解耦\n", step, len(cycles))
+		fmt.Fprintf(&b, "%d. Note: %d cyclic dependencies exist, prioritize decoupling\n", step, len(cycles))
 	}
 
 	return b.String()
@@ -2369,13 +2370,13 @@ func architectureBoundaryViolations(dirDeps map[string]map[string]int, dirStats 
 			tgtRank := architectureLayerRank(tgt, tgtStat.role)
 			if srcRank == 1 && tgtRank == 3 {
 				violations = append(violations, boundaryViolation{
-					text:  fmt.Sprintf("高层 `%s` 直接调用底层 `%s`（%d 次），建议经由业务/端口层收敛边界。", src, tgt, count),
+					text:  fmt.Sprintf("High-level `%s` directly calls low-level `%s` (%d times), suggest converging boundaries through business/port layers.", src, tgt, count),
 					count: count,
 				})
 			}
 			if srcRank == 3 && tgtRank == 1 {
 				violations = append(violations, boundaryViolation{
-					text:  fmt.Sprintf("底层 `%s` 反向调用高层 `%s`（%d 次），存在依赖方向反转风险。", src, tgt, count),
+					text:  fmt.Sprintf("Low-level `%s` reversely calls high-level `%s` (%d times), dependency direction reversal risk detected.", src, tgt, count),
 					count: count,
 				})
 			}
@@ -2395,10 +2396,10 @@ func architectureBoundaryViolations(dirDeps map[string]map[string]int, dirStats 
 
 func architectureLayerRank(dir, role string) int {
 	lower := strings.ToLower(dir + " " + role)
-	if strings.Contains(lower, "handler") || strings.Contains(lower, "controller") || strings.Contains(lower, "route") || strings.Contains(lower, "cmd") || strings.Contains(role, "请求") || strings.Contains(role, "入口") || strings.Contains(role, "接口") {
+	if strings.Contains(lower, "handler") || strings.Contains(lower, "controller") || strings.Contains(lower, "route") || strings.Contains(lower, "cmd") || strings.Contains(role, "RequestHandler") || strings.Contains(role, "Entry") || strings.Contains(role, "PublicInterface") {
 		return 1
 	}
-	if strings.Contains(lower, "driver") || strings.Contains(lower, "adapter") || strings.Contains(lower, "infra") || strings.Contains(lower, "storage") || strings.Contains(lower, "db") || strings.Contains(lower, "repo") || strings.Contains(role, "数据访问") || strings.Contains(role, "基础") {
+	if strings.Contains(lower, "driver") || strings.Contains(lower, "adapter") || strings.Contains(lower, "infra") || strings.Contains(lower, "storage") || strings.Contains(lower, "db") || strings.Contains(lower, "repo") || strings.Contains(role, "DataAccess") || strings.Contains(role, "Infrastructure") {
 		return 3
 	}
 	return 2
@@ -2441,7 +2442,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[WATCH] 文件监控初始化失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[WATCH] File watcher initialization failed: %v\n", err)
 		return
 	}
 	defer watcher.Close()
@@ -2449,12 +2450,6 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 	filter, _ := LoadIndexFilter(projectRoot)
 	if filter == nil {
 		filter = &IndexFilter{}
-	}
-
-	watchExts := map[string]bool{
-		".go": true, ".py": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true,
-		".c": true, ".h": true, ".cpp": true, ".hpp": true, ".cc": true, ".cxx": true,
-		".java": true,
 	}
 
 	var addDir func(path string)
@@ -2479,7 +2474,7 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 		}
 	}
 	addDir(projectRoot)
-	fmt.Fprintf(os.Stderr, "[WATCH] 文件监控已启动: %s\n", projectRoot)
+	fmt.Fprintf(os.Stderr, "[WATCH] File watcher started: %s\n", projectRoot)
 
 	debounce := make(map[string]time.Time)
 	mu := sync.Mutex{}
@@ -2498,7 +2493,7 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(event.Name))
-			if !watchExts[ext] && event.Name != "" {
+			if !IsSupportedExtension(ext) && event.Name != "" {
 				// Also handle Remove/Rename of directories
 				if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 					continue
@@ -2529,33 +2524,34 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			mu.Unlock()
 
 			anyChanged := false
+			profile := BuildProjectProfile(projectRoot, filter, StageTreeSitter)
 			for _, name := range pending {
 				relPath, _ := filepath.Rel(projectRoot, name)
-				changed, err := SyncFileAstraMap(db, projectRoot, name)
+				changed, err := syncFileAstraMapWithProfile(db, profile, name)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "[WATCH] 同步失败 %s: %v\n", relPath, err)
+					fmt.Fprintf(os.Stderr, "[WATCH] Sync failed %s: %v\n", relPath, err)
 					continue
 				}
 				if changed {
-					fmt.Fprintf(os.Stderr, "[WATCH] 已同步 %s\n", relPath)
+					fmt.Fprintf(os.Stderr, "[WATCH] Synced %s\n", relPath)
 					anyChanged = true
 				}
 			}
 			if anyChanged {
-				fmt.Fprintf(os.Stderr, "[WATCH] 正在更新跨文件关系，请稍后...\n")
+				fmt.Fprintf(os.Stderr, "[WATCH] Updating cross-file relationships, please wait...\n")
 				_ = ResolveGoInterfaces(db)
 				_ = ResolveWebRoutes(db, projectRoot)
 				if err := ResolveCrossFileCalls(db, projectRoot); err != nil {
-					fmt.Fprintf(os.Stderr, "[WATCH] 解析跨文件调用失败: %v\n", err)
+					fmt.Fprintf(os.Stderr, "[WATCH] Cross-file call resolution failed: %v\n", err)
 				}
 				InvalidateOverviewCache()
-				fmt.Fprintf(os.Stderr, "[WATCH] 跨文件关系更新完毕\n")
+				fmt.Fprintf(os.Stderr, "[WATCH] Cross-file relationship update complete\n")
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
-			fmt.Fprintf(os.Stderr, "[WATCH] 监控错误: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[WATCH] Watch error: %v\n", err)
 		}
 	}
 }
