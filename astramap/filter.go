@@ -20,7 +20,7 @@ const (
 	StageHeuristic  IndexStage = "heuristic"
 )
 
-// ===== 排除规则类型 =====
+// ===== Exclude Rule Types =====
 
 type ExcludeKind string
 
@@ -36,7 +36,7 @@ const (
 	ExcludeUserConfigured  ExcludeKind = "USER_CONFIGURED"
 )
 
-// ExcludeRule 描述一条内置排除规则
+// ExcludeRule describes a built-in exclude rule
 type ExcludeRule struct {
 	ID          string
 	Description string
@@ -44,10 +44,10 @@ type ExcludeRule struct {
 	Match       []string // glob patterns
 	Kind        ExcludeKind
 	Confidence  int  // 0-100
-	Overridable bool // 是否可被 forceInclude 覆盖
+	Overridable bool // whether it can be overridden by forceInclude
 }
 
-// FileIndexPlan 描述单个文件的索引判定结果
+// FileIndexPlan describes the index evaluation result of a single file
 type FileIndexPlan struct {
 	Path       string
 	Indexed    bool
@@ -57,58 +57,58 @@ type FileIndexPlan struct {
 	Overridden bool
 }
 
-// ===== 内置通用规则集 =====
+// ===== Built-in Universal Rule Set =====
 
 var builtInRules = []ExcludeRule{
-	// --- VCS 元数据 (不可覆盖) ---
-	{ID: "vcs.git", Description: "Git 仓库元数据", Match: []string{".git/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
-	{ID: "vcs.svn", Description: "SVN 仓库元数据", Match: []string{".svn/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
-	{ID: "vcs.hg", Description: "Mercurial 仓库元数据", Match: []string{".hg/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
-	{ID: "vcs.astramap", Description: "AstraMap 索引数据", Match: []string{".astramap/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
+	// --- VCS Metadata (Non-overridable) ---
+	{ID: "vcs.git", Description: "Git repository metadata", Match: []string{".git/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
+	{ID: "vcs.svn", Description: "SVN repository metadata", Match: []string{".svn/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
+	{ID: "vcs.hg", Description: "Mercurial repository metadata", Match: []string{".hg/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
+	{ID: "vcs.astramap", Description: "AstraMap index data", Match: []string{".astramap/**"}, Kind: ExcludeVCSMetadata, Confidence: 100, Overridable: false},
 
-	// --- 第三方依赖 ---
-	{ID: "dep.node_modules", Description: "Node.js 依赖", Match: []string{"**/node_modules/**"}, Kind: ExcludeDependency, Confidence: 100, Overridable: true},
-	{ID: "dep.bower_components", Description: "Bower 依赖", Match: []string{"**/bower_components/**"}, Kind: ExcludeDependency, Confidence: 100, Overridable: true},
-	{ID: "dep.pods", Description: "CocoaPods 依赖", Match: []string{"**/Pods/**"}, Kind: ExcludeDependency, Confidence: 100, Overridable: true},
-	{ID: "dep.vendor", Description: "Vendor 依赖", Match: []string{"vendor/**"}, Kind: ExcludeDependency, Confidence: 95, Overridable: true},
-	{ID: "dep.third_party", Description: "第三方代码", Match: []string{"third_party/**"}, Kind: ExcludeDependency, Confidence: 90, Overridable: true},
+	// --- Third-party Dependencies ---
+	{ID: "dep.node_modules", Description: "Node.js dependencies", Match: []string{"**/node_modules/**"}, Kind: ExcludeDependency, Confidence: 100, Overridable: true},
+	{ID: "dep.bower_components", Description: "Bower dependencies", Match: []string{"**/bower_components/**"}, Kind: ExcludeDependency, Confidence: 100, Overridable: true},
+	{ID: "dep.pods", Description: "CocoaPods dependencies", Match: []string{"**/Pods/**"}, Kind: ExcludeDependency, Confidence: 100, Overridable: true},
+	{ID: "dep.vendor", Description: "Vendor dependencies", Match: []string{"vendor/**"}, Kind: ExcludeDependency, Confidence: 95, Overridable: true},
+	{ID: "dep.third_party", Description: "Third-party code", Match: []string{"third_party/**"}, Kind: ExcludeDependency, Confidence: 90, Overridable: true},
 
-	// --- 缓存 ---
-	{ID: "cache.pycache", Description: "Python 缓存", Match: []string{"**/__pycache__/**", "**/*.pyc", "**/*.pyo"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
-	{ID: "cache.pytest", Description: "pytest 缓存", Match: []string{"**/.pytest_cache/**"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
-	{ID: "cache.mypy", Description: "mypy 缓存", Match: []string{"**/.mypy_cache/**"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
-	{ID: "cache.ruff", Description: "ruff 缓存", Match: []string{"**/.ruff_cache/**"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
-	{ID: "cache.generic", Description: "通用缓存", Match: []string{"**/.cache/**", "**/.sass-cache/**"}, Kind: ExcludeCache, Confidence: 95, Overridable: true},
+	// --- Caches ---
+	{ID: "cache.pycache", Description: "Python cache", Match: []string{"**/__pycache__/**", "**/*.pyc", "**/*.pyo"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
+	{ID: "cache.pytest", Description: "pytest cache", Match: []string{"**/.pytest_cache/**"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
+	{ID: "cache.mypy", Description: "mypy cache", Match: []string{"**/.mypy_cache/**"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
+	{ID: "cache.ruff", Description: "ruff cache", Match: []string{"**/.ruff_cache/**"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
+	{ID: "cache.generic", Description: "Generic cache", Match: []string{"**/.cache/**", "**/.sass-cache/**"}, Kind: ExcludeCache, Confidence: 95, Overridable: true},
 
-	// --- OS/编辑器垃圾 ---
+	// --- OS/Editor Junk ---
 	{ID: "os.ds_store", Description: "macOS .DS_Store", Match: []string{"**/.DS_Store"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
 	{ID: "os.thumbs", Description: "Windows Thumbs.db", Match: []string{"**/Thumbs.db"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
-	{ID: "os.swap", Description: "编辑器 swap 文件", Match: []string{"**/*.swp", "**/*.swo", "**/*~"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
-	{ID: "os.tmp", Description: "临时文件", Match: []string{"**/*.tmp", "**/*.temp"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
+	{ID: "os.swap", Description: "Editor swap files", Match: []string{"**/*.swp", "**/*.swo", "**/*~"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
+	{ID: "os.tmp", Description: "Temporary files", Match: []string{"**/*.tmp", "**/*.temp"}, Kind: ExcludeCache, Confidence: 100, Overridable: true},
 
-	// --- 压缩/Source Map ---
-	{ID: "minified.js", Description: "压缩 JS/CSS", Match: []string{"**/*.min.js", "**/*.min.mjs", "**/*.min.cjs", "**/*.min.css"}, Kind: ExcludeMinified, Confidence: 100, Overridable: true},
-	{ID: "sourcemap", Description: "Source Map 文件", Match: []string{"**/*.js.map", "**/*.css.map", "**/*.d.ts.map"}, Kind: ExcludeMinified, Confidence: 100, Overridable: true},
+	// --- Minified/Source Maps ---
+	{ID: "minified.js", Description: "Minified JS/CSS", Match: []string{"**/*.min.js", "**/*.min.mjs", "**/*.min.cjs", "**/*.min.css"}, Kind: ExcludeMinified, Confidence: 100, Overridable: true},
+	{ID: "sourcemap", Description: "Source Map files", Match: []string{"**/*.js.map", "**/*.css.map", "**/*.d.ts.map"}, Kind: ExcludeMinified, Confidence: 100, Overridable: true},
 
-	// --- 生成源码：确定性文件名 ---
-	{ID: "gen.go.protobuf", Description: "Go protobuf 生成文件", Ecosystem: "go", Match: []string{"**/*.pb.go", "**/*.grpc.pb.go"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
-	{ID: "gen.py.protobuf", Description: "Python protobuf 生成文件", Ecosystem: "python", Match: []string{"**/*_pb2.py", "**/*_pb2.pyi", "**/*_pb2_grpc.py"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
-	{ID: "gen.cc.protobuf", Description: "C++ protobuf 生成文件", Ecosystem: "cpp", Match: []string{"**/*.pb.cc", "**/*.pb.h", "**/*.grpc.pb.cc", "**/*.grpc.pb.h"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
-	{ID: "gen.cc.flatbuffers", Description: "FlatBuffers 生成文件", Ecosystem: "cpp", Match: []string{"**/*_generated.h"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
-	{ID: "gen.dart.all", Description: "Dart 生成文件", Ecosystem: "dart", Match: []string{"**/*.g.dart", "**/*.freezed.dart", "**/*.gr.dart", "**/*.mocks.dart", "**/*.pb.dart"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
-	{ID: "gen.rb.protobuf", Description: "Ruby protobuf 生成文件", Ecosystem: "ruby", Match: []string{"**/*_pb.rb"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
+	// --- Generated Sources: Deterministic Filenames ---
+	{ID: "gen.go.protobuf", Description: "Go protobuf generated files", Ecosystem: "go", Match: []string{"**/*.pb.go", "**/*.grpc.pb.go"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
+	{ID: "gen.py.protobuf", Description: "Python protobuf generated files", Ecosystem: "python", Match: []string{"**/*_pb2.py", "**/*_pb2.pyi", "**/*_pb2_grpc.py"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
+	{ID: "gen.cc.protobuf", Description: "C++ protobuf generated files", Ecosystem: "cpp", Match: []string{"**/*.pb.cc", "**/*.pb.h", "**/*.grpc.pb.cc", "**/*.grpc.pb.h"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
+	{ID: "gen.cc.flatbuffers", Description: "FlatBuffers generated files", Ecosystem: "cpp", Match: []string{"**/*_generated.h"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
+	{ID: "gen.dart.all", Description: "Dart generated files", Ecosystem: "dart", Match: []string{"**/*.g.dart", "**/*.freezed.dart", "**/*.gr.dart", "**/*.mocks.dart", "**/*.pb.dart"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
+	{ID: "gen.rb.protobuf", Description: "Ruby protobuf generated files", Ecosystem: "ruby", Match: []string{"**/*_pb.rb"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
 
-	// --- 二进制文件 (不可覆盖) ---
-	{ID: "binary.object", Description: "编译目标文件", Match: []string{"**/*.o", "**/*.obj", "**/*.a", "**/*.lib", "**/*.so", "**/*.dylib", "**/*.dll", "**/*.exe"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
-	{ID: "binary.java", Description: "Java 归档", Match: []string{"**/*.class", "**/*.jar", "**/*.war", "**/*.ear"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
+	// --- Binary Files (Non-overridable) ---
+	{ID: "binary.object", Description: "Compiled object files", Match: []string{"**/*.o", "**/*.obj", "**/*.a", "**/*.lib", "**/*.so", "**/*.dylib", "**/*.dll", "**/*.exe"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
+	{ID: "binary.java", Description: "Java archives", Match: []string{"**/*.class", "**/*.jar", "**/*.war", "**/*.ear"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
 	{ID: "binary.wasm", Description: "WebAssembly", Match: []string{"**/*.wasm"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
-	{ID: "binary.archive", Description: "压缩归档", Match: []string{"**/*.zip", "**/*.tar", "**/*.gz", "**/*.7z"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
-	{ID: "binary.image", Description: "图片文件", Match: []string{"**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.pdf", "**/*.ico", "**/*.svg", "**/*.webp"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
-	{ID: "binary.model", Description: "模型文件", Match: []string{"**/*.tflite", "**/*.onnx", "**/*.pt"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
-	{ID: "binary.font", Description: "字体文件", Match: []string{"**/*.woff", "**/*.woff2", "**/*.ttf", "**/*.eot"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
+	{ID: "binary.archive", Description: "Compressed archives", Match: []string{"**/*.zip", "**/*.tar", "**/*.gz", "**/*.7z"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
+	{ID: "binary.image", Description: "Image files", Match: []string{"**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.pdf", "**/*.ico", "**/*.svg", "**/*.webp"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
+	{ID: "binary.model", Description: "Model files", Match: []string{"**/*.tflite", "**/*.onnx", "**/*.pt"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
+	{ID: "binary.font", Description: "Font files", Match: []string{"**/*.woff", "**/*.woff2", "**/*.ttf", "**/*.eot"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
 }
 
-// ===== 生成文件头检测 =====
+// ===== Generated File Header Detection =====
 
 var generatedHeaderPatterns = []string{
 	`(?i)^// Code generated .* DO NOT EDIT\.?$`,
@@ -134,7 +134,7 @@ type matchPattern struct {
 	re      interface{ MatchString(string) bool }
 }
 
-// IsGeneratedByHeader 扫描文件前 8KB / 100 行检测生成文件头标记
+// IsGeneratedByHeader scans the first 8KB / 100 lines of the file to detect generated file headers
 func IsGeneratedByHeader(content []byte) bool {
 	const maxScan = 8 * 1024
 	if len(content) > maxScan {
@@ -162,9 +162,9 @@ func IsGeneratedByHeader(content []byte) bool {
 type IndexFilter struct {
 	Include      []string
 	Exclude      []string
-	ForceInclude []string // advanced.forceInclude — 覆盖可覆盖的内置规则
+	ForceInclude []string // advanced.forceInclude — overrides overridable built-in rules
 
-	// 生态感知动态规则（由 DetectProjectRoots 生成）
+	// Ecosystem-aware dynamic rules (generated by DetectProjectRoots)
 	ecosystemRules []ExcludeRule
 }
 
@@ -179,21 +179,21 @@ type IndexFilterExcludedEntry struct {
 	Reason string
 }
 
-// Evaluate 评估文件是否应被索引，返回 FileIndexPlan
+// Evaluate evaluates whether a file should be indexed, returning a FileIndexPlan
 func (f *IndexFilter) Evaluate(relPath string) FileIndexPlan {
 	relPath = normalizeFilterPath(relPath)
 	if relPath == "" || relPath == "." {
 		return FileIndexPlan{Path: relPath, Indexed: true}
 	}
 
-	// 1. 内置规则（含生态感知规则）
+	// 1. Built-in rules (including ecosystem-aware rules)
 	allRules := builtInRules
 	if len(f.ecosystemRules) > 0 {
 		allRules = append(allRules, f.ecosystemRules...)
 	}
 	for _, rule := range allRules {
 		if matchesAnyPattern(relPath, rule.Match) {
-			// forceInclude 可覆盖 Overridable 规则
+			// forceInclude can override Overridable rules
 			if rule.Overridable && len(f.ForceInclude) > 0 && matchesAnyPattern(relPath, f.ForceInclude) {
 				return FileIndexPlan{Path: relPath, Indexed: true, RuleID: rule.ID, Kind: rule.Kind, Reason: rule.Description, Overridden: true}
 			}
@@ -201,41 +201,41 @@ func (f *IndexFilter) Evaluate(relPath string) FileIndexPlan {
 		}
 	}
 
-	// 2. 隐藏路径
+	// 2. Hidden paths
 	if hasHiddenSegment(relPath) {
 		if len(f.ForceInclude) > 0 && matchesAnyPattern(relPath, f.ForceInclude) {
 			return FileIndexPlan{Path: relPath, Indexed: true, Kind: ExcludeHiddenPath, Overridden: true}
 		}
-		return FileIndexPlan{Path: relPath, Indexed: false, RuleID: "hidden.dotdir", Kind: ExcludeHiddenPath, Reason: "隐藏路径"}
+		return FileIndexPlan{Path: relPath, Indexed: false, RuleID: "hidden.dotdir", Kind: ExcludeHiddenPath, Reason: "Hidden path"}
 	}
 
-	// 3. 用户 Include
+	// 3. User Include
 	if len(f.Include) > 0 && !matchesAnyPattern(relPath, f.Include) {
-		return FileIndexPlan{Path: relPath, Indexed: false, RuleID: "user.include", Kind: ExcludeUserConfigured, Reason: "不在 include 范围内"}
+		return FileIndexPlan{Path: relPath, Indexed: false, RuleID: "user.include", Kind: ExcludeUserConfigured, Reason: "Not in include range"}
 	}
 
-	// 4. 用户 Exclude
+	// 4. User Exclude
 	if matchesAnyPattern(relPath, f.Exclude) {
-		return FileIndexPlan{Path: relPath, Indexed: false, RuleID: "user.exclude", Kind: ExcludeUserConfigured, Reason: "用户配置排除"}
+		return FileIndexPlan{Path: relPath, Indexed: false, RuleID: "user.exclude", Kind: ExcludeUserConfigured, Reason: "User configured exclusion"}
 	}
 
 	return FileIndexPlan{Path: relPath, Indexed: true}
 }
 
-// EvaluateDir 评估目录是否应被遍历
+// EvaluateDir evaluates whether a directory should be traversed
 func (f *IndexFilter) EvaluateDir(relPath string) FileIndexPlan {
 	relPath = normalizeFilterPath(relPath)
 	if relPath == "" || relPath == "." {
 		return FileIndexPlan{Path: relPath, Indexed: true}
 	}
 
-	// 目录先检查自身
+	// Check the directory itself first
 	plan := f.Evaluate(relPath)
 	if !plan.Indexed && !plan.Overridden {
 		return plan
 	}
 
-	// 再检查带 / 后缀的目录匹配
+	// Then check directory match with trailing /
 	planSlash := f.Evaluate(relPath + "/")
 	if !planSlash.Indexed && !planSlash.Overridden {
 		return planSlash
@@ -244,20 +244,20 @@ func (f *IndexFilter) EvaluateDir(relPath string) FileIndexPlan {
 	return FileIndexPlan{Path: relPath, Indexed: true}
 }
 
-// Allows 保持向后兼容：stage 参数被忽略，统一走 Evaluate
+// Allows maintains backward compatibility
 func (f *IndexFilter) Allows(relPath string, stage IndexStage) bool {
 	return f.Evaluate(relPath).Indexed
 }
 
-// AllowsDir 保持向后兼容
+// AllowsDir maintains backward compatibility
 func (f *IndexFilter) AllowsDir(relPath string, stage IndexStage) bool {
 	return f.EvaluateDir(relPath).Indexed
 }
 
-// ===== 生态感知工程根识别 =====
+// ===== Ecosystem-aware Project Root Detection =====
 
 type ProjectRoot struct {
-	Path      string // 相对于项目根的路径
+	Path      string // Path relative to the project root
 	Ecosystem string // "go", "node", "rust", "maven", "gradle", "dotnet", "cmake", "python", "swift", "bazel"
 }
 
@@ -279,7 +279,7 @@ var rootMarkers = map[string]string{
 	"MODULE.bazel":     "bazel",
 }
 
-// DetectProjectRoots 扫描项目目录建立工程根映射
+// DetectProjectRoots scans the project directory to establish project root mappings
 func DetectProjectRoots(projectRoot string) []ProjectRoot {
 	var roots []ProjectRoot
 	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
@@ -290,7 +290,7 @@ func DetectProjectRoots(projectRoot string) []ProjectRoot {
 		relPath = filepath.ToSlash(relPath)
 
 		if info.IsDir() {
-			// 隐藏目录和常见非源码目录跳过
+			// Skip hidden directories and common non-source directories
 			name := info.Name()
 			if strings.HasPrefix(name, ".") && name != "." && name != ".." {
 				return filepath.SkipDir
@@ -315,7 +315,7 @@ func DetectProjectRoots(projectRoot string) []ProjectRoot {
 	return roots
 }
 
-// BuildEcosystemRules 根据工程根生成生态感知排除规则
+// BuildEcosystemRules generates ecosystem-aware exclude rules based on project roots
 func BuildEcosystemRules(roots []ProjectRoot) []ExcludeRule {
 	var rules []ExcludeRule
 	seen := make(map[string]bool)
@@ -328,37 +328,37 @@ func BuildEcosystemRules(roots []ProjectRoot) []ExcludeRule {
 		switch root.Ecosystem {
 		case "node":
 			if !seen[key("build.node.dist")] {
-				rules = append(rules, ExcludeRule{ID: "build.node.dist", Description: "Node.js 构建输出", Match: []string{prefix + "dist/**", prefix + "coverage/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				rules = append(rules, ExcludeRule{ID: "build.node.dist", Description: "Node.js build output", Match: []string{prefix + "dist/**", prefix + "coverage/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.node.dist")] = true
 			}
 		case "rust":
 			if !seen[key("build.rust.target")] {
-				rules = append(rules, ExcludeRule{ID: "build.rust.target", Description: "Rust 构建输出", Match: []string{prefix + "target/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				rules = append(rules, ExcludeRule{ID: "build.rust.target", Description: "Rust build output", Match: []string{prefix + "target/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.rust.target")] = true
 			}
 		case "maven":
 			if !seen[key("build.maven.target")] {
-				rules = append(rules, ExcludeRule{ID: "build.maven.target", Description: "Maven 构建输出", Match: []string{prefix + "target/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				rules = append(rules, ExcludeRule{ID: "build.maven.target", Description: "Maven build output", Match: []string{prefix + "target/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.maven.target")] = true
 			}
 		case "gradle":
 			if !seen[key("build.gradle.output")] {
-				rules = append(rules, ExcludeRule{ID: "build.gradle.output", Description: "Gradle 构建输出", Match: []string{prefix + "build/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				rules = append(rules, ExcludeRule{ID: "build.gradle.output", Description: "Gradle build output", Match: []string{prefix + "build/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.gradle.output")] = true
 			}
 		case "cmake":
 			if !seen[key("build.cmake.output")] {
-				rules = append(rules, ExcludeRule{ID: "build.cmake.output", Description: "CMake 构建输出", Match: []string{prefix + "cmake-build-*/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				rules = append(rules, ExcludeRule{ID: "build.cmake.output", Description: "CMake build output", Match: []string{prefix + "cmake-build-*/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.cmake.output")] = true
 			}
 		case "bazel":
 			if !seen[key("build.bazel.output")] {
-				rules = append(rules, ExcludeRule{ID: "build.bazel.output", Description: "Bazel 构建输出", Match: []string{prefix + "bazel-*/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				rules = append(rules, ExcludeRule{ID: "build.bazel.output", Description: "Bazel build output", Match: []string{prefix + "bazel-*/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.bazel.output")] = true
 			}
 		case "swift":
 			if !seen[key("build.swift.output")] {
-				rules = append(rules, ExcludeRule{ID: "build.swift.output", Description: "Swift 构建输出", Match: []string{prefix + ".build/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				rules = append(rules, ExcludeRule{ID: "build.swift.output", Description: "Swift build output", Match: []string{prefix + ".build/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.swift.output")] = true
 			}
 		}
@@ -366,7 +366,7 @@ func BuildEcosystemRules(roots []ProjectRoot) []ExcludeRule {
 	return rules
 }
 
-// ===== 配置加载 =====
+// ===== Configuration Loading =====
 
 func EnsureIndexConfigExample(projectRoot string) (string, bool, error) {
 	configPath := filepath.Join(projectRoot, ".astramap", "config.yaml")
@@ -405,7 +405,7 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 		rawLine := scanner.Text()
 		line := stripConfigComment(rawLine)
 
-		// 注释中的 key 追踪
+		// Key tracking in comments
 		if line != rawLine {
 			commentPart := strings.TrimSpace(strings.SplitN(rawLine, "#", 2)[1])
 			if strings.Contains(commentPart, ":") {
@@ -435,7 +435,7 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 			continue
 		}
 
-		// advanced: 嵌套键
+		// advanced: nested keys
 		if indent > 0 && !inAdvanced {
 			advKey, _, advOk := strings.Cut(trimmed, ":")
 			if advOk && normalizeIndexConfigKey(advKey) == "advanced" {
@@ -474,10 +474,10 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 		return nil, err
 	}
 
-	// 向后兼容：旧配置中的 scipExclude / treeSitterExclude 合并到 Exclude
-	// (这些字段在 addIndexPattern 中已直接写入 Exclude)
+	// Backward compatibility: scipExclude / treeSitterExclude in old config are merged into Exclude
+	// (These fields are written directly to Exclude in addIndexPattern)
 
-	// 加载 .gitignore
+	// Load .gitignore
 	gitIgnorePath := filepath.Join(projectRoot, ".gitignore")
 	if gitIgnoreFile, err := os.Open(gitIgnorePath); err == nil {
 		defer gitIgnoreFile.Close()
@@ -494,7 +494,7 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 		}
 	}
 
-	// 生态感知
+	// Ecosystem-aware
 	roots := DetectProjectRoots(projectRoot)
 	filter.ecosystemRules = BuildEcosystemRules(roots)
 
@@ -535,7 +535,7 @@ index:
   #     - "src/.domain/**"
 `
 
-// ===== 报告 =====
+// ===== Reporting =====
 
 func BuildIndexFilterMatchReport(projectRoot string, filter *IndexFilter) (*IndexFilterMatchReport, error) {
 	report := &IndexFilterMatchReport{}
@@ -588,7 +588,7 @@ func BuildIndexFilterMatchReport(projectRoot string, filter *IndexFilter) (*Inde
 	return report, err
 }
 
-// ===== 内部辅助函数 =====
+// ===== Internal Helper Functions =====
 
 func isValidConfigKey(normalized string) bool {
 	return normalized == "include" || normalized == "exclude" ||
@@ -780,7 +780,7 @@ func convertGitIgnoreToGlob(line string) string {
 	return pattern
 }
 
-// mustCompileRegex 编译正则表达式，编译失败 panic
+// mustCompileRegex compiles a regular expression, panic on failure
 func mustCompileRegex(pattern string) interface{ MatchString(string) bool } {
 	return regexp.MustCompile(pattern)
 }
