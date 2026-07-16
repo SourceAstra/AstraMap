@@ -243,8 +243,6 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				docstring = findLeadingComments(sourceLines, startLine)
 			}
 
-
-
 			// isExported: Go 语言按首字母大写判断; 其他语言默认 0
 			if docLang == "go" {
 				r, _ := utf8.DecodeRuneInString(info.name)
@@ -550,6 +548,25 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 	}
 	defer tx.Rollback()
 
+	// Find nodes about to be deleted to update incoming calls to external placeholders
+	var deletedNodes []struct {
+		ID       string `db:"id"`
+		Name     string `db:"name"`
+		Language string `db:"language"`
+		Kind     string `db:"kind"`
+	}
+	_ = tx.Select(&deletedNodes, "SELECT id, name, language, kind FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
+	for _, dn := range deletedNodes {
+		if dn.Kind == "function" || dn.Kind == "method" {
+			prefix := getLangPrefix(dn.Language)
+			if prefix == "cpp" {
+				prefix = "cxx"
+			}
+			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, dn.Name)
+			_, _ = tx.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND provenance != 'heuristic'", extID, dn.ID)
+		}
+	}
+
 	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
 	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
 
@@ -636,6 +653,23 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 
 	if err := tx.Commit(); err != nil {
 		return false, err
+	}
+
+	// Bind existing external calls to the newly indexed functions/methods
+	for _, n := range nodes {
+		if n.Kind == "function" || n.Kind == "method" {
+			prefix := getLangPrefix(n.Language)
+			if prefix == "cpp" {
+				prefix = "cxx"
+			}
+			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, n.Name)
+			_, _ = db.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND kind = 'calls'", n.ID, extID)
+		}
+	}
+
+	// Rebuild heuristic calls for the updated file
+	if err2 := ResolveCrossFileCallsForFiles(db, projectRoot, []string{relPath}); err2 != nil {
+		logError("ResolveCrossFileCalls failed for %s: %v", relPath, err2)
 	}
 
 	InvalidateQueryHelperCacheForFile(relPath)
@@ -1004,8 +1038,7 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 		}
 		relPath, _ := filepath.Rel(projectRoot, path)
 		if info.IsDir() {
-			name := info.Name()
-			if shouldSkipIndexDir(name) || !filter.AllowsDir(relPath, StageTreeSitter) {
+			if !filter.AllowsDir(relPath, StageTreeSitter) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1210,7 +1243,7 @@ func PruneExcludedFiles(db *sqlx.DB, filter *IndexFilter) (bool, error) {
 
 	pruned := false
 	for _, filePath := range files {
-		if filter.Allows(filePath, StageTreeSitter) || filter.Allows(filePath, StageScip) {
+		if filter.Allows(filePath, StageTreeSitter) {
 			continue
 		}
 
@@ -1294,10 +1327,6 @@ func ProvenanceStats(db *sqlx.DB) (map[string]int, map[string]int, error) {
 		}
 	}
 	return nodeStats, edgeStats, nil
-}
-
-func shouldSkipIndexDir(name string) bool {
-	return strings.HasPrefix(name, ".") && name != "." && name != ".."
 }
 
 // ===== Heuristic Resolvers (启发式粘合解析器) =====
