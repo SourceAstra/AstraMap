@@ -107,14 +107,19 @@ Dashboard 不是静态截图式代码地图，而是直接运行在同一份 SQL
 
 ## 支持语言
 
-| 语言 | Tree-sitter | SCIP 索引器 |
-|------|------------|------------|
-| Go | `tree-sitter-go` | `scip-go` |
-| Python | `tree-sitter-python` | `scip-python` |
-| TypeScript / TSX | `tree-sitter-typescript` | `scip-typescript` |
-| C | `tree-sitter-c` | `scip-clang` |
-| C++ | `tree-sitter-cpp` | `scip-clang` |
-| Java | `tree-sitter-java` | `scip-java` |
+| 语言 | 扩展名 | Tree-sitter | 语义 Provider | 能力等级 |
+|------|--------|-------------|---------------|----------|
+| Go | `.go` | `tree-sitter-go` | `scip-go` 自动生成 | `semantic` |
+| Python | `.py` | `tree-sitter-python` | `scip-python` 自动生成 | `semantic` |
+| TypeScript / TSX | `.ts` `.tsx` | `tree-sitter-typescript` | `scip-typescript` 自动生成 | `semantic` |
+| JavaScript / JSX | `.js` `.jsx` `.mjs` `.cjs` | TypeScript/TSX grammar | 与 TypeScript 共享 `scip-typescript` | `semantic` |
+| C | `.c` `.h` | `tree-sitter-c` | 与 C++ 共享 `scip-clang` | `semantic` |
+| C++ | `.cc` `.cpp` `.cxx` `.hpp` `.hxx`，以及 C++ 项目中的 `.h` | `tree-sitter-cpp` | 与 C 共享 `scip-clang` | `semantic` |
+| Java | `.java` | `tree-sitter-java` | 可导入已有 SCIP，暂不自动生成 | `local-graph` |
+
+HTTP/MCP 状态接口同时返回 `supportedLanguages` 和 `languageCapabilities`。共享 Provider
+只执行一次：C/C++ 共用一次 `scip-clang`，TypeScript/JavaScript 共用一次
+`scip-typescript`。
 
 ## 快速开始
 
@@ -443,7 +448,7 @@ index:
 | **MCP stdio 服务** | 9 个工具（search/explore/node/callers/callees/impact/trace/status/files），JSON-RPC stdio 协议 |
 | **REST API** | 11 个端点，覆盖搜索、节点详情、调用链追踪、影响分析、区域探索 |
 | **D3.js 交互式 Dashboard** | 探索视界（全局→局部图谱浏览）、依赖关系视图（调用邻域展开） |
-| **5 语言支持** | Go / Python / TypeScript+TSX / C++ / Java，对应 SCIP 索引器 + Tree-sitter 语法 |
+| **7 种语言支持** | Go / Python / TypeScript / JavaScript / C / C++ / Java；能力等级由注册表统一派生 |
 | **增量索引** | Tree-sitter 按文件哈希跳过未变更文件；`amap index` 快速增量；`amap watch` 持续监听 |
 | **CLI 诊断工具集** | locate / diff / hotspots / deadcode / cycles / coupling / owners / tree / query |
 | **一键 MCP 注册** | `amap install` 注册到 Claude Code / VS Code / Cursor / Codex |
