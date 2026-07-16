@@ -64,7 +64,7 @@ type McpContent struct {
 }
 
 const ServerInstructions = `
-# AstraMap MCP 使用指导规则 (Steering Rules)
+# AstraMap MCP Steering Rules
 
 You are Antigravity/Claude Code programming agent, analyzing the current project with high-precision semantic code map. Please follow these rules:
 
@@ -77,13 +77,13 @@ You are Antigravity/Claude Code programming agent, analyzing the current project
    - It returns all candidates in one turn to avoid roundtrips.
 `
 
-// RunMcpServer 启动 stdio MCP 协议循环
+// RunMcpServer starts the stdio MCP protocol loop
 func RunMcpServer(db *sqlx.DB, projectRoot string) {
-	logInfo("AstraMap: 启动 stdio MCP Server 循环, 工作目录: %s", projectRoot)
+	logInfo("AstraMap: Starting stdio MCP Server loop, working directory: %s", projectRoot)
 
 	go func() {
 		if err := SyncAllFilesAstraMap(db, projectRoot); err != nil {
-			logError("AstraMap: 后台同步失败: %v", err)
+			logError("AstraMap: Background sync failed: %v", err)
 		}
 	}()
 
@@ -94,7 +94,7 @@ func RunMcpServer(db *sqlx.DB, projectRoot string) {
 			if err == io.EOF {
 				break
 			}
-			fmt.Fprintf(os.Stderr, "读取请求失败: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Failed to read request: %v\n", err)
 			continue
 		}
 
@@ -136,80 +136,80 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 		tools := []McpTool{
 			{
 				Name:        "astramap_search",
-				Description: "按名称快速检索符号定义，返回符号名称、类型及位置，支持模糊匹配。常用于首层快速定位。触发场景：用户问「X 在哪定义」「找一下 Y 函数」时，优先调用此工具而非 grep。",
+				Description: "Quickly search symbol definitions by name, returning symbol name, kind, and location, supporting fuzzy matching. Used for first-level quick location. Trigger: when user asks 'where is X defined' or 'find function Y', prioritize this over grep.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"query":  map[string]string{"type": "string", "description": "模糊检索符号关键词"},
-						"kind":   map[string]string{"type": "string", "description": "符号类型 (function, struct, class, interface 等)"},
-						"limit":  map[string]string{"type": "integer", "description": "返回数量限制，默认 20"},
-						"offset": map[string]string{"type": "integer", "description": "分页偏移量，默认 0"},
+						"query":  map[string]string{"type": "string", "description": "Fuzzy search symbol keyword"},
+						"kind":   map[string]string{"type": "string", "description": "Symbol kind (function, struct, class, interface, etc.)"},
+						"limit":  map[string]string{"type": "integer", "description": "Return limit, default 20"},
+						"offset": map[string]string{"type": "integer", "description": "Pagination offset, default 0"},
 					},
 					Required: []string{"query"},
 				},
 			},
 			{
 				Name:        "astramap_explore",
-				Description: "探索区域性代码流，根据给定的业务词汇、一组符号或自然语言任务描述返回相关的源码上下文及拓扑调用关系。客户端应首选该命令以快速压缩上下文并构建逻辑入口。触发场景：用户描述业务流程或问「X 和 Y 是怎么关联的」时首选此工具。",
+				Description: "Explore regional code flows, returning relevant source context and topological call relationships based on given business terms, a set of symbols, or natural language task descriptions. Clients should prefer this command to compress context and build logical entry points quickly. Trigger: preferred when user describes a business workflow or asks 'how are X and Y related'.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"query":    map[string]string{"type": "string", "description": "业务流符号集（多符号用空格隔开）或自然语言任务描述"},
-						"maxFiles": map[string]string{"type": "integer", "description": "自适应返回的最大文件范围"},
+						"query":    map[string]string{"type": "string", "description": "Business flow symbol set (separated by space) or natural language task description"},
+						"maxFiles": map[string]string{"type": "integer", "description": "Adaptive maximum file range returned"},
 					},
 					Required: []string{"query"},
 				},
 			},
 			{
 				Name:        "astramap_node",
-				Description: "符号实体详情还原。获取单个符号对应的底层代码实现、文档注释及依赖；在有重载歧义时会在单个 Turn 中合并返回全部候选体以避免反复查询。触发场景：用户问「X 的源码是什么」「X 的签名和文档」时使用。",
+				Description: "Resolve symbol entity details. Retrieves the underlying code implementation, docstring, and dependencies for a single symbol; in case of overload ambiguity, merges and returns all candidates in a single turn to avoid roundtrips. Trigger: used when user asks 'what is the source of X' or 'signature and doc of X'.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"symbol":      map[string]string{"type": "string", "description": "目标方法/类完全限定名"},
-						"file":        map[string]string{"type": "string", "description": "指定文件名"},
-						"includeCode": map[string]string{"type": "boolean", "description": "是否附加完整源码内容（默认 true）"},
+						"symbol":      map[string]string{"type": "string", "description": "Fully qualified name of target method/class"},
+						"file":        map[string]string{"type": "string", "description": "Specify file name"},
+						"includeCode": map[string]string{"type": "boolean", "description": "Whether to attach full source code (default true)"},
 					},
 				},
 			},
 			{
 				Name:        "astramap_callers",
-				Description: "向上追溯指定符号的直接上游调用源。触发场景：用户问「谁调用了 X」「X 被哪些地方引用」时使用。",
+				Description: "Trace direct upstream callers of a specified symbol. Trigger: used when user asks 'who calls X' or 'where is X referenced'.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"symbol": map[string]string{"type": "string", "description": "目标符号ID"},
-						"limit":  map[string]string{"type": "integer", "description": "返回数量限制，默认 100"},
+						"symbol": map[string]string{"type": "string", "description": "Target symbol ID"},
+						"limit":  map[string]string{"type": "integer", "description": "Return limit, default 100"},
 					},
 					Required: []string{"symbol"},
 				},
 			},
 			{
 				Name:        "astramap_callees",
-				Description: "向下追溯指定符号的直接被调用依赖。触发场景：用户问「X 依赖什么」「X 内部调用了什么」时使用。",
+				Description: "Trace direct downstream callees of a specified symbol. Trigger: used when user asks 'what does X depend on' or 'what does X call internally'.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"symbol": map[string]string{"type": "string", "description": "目标符号ID"},
+						"symbol": map[string]string{"type": "string", "description": "Target symbol ID"},
 					},
 					Required: []string{"symbol"},
 				},
 			},
 			{
 				Name:        "astramap_impact",
-				Description: "逆向依赖波及评估。输入待变动的符号 ID，深度广度遍历返回波及受损的上游节点列表与风险值。触发场景：用户问「改了 X 会影响什么」时使用。",
+				Description: "Reverse dependency impact evaluation. Input the symbol ID to change, performs deep/broad traversal to return upstream nodes affected and risk values. Trigger: used when user asks 'what is affected if I change X'.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"symbol": map[string]string{"type": "string", "description": "修改的源符号ID"},
-						"depth":  map[string]string{"type": "integer", "description": "扩散深度限制"},
+						"symbol": map[string]string{"type": "string", "description": "Modified source symbol ID"},
+						"depth":  map[string]string{"type": "integer", "description": "Diffusion depth limit"},
 					},
 					Required: []string{"symbol"},
 				},
 			},
 			{
 				Name:        "astramap_status",
-				Description: "查询代码地图当前索引覆盖率、脏文件列表、系统支持语言以及增量解析状态。触发场景：用户问「索引好了吗」「地图状态如何」时使用。",
+				Description: "Query current index coverage, dirty file list, supported languages, and incremental parsing status. Trigger: used when user asks 'is indexing done' or 'what is the map status'.",
 				InputSchema: InputSchema{
 					Type:       "object",
 					Properties: map[string]interface{}{},
@@ -217,26 +217,26 @@ func handleMcpMessage(db *sqlx.DB, projectRoot string, req JsonRpcRequest) {
 			},
 			{
 				Name:        "astramap_trace",
-				Description: "追踪从起始符号 A 到目标符号 B 的调用路径。触发场景：用户问「从 A 到 B 的调用链是什么」「执行流如何到达 Y」时使用。",
+				Description: "Trace call path from starting symbol A to target symbol B. Trigger: used when user asks 'what is the call chain from A to B' or 'how does execution flow reach Y'.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"from": map[string]string{"type": "string", "description": "起始方法/类完全限定名"},
-						"to":   map[string]string{"type": "string", "description": "目标方法/类完全限定名"},
+						"from": map[string]string{"type": "string", "description": "Fully qualified name of starting method/class"},
+						"to":   map[string]string{"type": "string", "description": "Fully qualified name of target method/class"},
 					},
 					Required: []string{"from", "to"},
 				},
 			},
 			{
 				Name:        "astramap_files",
-				Description: "列出当前项目中的所有已索引源文件，支持前缀路径过滤与后缀/模式匹配。触发场景：用户问「项目有哪些文件」「某目录下有哪些源码」时使用。",
+				Description: "List all indexed source files in the current project, supporting prefix path filtering and suffix/pattern matching. Trigger: used when user asks 'what files are in the project' or 'what source code is under directory X'.",
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
-						"path":    map[string]string{"type": "string", "description": "路径前缀过滤"},
-						"pattern": map[string]string{"type": "string", "description": "文件名正则或模式匹配 (如 *.go)"},
-						"limit":   map[string]string{"type": "integer", "description": "返回数量限制，默认 100"},
-						"offset":  map[string]string{"type": "integer", "description": "分页偏移量，默认 0"},
+						"path":    map[string]string{"type": "string", "description": "Path prefix filter"},
+						"pattern": map[string]string{"type": "string", "description": "Filename regex or pattern match (e.g. *.go)"},
+						"limit":   map[string]string{"type": "integer", "description": "Return limit, default 100"},
+						"offset":  map[string]string{"type": "integer", "description": "Pagination offset, default 0"},
 					},
 				},
 			},
@@ -519,14 +519,15 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 				statusStr = "indexing"
 			}
 			res := map[string]interface{}{
-				"status":             statusStr,
-				"database":           "SQLite (modernc-sqlite-adapter)",
-				"totalFiles":         status.FileCount,
-				"indexedNodes":       status.NodeCount,
-				"indexedEdges":       status.EdgeCount,
-				"dirtyCount":         status.DirtyCount,
-				"dirtyFiles":         status.DirtyFiles,
-				"supportedLanguages": []string{"go", "c", "cpp", "python", "typescript", "java"},
+				"status":               statusStr,
+				"database":             "SQLite (modernc-sqlite-adapter)",
+				"totalFiles":           status.FileCount,
+				"indexedNodes":         status.NodeCount,
+				"indexedEdges":         status.EdgeCount,
+				"dirtyCount":           status.DirtyCount,
+				"dirtyFiles":           status.DirtyFiles,
+				"supportedLanguages":   SupportedLanguageIDs(),
+				"languageCapabilities": SupportedLanguageCapabilities(),
 			}
 			data, _ := json.MarshalIndent(res, "", "  ")
 			content = string(data)
