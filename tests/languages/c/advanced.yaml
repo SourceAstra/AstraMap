@@ -1,0 +1,79 @@
+# C 高级语义场景
+metadata:
+  language: c
+  description: "C 跨文件调用、头文件、函数指针、条件编译"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      math.h: |
+        int calculate(int x);
+      math.c: |
+        #include "math.h"
+        int calculate(int x) { return x * 2; }
+      main.c: |
+        #include "math.h"
+        int main() { return calculate(10); }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "calculate"
+
+  - id: function_pointer_typedef
+    files:
+      callback.h: |
+        typedef void (*Callback)(int status);
+    expected:
+      symbols:
+        - name: "Callback"
+          kind: type
+
+  - id: conditional_compilation
+    # tree-sitter 解析 #else 分支（未定义 DEBUG 时），debug_log 为宏
+    files:
+      platform.c: |
+        #ifdef DEBUG
+        void debug_log(const char* msg) {}
+        #else
+        #define debug_log(msg)
+        #endif
+    expected:
+      symbols:
+        - name: "debug_log"
+          kind: macro
+
+  - id: struct_with_function_pointer
+    files:
+      handler.c: |
+        typedef struct {
+            int (*process)(int);
+            void (*cleanup)(void);
+        } Handler;
+    expected:
+      symbols:
+        - name: "Handler"
+          kind: type
+
+  - id: multi_include
+    files:
+      defs.h: |
+        #define VERSION 2
+        typedef int Handle;
+      impl.c: |
+        #include "defs.h"
+        Handle create_handle() { return 0; }
+    expected:
+      symbols:
+        - name: "VERSION"
+          kind: macro
+        - name: "Handle"
+          kind: type
+        - name: "create_handle"
+          kind: function

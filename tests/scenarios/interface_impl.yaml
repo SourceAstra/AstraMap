@@ -1,0 +1,81 @@
+# 接口实现关系场景
+metadata:
+  language: multi
+  description: "验证接口定义与实现类的提取"
+  complexity: scenario
+  scip_required: false
+
+fixtures:
+  - id: go_interface_implementation
+    files:
+      go.mod: "module test\n"
+      shape.go: |
+        package main
+        type Shape interface { Area() float64 }
+        type Circle struct { R float64 }
+        func (c Circle) Area() float64 { return 3.14 * c.R * c.R }
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: interface
+        - name: "Circle"
+          kind: struct
+        - name: "Area"
+          kind: method
+
+  - id: java_interface_implementation
+    files:
+      Printable.java: |
+        public interface Printable { void print(); }
+      Report.java: |
+        public class Report implements Printable {
+            public void print() {}
+        }
+    expected:
+      symbols:
+        - name: "Printable"
+          kind: interface
+        - name: "Report"
+          kind: class
+        - name: "print"
+          kind: method
+
+  - id: typescript_interface_implementation
+    files:
+      package.json: |
+        {"name": "test"}
+      shapes.ts: |
+        interface Printable { print(): void }
+        class Report implements Printable {
+            print(): void {}
+        }
+    expected:
+      symbols:
+        - name: "Printable"
+          kind: interface
+        - name: "Report"
+          kind: class
+        - name: "print"
+          kind: method
+
+  - id: cpp_abstract_class
+    # 注意：.hpp 不被 C++ tree-sitter 索引，改用 .cpp
+    files:
+      shape.cpp: |
+        class Shape {
+        public:
+            virtual int area() = 0;
+        };
+        class Circle : public Shape {
+            int r;
+        public:
+            int area() { return 3 * r * r; }
+        };
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: class
+        - name: "Circle"
+          kind: class
+        - name: "area"
+          kind: function

@@ -1,0 +1,79 @@
+# Go 高级语义场景
+metadata:
+  language: go
+  description: "Go 跨文件调用、接口实现、嵌入、泛型"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      go.mod: "module test\n"
+      defs.go: |
+        package main
+        func Calculate(x int) int { return x * 2 }
+      usage.go: |
+        package main
+        func Use() int { return Calculate(10) }
+    expected:
+      symbols:
+        - name: "Calculate"
+          kind: function
+        - name: "Use"
+          kind: function
+      calls:
+        - caller: "Use"
+          callee: "Calculate"
+
+  - id: embedded_struct
+    files:
+      go.mod: "module test\n"
+      model.go: |
+        package main
+        type Base struct { ID int }
+        type Extended struct { Base; Name string }
+    expected:
+      symbols:
+        - name: "Base"
+          kind: struct
+        - name: "Extended"
+          kind: struct
+
+  - id: interface_satisfaction
+    files:
+      go.mod: "module test\n"
+      shape.go: |
+        package main
+        type Shape interface { Area() float64 }
+        type Circle struct { R float64 }
+        func (c Circle) Area() float64 { return 3.14 * c.R * c.R }
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: interface
+        - name: "Circle"
+          kind: struct
+        - name: "Area"
+          kind: method
+
+  - id: multiple_return_values
+    files:
+      go.mod: "module test\n"
+      io.go: |
+        package main
+        func ReadAll() ([]byte, error) { return nil, nil }
+    expected:
+      symbols:
+        - name: "ReadAll"
+          kind: function
+
+  - id: variadic_function
+    files:
+      go.mod: "module test\n"
+      sum.go: |
+        package main
+        func Sum(nums ...int) int { return 0 }
+    expected:
+      symbols:
+        - name: "Sum"
+          kind: function

@@ -1,0 +1,41 @@
+# C/C++ .h 头文件消歧场景
+metadata:
+  language: multi
+  description: "验证 .h 文件在纯 C 项目和含 C++ 项目中的语言归属"
+  complexity: scenario
+  scip_required: false
+
+fixtures:
+  - id: h_in_pure_c_project
+    files:
+      util.h: |
+        #ifndef UTIL_H
+        #define UTIL_H
+        int add(int a, int b);
+        #endif
+      main.c: |
+        #include "util.h"
+        int main() { return add(1, 2); }
+    expected:
+      symbols:
+        - name: "main"
+          kind: function
+
+  - id: h_in_cpp_project
+    # 已知限制：.h 文件在 C++ 项目中不被 tree-sitter 索引
+    # 因此 util.h 中的声明不会被提取，只有 main.cpp 中的定义会被提取
+    files:
+      util.h: |
+        #ifndef UTIL_H
+        #define UTIL_H
+        int add(int a, int b);
+        #endif
+      main.cpp: |
+        int add(int a, int b) { return a + b; }
+        int main() { return add(1, 2); }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+        - name: "main"
+          kind: function

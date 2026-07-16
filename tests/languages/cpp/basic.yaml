@@ -1,0 +1,101 @@
+# C++ 基础定义与调用提取
+metadata:
+  language: cpp
+  description: "C++ 函数、类、命名空间、模板、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: function_definition
+    files:
+      main.cpp: |
+        int add(int a, int b) { return a + b; }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: namespace_function
+    files:
+      main.cpp: |
+        namespace Math {
+          int abs(int n) { return n < 0 ? -n : n; }
+        }
+    expected:
+      symbols:
+        - name: "abs"
+          kind: function
+
+  - id: simple_call
+    files:
+      main.cpp: |
+        int add(int a, int b) { return a + b; }
+        int main() { return add(1, 2); }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "add"
+
+  - id: template_function
+    files:
+      main.cpp: |
+        template<typename T>
+        T max(T a, T b) { return a > b ? a : b; }
+    expected:
+      symbols:
+        - name: "max"
+          kind: function
+
+  - id: class_with_methods
+    files:
+      main.cpp: |
+        class Calculator {
+        public:
+          int add(int a, int b) { return a + b; }
+          int subtract(int a, int b) { return a - b; }
+        };
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "add"
+          kind: method
+        - name: "subtract"
+          kind: method
+
+  - id: enum_definition
+    files:
+      main.cpp: |
+        enum Color { RED, GREEN, BLUE };
+    expected:
+      symbols:
+        - name: "Color"
+          kind: enum
+
+  - id: struct_definition
+    files:
+      main.cpp: |
+        struct Record {
+          int id;
+        };
+    expected:
+      symbols:
+        - name: "Record"
+          kind: struct
+
+  - id: multiple_functions
+    files:
+      main.cpp: |
+        int max(int a, int b) { return a > b ? a : b; }
+        int min(int a, int b) { return a < b ? a : b; }
+    expected:
+      symbols:
+        - name: "max"
+          kind: function
+        - name: "min"
+          kind: function

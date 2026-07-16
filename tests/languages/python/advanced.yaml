@@ -1,0 +1,87 @@
+# Python 高级语义场景
+metadata:
+  language: python
+  description: "Python 跨文件调用、继承、生成器、属性"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      math_utils.py: |
+        def calculate(x):
+            return x * 2
+      app.py: |
+          from math_utils import calculate
+          def process():
+              return calculate(10)
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: class_inheritance
+    files:
+      model.py: |
+        class Animal:
+            def speak(self):
+                pass
+        class Dog(Animal):
+            def speak(self):
+                return "Woof"
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
+  - id: generator_function
+    files:
+      gen.py: |
+        def fibonacci(n):
+            a, b = 0, 1
+            for _ in range(n):
+                yield a
+                a, b = b, a + b
+    expected:
+      symbols:
+        - name: "fibonacci"
+          kind: function
+
+  - id: property_decorator
+    files:
+      model.py: |
+        class Circle:
+            def __init__(self, radius):
+                self._radius = radius
+            @property
+            def area(self):
+                return 3.14 * self._radius ** 2
+    expected:
+      symbols:
+        - name: "Circle"
+          kind: class
+        - name: "area"
+          kind: method
+
+  - id: context_manager
+    files:
+      ctx.py: |
+        class FileManager:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+    expected:
+      symbols:
+        - name: "FileManager"
+          kind: class
+        - name: "__enter__"
+          kind: method
+        - name: "__exit__"
+          kind: method

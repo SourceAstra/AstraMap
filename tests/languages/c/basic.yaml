@@ -1,0 +1,114 @@
+# C 基础定义与调用提取
+metadata:
+  language: c
+  description: "C 函数、结构体、宏、枚举、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: function_definition
+    files:
+      main.c: |
+        int add(int a, int b) {
+            return a + b;
+        }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: struct_definition
+    files:
+      main.c: |
+        typedef struct {
+            int x;
+            int y;
+        } Point;
+    expected:
+      symbols:
+        - name: "Point"
+          kind: type
+
+  - id: macro_definition
+    files:
+      main.c: |
+        #define MAX_SIZE 100
+        #define ADD(a, b) ((a) + (b))
+    expected:
+      symbols:
+        - name: "MAX_SIZE"
+          kind: macro
+        - name: "ADD"
+          kind: macro
+
+  - id: enum_definition
+    files:
+      main.c: |
+        enum Color { RED, GREEN, BLUE };
+    expected:
+      symbols:
+        - name: "Color"
+          kind: enum
+
+  - id: typedef_simple
+    files:
+      main.c: |
+        typedef int Handle;
+    expected:
+      symbols:
+        - name: "Handle"
+          kind: type
+
+  - id: simple_call
+    files:
+      main.c: |
+        int add(int a, int b) { return a + b; }
+        int main() { return add(1, 2); }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "add"
+
+  - id: object_macro
+    files:
+      main.c: |
+        #define VERSION "1.0"
+        #define PI 3.14
+    expected:
+      symbols:
+        - name: "VERSION"
+          kind: macro
+        - name: "PI"
+          kind: macro
+
+  - id: multi_function
+    files:
+      main.c: |
+        int max(int a, int b) { return a > b ? a : b; }
+        int min(int a, int b) { return a < b ? a : b; }
+        int clamp(int v, int lo, int hi) { return max(lo, min(v, hi)); }
+    expected:
+      symbols:
+        - name: "max"
+          kind: function
+        - name: "min"
+          kind: function
+        - name: "clamp"
+          kind: function
+
+  - id: typedef_struct_named
+    files:
+      main.c: |
+        struct Node {
+            int value;
+            struct Node *next;
+        };
+    expected:
+      symbols:
+        - name: "Node"
+          kind: struct

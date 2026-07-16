@@ -1,0 +1,84 @@
+# TypeScript 高级语义场景
+metadata:
+  language: typescript
+  description: "TypeScript 跨文件调用、泛型约束、命名空间"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      utils.ts: |
+        export function calculate(x: number): number { return x * 2 }
+      main.ts: |
+        import { calculate } from './utils'
+        function process(): number { return calculate(10) }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: generic_class
+    files:
+      container.ts: |
+        class Container<T> {
+            private value: T;
+            constructor(value: T) { this.value = value; }
+            get(): T { return this.value; }
+        }
+    expected:
+      symbols:
+        - name: "Container"
+          kind: class
+        - name: "get"
+          kind: method
+
+  - id: interface_implementation
+    files:
+      shapes.ts: |
+        interface Printable { print(): void }
+        class Report implements Printable {
+            print(): void { console.log("report") }
+        }
+    expected:
+      symbols:
+        - name: "Printable"
+          kind: interface
+        - name: "Report"
+          kind: class
+        - name: "print"
+          kind: method
+
+  - id: namespace_with_export
+    # tree-sitter 不提取 namespace 节点，但提取其中的函数和类
+    files:
+      ns.ts: |
+        namespace API {
+            export function fetch(url: string): void {}
+            export class Client {}
+        }
+    expected:
+      symbols:
+        - name: "fetch"
+          kind: function
+        - name: "Client"
+          kind: class
+
+  - id: class_with_method
+    # 替代 abstract_class（tree-sitter 不提取 abstract class 节点）
+    files:
+      base.ts: |
+        class Shape {
+            area(): number { return 0; }
+            describe(): string { return "shape" }
+        }
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: class
+        - name: "area"
+          kind: method
+        - name: "describe"
+          kind: method

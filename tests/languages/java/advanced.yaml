@@ -1,0 +1,100 @@
+# Java 高级语义场景
+metadata:
+  language: java
+  description: "Java 跨文件调用、继承、泛型、注解"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      Calculator.java: |
+        public class Calculator {
+            public int calculate(int x) { return x * 2; }
+        }
+      Main.java: |
+        public class Main {
+            public int run() {
+                Calculator c = new Calculator();
+                return c.calculate(10);
+            }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "calculate"
+          kind: method
+        - name: "Main"
+          kind: class
+        - name: "run"
+          kind: method
+      calls:
+        - caller: "run"
+          callee: "calculate"
+
+  - id: class_inheritance
+    files:
+      Animal.java: |
+        abstract class Animal {
+            public abstract String speak();
+        }
+        class Dog extends Animal {
+            public String speak() { return "Woof"; }
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
+  - id: generic_class
+    files:
+      Box.java: |
+        public class Box<T> {
+            private T value;
+            public void set(T value) { this.value = value; }
+            public T get() { return value; }
+        }
+    expected:
+      symbols:
+        - name: "Box"
+          kind: class
+        - name: "set"
+          kind: method
+        - name: "get"
+          kind: method
+
+  - id: interface_implementation
+    files:
+      Printable.java: |
+        interface Printable { void print(); }
+      Report.java: |
+        class Report implements Printable {
+            public void print() {}
+        }
+    expected:
+      symbols:
+        - name: "Printable"
+          kind: interface
+        - name: "Report"
+          kind: class
+        - name: "print"
+          kind: method
+
+  - id: method_overload
+    files:
+      Processor.java: |
+        public class Processor {
+            public int process(int x) { return x; }
+            public String process(String s) { return s; }
+        }
+    expected:
+      symbols:
+        - name: "Processor"
+          kind: class
+        - name: "process"
+          kind: method

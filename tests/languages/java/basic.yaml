@@ -1,0 +1,123 @@
+# Java 基础定义与调用提取
+metadata:
+  language: java
+  description: "Java 类、接口、方法、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: class_definition
+    files:
+      Point.java: |
+        public class Point {
+            private int x, y;
+            public Point(int x, int y) { this.x = x; this.y = y; }
+            public int distance() { return x*x + y*y; }
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "distance"
+          kind: method
+
+  - id: interface_definition
+    files:
+      Reader.java: |
+        public interface Reader { byte[] read(); }
+    expected:
+      symbols:
+        - name: "Reader"
+          kind: interface
+
+  - id: method_call
+    files:
+      Main.java: |
+        public class Main {
+            public static void main(String[] args) {
+                System.out.println("Hello");
+            }
+        }
+    expected:
+      symbols:
+        - name: "Main"
+          kind: class
+        - name: "main"
+          kind: method
+      calls:
+        - caller: "main"
+          callee: "println"
+
+  - id: inner_class
+    files:
+      Builder.java: |
+        public class Builder {
+            public static class Config {
+                int timeout;
+            }
+        }
+    expected:
+      symbols:
+        - name: "Builder"
+          kind: class
+        - name: "Config"
+          kind: class
+
+  - id: abstract_class
+    files:
+      Base.java: |
+        public abstract class Base {
+            public abstract void process();
+            public void init() {}
+        }
+    expected:
+      symbols:
+        - name: "Base"
+          kind: class
+        - name: "process"
+          kind: method
+        - name: "init"
+          kind: method
+
+  - id: static_method
+    files:
+      Utils.java: |
+        public class Utils {
+            public static int calculate(int x) { return x * 2; }
+        }
+    expected:
+      symbols:
+        - name: "Utils"
+          kind: class
+        - name: "calculate"
+          kind: method
+
+  - id: multiple_classes
+    files:
+      Animal.java: |
+        class Animal {
+            void speak() {}
+        }
+        class Dog extends Animal {
+            void speak() {}
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
+  - id: constructor
+    files:
+      Item.java: |
+        public class Item {
+            private String name;
+            public Item(String name) { this.name = name; }
+        }
+    expected:
+      symbols:
+        - name: "Item"
+          kind: class

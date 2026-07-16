@@ -1,0 +1,149 @@
+# Go 基础定义与调用提取
+metadata:
+  language: go
+  description: "Go 函数、方法、接口、结构体、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: func_declaration
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func add(a, b int) int { return a + b }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: method_declaration
+    files:
+      go.mod: "module test\n"
+      point.go: |
+        package main
+        type Point struct{ X, Y float64 }
+        func (p Point) Distance() float64 { return p.X*p.X + p.Y*p.Y }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+        - name: "Distance"
+          kind: method
+
+  - id: interface_definition
+    files:
+      go.mod: "module test\n"
+      writer.go: |
+        package main
+        type Writer interface { Write([]byte) (int, error) }
+    expected:
+      symbols:
+        - name: "Writer"
+          kind: interface
+
+  - id: struct_definition
+    files:
+      go.mod: "module test\n"
+      user.go: |
+        package main
+        type User struct { ID int; Name string }
+    expected:
+      symbols:
+        - name: "User"
+          kind: struct
+
+  - id: simple_call
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func add(a, b int) int { return a + b }
+        func main() { result := add(1, 2) }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "add"
+
+  - id: method_call
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type Point struct{ X, Y float64 }
+        func (p Point) Distance() float64 { return 0 }
+        func main() { p := Point{}; p.Distance() }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+        - name: "Distance"
+          kind: method
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "Distance"
+
+  - id: pointer_receiver_method
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type Counter struct{ N int }
+        func (c *Counter) Inc() { c.N++ }
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: struct
+        - name: "Inc"
+          kind: method
+
+  - id: func_multi_param
+    files:
+      go.mod: "module test\n"
+      calc.go: |
+        package main
+        func Calculate(input int, factor float64) float64 { return float64(input) * factor }
+    expected:
+      symbols:
+        - name: "Calculate"
+          kind: function
+
+  - id: multiple_functions
+    files:
+      go.mod: "module test\n"
+      math.go: |
+        package main
+        func Add(a, b int) int { return a + b }
+        func Subtract(a, b int) int { return a - b }
+    expected:
+      symbols:
+        - name: "Add"
+          kind: function
+        - name: "Subtract"
+          kind: function
+
+  - id: cross_file_call
+    files:
+      go.mod: "module test\n"
+      defs.go: |
+        package main
+        func Calculate(x int) int { return x * 2 }
+      usage.go: |
+        package main
+        func Use() int { return Calculate(10) }
+    expected:
+      symbols:
+        - name: "Calculate"
+          kind: function
+        - name: "Use"
+          kind: function
+      calls:
+        - caller: "Use"
+          callee: "Calculate"

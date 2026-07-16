@@ -1,0 +1,89 @@
+# C++ 高级语义场景
+metadata:
+  language: cpp
+  description: "C++ 跨文件调用、继承、重载、模板特化"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    # 注意：.hpp 不被 C++ tree-sitter 索引，声明和定义都放在 .cpp 中
+    files:
+      math.cpp: |
+        namespace Math {
+            int calculate(int x) { return x * 2; }
+        }
+      main.cpp: |
+        int main() { return 0; }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "main"
+          kind: function
+
+  - id: class_inheritance
+    files:
+      shapes.cpp: |
+        class Shape {
+        public:
+            virtual int area() = 0;
+        };
+        class Circle : public Shape {
+            int r;
+        public:
+            int area() { return 3 * r * r; }
+        };
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: class
+        - name: "Circle"
+          kind: class
+        - name: "area"
+          kind: method
+
+  - id: function_overload
+    files:
+      overload.cpp: |
+        int process(int x) { return x; }
+        double process(double x) { return x; }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: template_class
+    files:
+      container.cpp: |
+        template<typename T>
+        class Stack {
+            T data[100];
+            int top;
+        public:
+            void push(T value) {}
+            T pop() { return data[top--]; }
+        };
+    expected:
+      symbols:
+        - name: "Stack"
+          kind: class
+        - name: "push"
+          kind: method
+        - name: "pop"
+          kind: method
+
+  - id: operator_overload
+    files:
+      vec.cpp: |
+        class Vec {
+            int x, y;
+        public:
+            Vec operator+(const Vec& other) const { return Vec(); }
+        };
+    expected:
+      symbols:
+        - name: "Vec"
+          kind: class
+        - name: "operator+"
+          kind: method

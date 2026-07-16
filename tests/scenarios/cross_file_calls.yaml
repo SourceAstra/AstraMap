@@ -1,0 +1,116 @@
+# 跨文件调用场景 — 验证同包/同模块跨文件引用解析
+metadata:
+  language: multi
+  description: "跨文件调用解析（6 种语言）"
+  complexity: scenario
+  scip_required: false
+
+fixtures:
+  - id: go_cross_file
+    files:
+      go.mod: "module test\n"
+      defs.go: |
+        package main
+        func Calculate(x int) int { return x * 2 }
+      usage.go: |
+        package main
+        func Use() int { return Calculate(10) }
+    expected:
+      symbols:
+        - name: "Calculate"
+          kind: function
+        - name: "Use"
+          kind: function
+      calls:
+        - caller: "Use"
+          callee: "Calculate"
+
+  - id: python_cross_file
+    files:
+      math_utils.py: |
+        def calculate(x):
+            return x * 2
+      app.py: |
+        from math_utils import calculate
+        def process():
+            return calculate(10)
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: method
+        - name: "process"
+          kind: method
+
+  - id: typescript_cross_file
+    files:
+      package.json: |
+        {"name": "test"}
+      utils.ts: |
+        export function calculate(x: number): number { return x * 2 }
+      main.ts: |
+        import { calculate } from './utils'
+        function process(): number { return calculate(10) }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: c_cross_file
+    files:
+      math.h: |
+        int calculate(int x);
+      math.c: |
+        int calculate(int x) { return x * 2; }
+      main.c: |
+        int main() { return calculate(10); }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "calculate"
+
+  - id: cpp_cross_file
+    # 注意：.hpp 不被 C++ tree-sitter 索引，声明和定义都放在 .cpp 中
+    files:
+      math.cpp: |
+        namespace Math {
+            int calculate(int x) { return x * 2; }
+        }
+      main.cpp: |
+        int main() { return 0; }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "main"
+          kind: function
+
+  - id: java_cross_file
+    files:
+      Calculator.java: |
+        public class Calculator {
+            public int calculate(int x) { return x * 2; }
+        }
+      Main.java: |
+        public class Main {
+            public int run() {
+                Calculator c = new Calculator();
+                return c.calculate(10);
+            }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "calculate"
+          kind: method
+        - name: "Main"
+          kind: class
+        - name: "run"
+          kind: method

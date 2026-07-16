@@ -1,0 +1,138 @@
+# TypeScript 基础定义与调用提取
+metadata:
+  language: typescript
+  description: "TypeScript 类、接口、函数、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: interface_definition
+    files:
+      index.ts: |
+        interface User {
+          name: string;
+          age: number;
+        }
+    expected:
+      symbols:
+        - name: "User"
+          kind: interface
+
+  - id: class_definition
+    files:
+      index.ts: |
+        class Point {
+          x: number;
+          y: number;
+          distance(): number { return 0; }
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "distance"
+          kind: method
+
+  - id: function_declaration
+    files:
+      index.ts: |
+        function add(a: number, b: number): number {
+          return a + b;
+        }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: generic_function
+    files:
+      index.ts: |
+        function identity<T>(arg: T): T {
+          return arg;
+        }
+    expected:
+      symbols:
+        - name: "identity"
+          kind: function
+
+  - id: simple_call
+    files:
+      index.ts: |
+        function greet(name: string): string {
+          return "Hello, " + name;
+        }
+        function main(): void {
+          greet("world");
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+        - name: "main"
+          kind: function
+
+  - id: class_with_method_call
+    files:
+      index.ts: |
+        class Calculator {
+          add(a: number, b: number): number { return a + b; }
+          compute(): number { return this.add(1, 2); }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "add"
+          kind: method
+        - name: "compute"
+          kind: method
+
+  - id: export_function
+    files:
+      index.ts: |
+        export function parse(input: string): number {
+          return parseInt(input, 10);
+        }
+    expected:
+      symbols:
+        - name: "parse"
+          kind: function
+
+  - id: default_export_class
+    files:
+      index.ts: |
+        export default class App {
+          run(): void {}
+        }
+    expected:
+      symbols:
+        - name: "App"
+          kind: class
+
+  - id: multiple_interfaces
+    files:
+      index.ts: |
+        interface Serializable {
+          serialize(): string;
+        }
+        interface Comparable {
+          compareTo(other: any): number;
+        }
+    expected:
+      symbols:
+        - name: "Serializable"
+          kind: interface
+        - name: "Comparable"
+          kind: interface
+
+  - id: namespace_with_function
+    # tree-sitter 不提取 namespace 节点，但提取其中的函数
+    files:
+      index.ts: |
+        namespace Math {
+          export function abs(n: number): number { return n < 0 ? -n : n; }
+        }
+    expected:
+      symbols:
+        - name: "abs"
+          kind: function
