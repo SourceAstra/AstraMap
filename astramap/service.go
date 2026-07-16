@@ -52,11 +52,7 @@ var stopWords = map[string]bool{
 	"yours": true, "yourself": true, "yourselves": true,
 }
 
-var chStopWords = map[string]bool{
-	"的": true, "了": true, "和": true, "是": true, "在": true, "有": true, "个": true,
-	"到": true, "之": true, "与": true, "或": true, "及": true, "等": true, "去": true,
-	"层": true, "从": true, "链": true, "路": true, "径": true,
-}
+var chStopWords = map[string]bool{}
 
 func cleanQueryTerms(query string) []string {
 	re := regexp.MustCompile(`[a-zA-Z0-9_]+|[\p{Han}]`)
@@ -78,8 +74,8 @@ func cleanQueryTerms(query string) []string {
 	return clean
 }
 
-// ===== 共享查询服务层 =====
-// 所有查询逻辑的唯一实现，MCP handler 和 REST handler 均通过此层访问数据。
+// ===== Shared Query Service Layer =====
+// The single implementation of all query logic, accessed by both MCP handlers and REST handlers.
 
 // IndexStatus holds index health metrics.
 type IndexStatus struct {
@@ -1156,7 +1152,7 @@ func QueryTraceCTE(db *sqlx.DB, projectRoot string, startNodeID string, maxDepth
 	if err != nil {
 		err = db.Get(&startID, "SELECT id FROM astramap_nodes WHERE name = ? ORDER BY file_path, start_line LIMIT 1", startNodeID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("起始节点未找到: %s", startNodeID)
+			return nil, nil, fmt.Errorf("start node not found: %s", startNodeID)
 		}
 	}
 	startID = resolveCanonicalTraceStart(db, startID)
@@ -1196,7 +1192,7 @@ func QueryTraceCTE(db *sqlx.DB, projectRoot string, startNodeID string, maxDepth
 		return nil, nil, nil
 	}
 
-	// 3. 查询命中的 symbols (nodes)
+	// 3. Query matched symbols (nodes)
 	query, args, err := sqlx.In("SELECT * FROM astramap_nodes WHERE id IN (?)", nodeIDs)
 	if err != nil {
 		return nil, nil, err
@@ -1240,7 +1236,7 @@ func resolveCanonicalTraceStart(db *sqlx.DB, nodeID string) string {
 		return nodeID
 	}
 
-	// 使用覆盖索引快速查找同名同文件的候选符号，以边数最多者作为规范起点
+	// Use covering index to quickly find candidate symbols with the same name and file, using the one with the most edges as the canonical start
 	var candidates []string
 	if err := db.Select(&candidates, `
 		SELECT id FROM astramap_nodes
@@ -1250,7 +1246,7 @@ func resolveCanonicalTraceStart(db *sqlx.DB, nodeID string) string {
 		return nodeID
 	}
 
-	// 仅当存在多个同名候选时才计算度数
+	// Calculate degree only when multiple candidates with the same name exist
 	type idDegree struct {
 		ID     string `db:"id"`
 		Degree int    `db:"degree"`
