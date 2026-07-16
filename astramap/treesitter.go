@@ -1,7 +1,6 @@
 package astramap
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -9,17 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 	sitter "github.com/tree-sitter/go-tree-sitter"
-	c "github.com/tree-sitter/tree-sitter-c/bindings/go"
-	cpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
-	golang "github.com/tree-sitter/tree-sitter-go/bindings/go"
-	java "github.com/tree-sitter/tree-sitter-java/bindings/go"
-	python "github.com/tree-sitter/tree-sitter-python/bindings/go"
-	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 var (
@@ -32,6 +26,12 @@ var (
 // ParseFileIncremental parses a single file incrementally using Tree-sitter.
 // It extracts node definitions, contains edges, local calls, and file imports.
 func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*AstraMapEdge, string, error) {
+	profile := BuildProjectProfile(projectRoot, nil, StageTreeSitter)
+	return ParseFileIncrementalWithProfile(profile, filePath)
+}
+
+func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([]*AstraMapNode, []*AstraMapEdge, string, error) {
+	projectRoot := profile.ProjectRoot
 	absPath := filePath
 	if !filepath.IsAbs(absPath) {
 		absPath = filepath.Join(projectRoot, filePath)
@@ -58,50 +58,14 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
 	sourceLines := strings.Split(string(codeBytes), "\n")
 
-	// 2. Identify Language and load corresponding Tree-sitter grammar
-	ext := strings.ToLower(filepath.Ext(filePath))
-	lang := "unknown"
-	var langGrammar *sitter.Language
-	switch ext {
-	case ".go":
-		lang = "go"
-		langGrammar = sitter.NewLanguage(golang.Language())
-	case ".py":
-		lang = "python"
-		langGrammar = sitter.NewLanguage(python.Language())
-	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs":
-		lang = "typescript"
-		if ext == ".tsx" {
-			langGrammar = sitter.NewLanguage(typescript.LanguageTSX())
-		} else {
-			langGrammar = sitter.NewLanguage(typescript.LanguageTypescript())
-		}
-	case ".c":
-		lang = "c"
-		langGrammar = sitter.NewLanguage(c.Language())
-	case ".cpp", ".cc", ".cxx", ".hpp", ".hxx":
-		lang = "cpp"
-		langGrammar = sitter.NewLanguage(cpp.Language())
-	case ".h":
-		if hasProjectExtension(projectRoot, ".cpp", ".cc", ".cxx", ".hpp", ".hxx") {
-			lang = "cpp"
-			langGrammar = sitter.NewLanguage(cpp.Language())
-		} else {
-			lang = "c"
-			langGrammar = sitter.NewLanguage(c.Language())
-		}
-	case ".java":
-		lang = "java"
-		langGrammar = sitter.NewLanguage(java.Language())
-	}
-
-	if lang == "unknown" || langGrammar == nil {
+	selection, supported := ResolveLanguageWithProfile(profile, filePath)
+	if !supported {
 		return nil, nil, contentHash, nil
 	}
+	lang := selection.ID
 
-	// 3. Tree-sitter parsing
 	parser := sitter.NewParser()
-	parser.SetLanguage(langGrammar)
+	parser.SetLanguage(selection.Grammar)
 	defer parser.Close()
 
 	tree := parser.Parse(codeBytes, nil)
@@ -113,440 +77,483 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 	rootNode := tree.RootNode()
 	now := time.Now().Unix()
 
-	// 4. Traverse syntax tree to collect node definitions and 'contains' hierarchy edges
 	var nodes []*AstraMapNode
 	var edges []*AstraMapEdge
-	definedSymbols := make(map[string]*AstraMapNode)
+	definedByName := make(map[string][]*AstraMapNode)
+	definedByQName := make(map[string][]*AstraMapNode)
+	definedByID := make(map[string]*AstraMapNode)
+	var callCaptures []*sitter.Node
+	var importCaptures []*sitter.Node
 
-	var collect func(n *sitter.Node, container string)
-	collect = func(n *sitter.Node, container string) {
+	resolveLocalDefinition := func(name string) (*AstraMapNode, bool) {
+		candidates := definedByName[name]
+		if len(candidates) != 1 {
+			return nil, false
+		}
+		return candidates[0], true
+	}
+
+	resolveContainer := func(name string) (*AstraMapNode, bool) {
+		if candidates := definedByQName[name]; len(candidates) == 1 {
+			return candidates[0], true
+		}
+		return resolveLocalDefinition(name)
+	}
+
+	resolveCallDefinition := func(caller *AstraMapNode, name string) (*AstraMapNode, bool) {
+		if caller != nil {
+			qname := caller.QualifiedName
+			separator := LanguageQualifiedSeparator(lang)
+			if idx := strings.LastIndex(qname, separator); idx >= 0 {
+				if candidates := definedByQName[qname[:idx+len(separator)]+name]; len(candidates) == 1 {
+					return candidates[0], true
+				}
+			}
+		}
+		return resolveLocalDefinition(name)
+	}
+
+	type scopeFrame struct {
+		Kind  string
+		QName string
+	}
+	separator := LanguageQualifiedSeparator(lang)
+
+	var collect func(n *sitter.Node, scope scopeFrame)
+	collect = func(n *sitter.Node, scope scopeFrame) {
 		if n == nil {
 			return
 		}
 
-		nodeType := n.Kind()
-		nodeName := ""
-		nodeKind := ""
-		sig := ""
-		isDef := false
-
-		switch lang {
-		case "go":
-			if nodeType == "function_declaration" {
-				nodeKind = "function"
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				isDef = true
-			} else if nodeType == "method_declaration" {
-				nodeKind = "method"
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				receiver := ""
-				if recvNode := n.ChildByFieldName("receiver"); recvNode != nil {
-					recvText := nodeText(recvNode, codeBytes)
-					receiver = extractGoReceiverStruct(recvText)
-				}
-				if receiver != "" {
-					container = receiver
-				}
-				isDef = true
-			} else if nodeType == "type_spec" {
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				if typeNode := n.ChildByFieldName("type"); typeNode != nil {
-					if typeNode.Kind() == "struct_type" {
-						nodeKind = "struct"
-						isDef = true
-					} else if typeNode.Kind() == "interface_type" {
-						nodeKind = "interface"
-						isDef = true
-					}
-				}
-			}
-
-		case "python":
-			if nodeType == "class_definition" {
-				nodeKind = "class"
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				isDef = true
-			} else if nodeType == "function_definition" {
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				if container != "" {
-					nodeKind = "method"
-				} else {
-					nodeKind = "function"
-				}
-				isDef = true
-			}
-
-		case "typescript":
-			if nodeType == "class_declaration" || nodeType == "interface_declaration" {
-				if nodeType == "class_declaration" {
-					nodeKind = "class"
-				} else {
-					nodeKind = "interface"
-				}
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				isDef = true
-			} else if nodeType == "function_declaration" {
-				nodeKind = "function"
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				isDef = true
-			} else if nodeType == "method_definition" {
-				nodeKind = "method"
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				isDef = true
-			}
-
-		case "c", "cpp":
-			if nodeType == "type_definition" {
-				if declNode := n.ChildByFieldName("declarator"); declNode != nil {
-					nodeName = extractDeclaratorIdentifier(declNode, codeBytes)
-				}
-				typeNode := n.ChildByFieldName("type")
-				switch {
-				case containsNodeKind(typeNode, "class_specifier"):
-					nodeKind = "type"
-				case containsNodeKind(typeNode, "struct_specifier"):
-					nodeKind = "type"
-				case containsNodeKind(typeNode, "enum_specifier"):
-					nodeKind = "type"
-				default:
-					nodeKind = "type"
-				}
-				isDef = nodeName != ""
-			} else if nodeType == "class_specifier" || nodeType == "struct_specifier" || nodeType == "enum_specifier" {
-				if n.Parent() != nil && n.Parent().Kind() == "type_definition" {
-					isDef = false
-				} else {
-					if nodeType == "class_specifier" {
-						nodeKind = "class"
-					} else if nodeType == "enum_specifier" {
-						nodeKind = "enum"
-					} else {
-						nodeKind = "struct"
-					}
-					if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-						nodeName = nodeText(nameNode, codeBytes)
-					}
-					isDef = true
-				}
-			} else if nodeType == "function_definition" || nodeType == "declaration" {
-				declNode := n.ChildByFieldName("declarator")
-				isFuncDecl := false
-				if declNode != nil {
-					if containsNodeKind(declNode, "parameter_list") {
-						isFuncDecl = true
-						nodeName, container = extractCppFuncNameAndContainer(declNode, codeBytes)
-					}
-				}
-				if isFuncDecl {
-					if lang == "cpp" && container != "" {
-						nodeKind = "method"
-					} else {
-						nodeKind = "function"
-					}
-					isDef = true
-				}
-			} else if nodeType == "preproc_def" || nodeType == "preproc_function_def" {
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				nodeKind = "macro"
-				isDef = nodeName != ""
-			}
-
-		case "java":
-			if nodeType == "class_declaration" || nodeType == "interface_declaration" {
-				if nodeType == "class_declaration" {
-					nodeKind = "class"
-				} else {
-					nodeKind = "interface"
-				}
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				isDef = true
-			} else if nodeType == "method_declaration" {
-				nodeKind = "method"
-				if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-					nodeName = nodeText(nameNode, codeBytes)
-				}
-				isDef = true
-			}
+		nextScope := scope
+		if _, isCall := callExpressionFields(lang, n.Kind()); isCall {
+			callCaptures = append(callCaptures, n)
 		}
+		if isImportNode(lang, n.Kind()) {
+			importCaptures = append(importCaptures, n)
+		}
+		rule, isDefinition := definitionRule(lang, n.Kind())
+		if isDefinition {
+			record, ok := normalizeDefinition(DefinitionContext{
+				Node: n, Code: codeBytes, ScopeKind: scope.Kind, ScopeName: scope.QName,
+			}, rule)
+			if ok && record.Name != "" && record.Kind != "" {
+				container := record.Container
+				if container == "" {
+					container = scope.QName
+				}
+				qname := record.Name
+				if container != "" {
+					qname = container + separator + record.Name
+				}
 
-		nextContainer := container
-		if isDef && nodeName != "" && nodeKind != "" {
-			qname := nodeName
-			if container != "" {
-				if lang == "cpp" {
-					qname = container + "::" + nodeName
-				} else {
-					qname = container + "." + nodeName
+				sig := firstSignatureLine(n, codeBytes)
+				usn := fmt.Sprintf("%s:%s::%s%s", getLangPrefix(lang), relPath, qname, record.IdentitySuffix)
+				if _, exists := definedByID[usn]; exists {
+					usn = fmt.Sprintf("%s@%d", usn, int(n.StartPosition().Row)+1)
+				}
+
+				amNode := &AstraMapNode{
+					ID: usn, Kind: record.Kind, Name: record.Name, QualifiedName: qname,
+					FilePath: relPath, Language: lang,
+					StartLine: int(n.StartPosition().Row) + 1, EndLine: int(n.EndPosition().Row) + 1,
+					Signature: sig, Docstring: findLeadingComments(sourceLines, int(n.StartPosition().Row)+1),
+					Provenance: "tree-sitter", UpdatedAt: now,
+				}
+
+				nodes = append(nodes, amNode)
+				definedByID[usn] = amNode
+				definedByName[record.Name] = append(definedByName[record.Name], amNode)
+				definedByQName[qname] = append(definedByQName[qname], amNode)
+
+				parentID := fmt.Sprintf("file:%s", relPath)
+				if container != "" {
+					if parentNode, exists := resolveContainer(container); exists {
+						parentID = parentNode.ID
+					}
+				}
+				edges = append(edges, &AstraMapEdge{
+					Source: parentID, Target: usn, Kind: "contains", Provenance: "tree-sitter",
+				})
+
+				if record.Scope {
+					nextScope = scopeFrame{Kind: record.Kind, QName: qname}
 				}
 			}
-
-			sigLines := strings.Split(nodeText(n, codeBytes), "\n")
-			if len(sigLines) > 0 {
-				sig = strings.TrimSpace(sigLines[0])
-			}
-
-			usn := fmt.Sprintf("%s:%s::%s", getLangPrefix(lang), relPath, qname)
-			doc := ""
-			if len(sourceLines) > 0 {
-				doc = findLeadingComments(sourceLines, int(n.StartPosition().Row)+1)
-			}
-			amNode := &AstraMapNode{
-				ID:            usn,
-				Kind:          nodeKind,
-				Name:          nodeName,
-				QualifiedName: qname,
-				FilePath:      relPath,
-				Language:      lang,
-				StartLine:     int(n.StartPosition().Row) + 1,
-				EndLine:       int(n.EndPosition().Row) + 1,
-				Signature:     sig,
-				Docstring:     doc,
-				UpdatedAt:     now,
-			}
-
-			nodes = append(nodes, amNode)
-			definedSymbols[nodeName] = amNode
-
-			var parentID string
-			if container == "" {
-				parentID = fmt.Sprintf("file:%s", relPath)
-			} else {
-				if parentNode, exists := definedSymbols[container]; exists {
-					parentID = parentNode.ID
-				} else {
-					parentID = fmt.Sprintf("file:%s", relPath)
-				}
-			}
-			edges = append(edges, &AstraMapEdge{
-				Source:     parentID,
-				Target:     usn,
-				Kind:       "contains",
-				Provenance: "tree-sitter",
-			})
-
-			nextContainer = qname
 		}
 
 		for i := uint(0); i < n.ChildCount(); i++ {
-			collect(n.Child(i), nextContainer)
+			collect(n.Child(i), nextScope)
 		}
 	}
 
-	initialContainer := ""
-	if lang == "go" {
-		for i := uint(0); i < rootNode.ChildCount(); i++ {
-			child := rootNode.Child(i)
-			if child.Kind() == "package_clause" {
-				pkgText := strings.TrimSpace(nodeText(child, codeBytes))
-				if strings.HasPrefix(pkgText, "package ") {
-					initialContainer = strings.TrimSpace(strings.TrimPrefix(pkgText, "package "))
-				}
+	initialKind, initialName := initialLanguageScope(lang, filePath, rootNode, codeBytes)
+	collect(rootNode, scopeFrame{Kind: initialKind, QName: initialName})
+
+	for _, extra := range supplementalDefinitions(lang, codeBytes, sourceLines) {
+		if len(definedByName[extra.Name]) > 0 {
+			continue
+		}
+		usn := fmt.Sprintf("%s:%s::%s", getLangPrefix(lang), relPath, extra.Name)
+		amNode := &AstraMapNode{
+			ID: usn, Kind: extra.Kind, Name: extra.Name, QualifiedName: extra.Name,
+			FilePath: relPath, Language: lang, StartLine: extra.StartLine, EndLine: extra.EndLine,
+			Signature: extra.Signature, Docstring: extra.Docstring, Provenance: "tree-sitter", UpdatedAt: now,
+		}
+		nodes = append(nodes, amNode)
+		definedByID[usn] = amNode
+		definedByName[extra.Name] = append(definedByName[extra.Name], amNode)
+		definedByQName[extra.Name] = append(definedByQName[extra.Name], amNode)
+		edges = append(edges, &AstraMapEdge{
+			Source: fmt.Sprintf("file:%s", relPath), Target: usn, Kind: "contains", Provenance: "tree-sitter",
+		})
+	}
+
+	scopes := newCallableScopeIndex(nodes)
+
+	for _, callNode := range callCaptures {
+		fields, _ := callExpressionFields(lang, callNode.Kind())
+		var calleeNode *sitter.Node
+		for _, field := range fields {
+			if calleeNode = callNode.ChildByFieldName(field); calleeNode != nil {
 				break
 			}
 		}
-	} else if lang == "python" {
-		base := filepath.Base(filePath)
-		initialContainer = strings.TrimSuffix(base, filepath.Ext(base))
-	}
 
-	collect(rootNode, initialContainer)
-
-	if lang == "c" || lang == "cpp" {
-		// 仅捕获具有显式声明、定义、初始化或注册意图的大写宏
-		heuristicMacroRegex := regexp.MustCompile(`\b((?:(?:DECLARE|DEF|CREATE|IMPLEMENT)_[A-Z0-9_]+)|(?:[A-Z0-9_]+_(?:INIT|FUNC|REGISTER|ENTRY|HANDLER|CALLBACK)))\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)`)
-		inBlockComment := false
-		for lineIdx, line := range sourceLines {
-			trimmed := strings.TrimSpace(line)
-			// 1. 跳过块注释的边界以及行内注释行
-			if strings.HasPrefix(trimmed, "/*") {
-				inBlockComment = true
-			}
-			if inBlockComment {
-				if strings.Contains(trimmed, "*/") {
-					inBlockComment = false
-				}
-				continue
-			}
-			if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "*") {
-				continue // 过滤空行、单行注释、预处理宏定义本身以及块注释内部行
-			}
-
-			matches := heuristicMacroRegex.FindStringSubmatch(line)
-			if len(matches) == 3 {
-				macroName := matches[1]
-				symName := matches[2]
-
-				// 2. 检查匹配项左侧是否有单行注释或块注释标记
-				matchIdx := strings.Index(line, matches[0])
-				if matchIdx > 0 {
-					prefix := line[:matchIdx]
-					if strings.Contains(prefix, "//") || strings.Contains(prefix, "/*") {
-						continue
-					}
-				}
-
-				if _, exists := definedSymbols[symName]; !exists {
-					usn := fmt.Sprintf("%s:%s::%s", getLangPrefix(lang), relPath, symName)
-					amNode := &AstraMapNode{
-						ID:            usn,
-						Kind:          "function",
-						Name:          symName,
-						QualifiedName: symName,
-						FilePath:      relPath,
-						Language:      lang,
-						StartLine:     lineIdx + 1,
-						EndLine:       lineIdx + 1,
-						Signature:     strings.TrimSpace(line),
-						Docstring:     fmt.Sprintf("由宏 %s 隐式生成的函数定义", macroName),
-						UpdatedAt:     now,
-					}
-					nodes = append(nodes, amNode)
-					definedSymbols[symName] = amNode
-
-					parentID := fmt.Sprintf("file:%s", relPath)
-					edges = append(edges, &AstraMapEdge{
-						Source:     parentID,
-						Target:     usn,
-						Kind:       "contains",
-						Provenance: "tree-sitter",
-					})
-				}
-			}
-		}
-	}
-
-	// 5. Traverse AST to collect 'calls' inside the same file
-	getEnclosingFunc := func(line int) *AstraMapNode {
-		var matched *AstraMapNode
-		for _, node := range nodes {
-			if (node.Kind == "function" || node.Kind == "method") && line >= node.StartLine && line <= node.EndLine {
-				if matched == nil || (node.EndLine-node.StartLine < matched.EndLine-matched.StartLine) {
-					matched = node
-				}
-			}
-		}
-		return matched
-	}
-
-	var collectCalls func(n *sitter.Node)
-	collectCalls = func(n *sitter.Node) {
-		if n == nil {
-			return
-		}
-
-		nodeType := n.Kind()
-		isCall := false
-		var calleeNode *sitter.Node
-
-		switch lang {
-		case "go", "typescript", "c", "cpp":
-			if nodeType == "call_expression" {
-				isCall = true
-				calleeNode = n.ChildByFieldName("function")
-				if calleeNode == nil {
-					calleeNode = n.ChildByFieldName("expression")
-				}
-			}
-		case "python":
-			if nodeType == "call" {
-				isCall = true
-				calleeNode = n.ChildByFieldName("function")
-			}
-		case "java":
-			if nodeType == "method_invocation" {
-				isCall = true
-				calleeNode = n.ChildByFieldName("name")
-			}
-		}
-
-		if isCall && calleeNode != nil {
-			calleeName := extractCalleeShortName(calleeNode, codeBytes)
-			lineNum := int(n.StartPosition().Row) + 1
-
+		if calleeNode != nil {
+			calleeName := normalizeCallee(lang, calleeNode, codeBytes)
+			lineNum := int(callNode.StartPosition().Row) + 1
 			if calleeName != "" && !isKeyword(calleeName) {
-				callerNode := getEnclosingFunc(lineNum)
-				if callerNode != nil {
-					if targetNode, exists := definedSymbols[calleeName]; exists {
-						if targetNode.ID != callerNode.ID {
-							edges = append(edges, &AstraMapEdge{
-								Source:     callerNode.ID,
-								Target:     targetNode.ID,
-								Kind:       "calls",
-								Provenance: "tree-sitter",
-								Line:       lineNum,
-								Col:        int(n.StartPosition().Column) + 1,
-							})
-						}
-					} else {
+				if callerNode := scopes.Enclosing(lineNum); callerNode != nil {
+					targetID := externalCallTargetID(lang, calleeName)
+					if targetNode, exists := resolveCallDefinition(callerNode, calleeName); exists && targetNode.ID != callerNode.ID {
+						targetID = targetNode.ID
+					}
+					if targetID != callerNode.ID {
 						edges = append(edges, &AstraMapEdge{
-							Source:     callerNode.ID,
-							Target:     externalCallTargetID(lang, calleeName),
-							Kind:       "calls",
-							Provenance: "tree-sitter",
-							Line:       lineNum,
-							Col:        int(n.StartPosition().Column) + 1,
+							Source: callerNode.ID, Target: targetID, Kind: "calls", Provenance: "tree-sitter",
+							Line: lineNum, Col: int(callNode.StartPosition().Column) + 1,
 						})
 					}
 				}
 			}
 		}
-
-		for i := uint(0); i < n.ChildCount(); i++ {
-			collectCalls(n.Child(i))
-		}
 	}
 
-	collectCalls(rootNode)
-
-	// 6. Collect file imports edges
-	var collectImports func(n *sitter.Node)
-	collectImports = func(n *sitter.Node) {
-		if n == nil {
-			return
-		}
-		nodeType := n.Kind()
-		if nodeType == "import_spec" || nodeType == "import_statement" || nodeType == "import_from_statement" || nodeType == "preproc_include" {
-			impPath := normalizeImportText(nodeText(n, codeBytes))
-			if impPath != "" {
-				targetUSN := fmt.Sprintf("import:%s", impPath)
-				edges = append(edges, &AstraMapEdge{
-					Source:     fmt.Sprintf("file:%s", relPath),
-					Target:     targetUSN,
-					Kind:       "imports",
-					Provenance: "tree-sitter",
-				})
+	for _, importNode := range importCaptures {
+		for _, impPath := range importPaths(lang, importNode.Kind(), nodeText(importNode, codeBytes)) {
+			if impPath == "" {
+				continue
 			}
-		}
-		for i := uint(0); i < n.ChildCount(); i++ {
-			collectImports(n.Child(i))
+			edges = append(edges, &AstraMapEdge{
+				Source: fmt.Sprintf("file:%s", relPath), Target: fmt.Sprintf("import:%s", impPath),
+				Kind: "imports", Provenance: "tree-sitter",
+			})
 		}
 	}
-	collectImports(rootNode)
 
 	return nodes, edges, contentHash, nil
 }
 
+type callableInterval struct {
+	node   *AstraMapNode
+	maxEnd int
+	left   *callableInterval
+	right  *callableInterval
+}
+
+type callableScopeIndex struct {
+	root *callableInterval
+}
+
+func newCallableScopeIndex(nodes []*AstraMapNode) callableScopeIndex {
+	var callables []*AstraMapNode
+	for _, node := range nodes {
+		if node.Kind == "function" || node.Kind == "method" {
+			callables = append(callables, node)
+		}
+	}
+	sort.Slice(callables, func(i, j int) bool {
+		if callables[i].StartLine == callables[j].StartLine {
+			return callables[i].EndLine > callables[j].EndLine
+		}
+		return callables[i].StartLine < callables[j].StartLine
+	})
+	var build func([]*AstraMapNode) *callableInterval
+	build = func(items []*AstraMapNode) *callableInterval {
+		if len(items) == 0 {
+			return nil
+		}
+		mid := len(items) / 2
+		root := &callableInterval{node: items[mid], maxEnd: items[mid].EndLine}
+		root.left = build(items[:mid])
+		root.right = build(items[mid+1:])
+		if root.left != nil && root.left.maxEnd > root.maxEnd {
+			root.maxEnd = root.left.maxEnd
+		}
+		if root.right != nil && root.right.maxEnd > root.maxEnd {
+			root.maxEnd = root.right.maxEnd
+		}
+		return root
+	}
+	return callableScopeIndex{root: build(callables)}
+}
+
+func (idx callableScopeIndex) Enclosing(line int) *AstraMapNode {
+	var matched *AstraMapNode
+	var visit func(*callableInterval)
+	visit = func(current *callableInterval) {
+		if current == nil || current.maxEnd < line {
+			return
+		}
+		if current.left != nil && current.left.maxEnd >= line {
+			visit(current.left)
+		}
+		node := current.node
+		if node.StartLine <= line && line <= node.EndLine {
+			if matched == nil || node.EndLine-node.StartLine < matched.EndLine-matched.StartLine {
+				matched = node
+			}
+		}
+		if node.StartLine <= line {
+			visit(current.right)
+		}
+	}
+	visit(idx.root)
+	return matched
+}
+
 // ===== Tree-sitter Helper Functions =====
+
+func normalizeDefinition(ctx DefinitionContext, rule DefinitionRule) (DefinitionRecord, bool) {
+	if rule.Normalizer != nil {
+		return rule.Normalizer(ctx, rule)
+	}
+	if ctx.Node == nil {
+		return DefinitionRecord{}, false
+	}
+	nameNode := ctx.Node.ChildByFieldName(rule.NameField)
+	if nameNode == nil {
+		return DefinitionRecord{}, false
+	}
+	name := strings.TrimSpace(nodeText(nameNode, ctx.Code))
+	return DefinitionRecord{
+		Name: name, Kind: rule.Kind, Scope: rule.Scope, Callable: rule.Callable,
+	}, name != "" && rule.Kind != ""
+}
+
+func firstSignatureLine(node *sitter.Node, code []byte) string {
+	if node == nil {
+		return ""
+	}
+	lines := strings.Split(nodeText(node, code), "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(lines[0])
+}
+
+func normalizeGoMethodDefinition(ctx DefinitionContext, rule DefinitionRule) (DefinitionRecord, bool) {
+	record, ok := normalizeDefinition(ctx, DefinitionRule{
+		Kind: rule.Kind, NameField: rule.NameField, Scope: rule.Scope, Callable: rule.Callable,
+	})
+	if !ok {
+		return DefinitionRecord{}, false
+	}
+	if receiverNode := ctx.Node.ChildByFieldName("receiver"); receiverNode != nil {
+		receiver := extractGoReceiverStruct(nodeText(receiverNode, ctx.Code))
+		if receiver != "" {
+			record.Container = receiver
+			if ctx.ScopeName != "" {
+				record.Container = ctx.ScopeName + "." + receiver
+			}
+		}
+	}
+	return record, true
+}
+
+func normalizeGoTypeDefinition(ctx DefinitionContext, rule DefinitionRule) (DefinitionRecord, bool) {
+	nameNode := ctx.Node.ChildByFieldName("name")
+	typeNode := ctx.Node.ChildByFieldName("type")
+	if nameNode == nil || typeNode == nil {
+		return DefinitionRecord{}, false
+	}
+	kind := "type"
+	scope := false
+	switch typeNode.Kind() {
+	case "struct_type":
+		kind, scope = "struct", true
+	case "interface_type":
+		kind, scope = "interface", true
+	}
+	return DefinitionRecord{
+		Name: strings.TrimSpace(nodeText(nameNode, ctx.Code)), Kind: kind, Scope: scope,
+	}, true
+}
+
+func normalizePythonFunctionDefinition(ctx DefinitionContext, rule DefinitionRule) (DefinitionRecord, bool) {
+	record, ok := normalizeDefinition(ctx, DefinitionRule{
+		Kind: "function", NameField: rule.NameField, Scope: true, Callable: true,
+	})
+	if ok && ctx.ScopeKind == "class" {
+		record.Kind = "method"
+	}
+	return record, ok
+}
+
+func normalizeScriptLexicalDefinition(ctx DefinitionContext, _ DefinitionRule) (DefinitionRecord, bool) {
+	declarator := findDescendantByKind(ctx.Node, "variable_declarator")
+	if declarator == nil {
+		return DefinitionRecord{}, false
+	}
+	value := declarator.ChildByFieldName("value")
+	if value == nil || (value.Kind() != "arrow_function" && value.Kind() != "function_expression") {
+		return DefinitionRecord{}, false
+	}
+	nameNode := declarator.ChildByFieldName("name")
+	if nameNode == nil {
+		return DefinitionRecord{}, false
+	}
+	kind := "function"
+	if ctx.ScopeKind == "class" {
+		kind = "method"
+	}
+	return DefinitionRecord{
+		Name: strings.TrimSpace(nodeText(nameNode, ctx.Code)), Kind: kind, Scope: true, Callable: true,
+	}, true
+}
+
+func normalizeCTypeDefinition(ctx DefinitionContext, _ DefinitionRule) (DefinitionRecord, bool) {
+	declarator := ctx.Node.ChildByFieldName("declarator")
+	if declarator == nil {
+		return DefinitionRecord{}, false
+	}
+	return DefinitionRecord{
+		Name: extractDeclaratorIdentifier(declarator, ctx.Code), Kind: "type",
+	}, true
+}
+
+func normalizeStandaloneCTypeDefinition(ctx DefinitionContext, rule DefinitionRule) (DefinitionRecord, bool) {
+	if parent := ctx.Node.Parent(); parent != nil && parent.Kind() == "type_definition" {
+		return DefinitionRecord{}, false
+	}
+	return normalizeDefinition(ctx, DefinitionRule{
+		Kind: rule.Kind, NameField: rule.NameField, Scope: true,
+	})
+}
+
+func normalizeCFunctionDefinition(ctx DefinitionContext, rule DefinitionRule) (DefinitionRecord, bool) {
+	declarator := ctx.Node.ChildByFieldName("declarator")
+	if declarator == nil || !containsNodeKind(declarator, "parameter_list") {
+		return DefinitionRecord{}, false
+	}
+	name, container := extractCppFuncNameAndContainer(declarator, ctx.Code)
+	if name == "" {
+		return DefinitionRecord{}, false
+	}
+	kind := rule.Kind
+	if container != "" || ctx.ScopeKind == "class" || ctx.ScopeKind == "struct" {
+		kind = "method"
+	}
+	if container == "" {
+		container = ctx.ScopeName
+	} else if ctx.ScopeKind == "namespace" && ctx.ScopeName != "" && !strings.HasPrefix(container, ctx.ScopeName+"::") {
+		container = ctx.ScopeName + "::" + container
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(nodeText(declarator, ctx.Code))))
+	return DefinitionRecord{
+		Name: name, Kind: kind, Container: container, Scope: true, Callable: true,
+		IdentitySuffix: fmt.Sprintf("~%x", sum[:6]),
+	}, true
+}
+
+func goInitialScope(_ string, root *sitter.Node, code []byte) (string, string) {
+	if root == nil {
+		return "", ""
+	}
+	for i := uint(0); i < root.ChildCount(); i++ {
+		child := root.Child(i)
+		if child.Kind() != "package_clause" {
+			continue
+		}
+		value := strings.TrimSpace(nodeText(child, code))
+		return "module", strings.TrimSpace(strings.TrimPrefix(value, "package "))
+	}
+	return "", ""
+}
+
+func moduleInitialScope(filePath string, _ *sitter.Node, _ []byte) (string, string) {
+	base := filepath.Base(filePath)
+	return "module", strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+func javaInitialScope(_ string, root *sitter.Node, code []byte) (string, string) {
+	if root == nil {
+		return "", ""
+	}
+	for i := uint(0); i < root.ChildCount(); i++ {
+		child := root.Child(i)
+		if child.Kind() != "package_declaration" {
+			continue
+		}
+		value := strings.TrimSpace(nodeText(child, code))
+		value = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "package"), ";"))
+		return "module", value
+	}
+	return "", ""
+}
+
+func supplementCMacroDefinitions(_ []byte, lines []string) []SupplementDefinition {
+	pattern := regexp.MustCompile(`\b((?:(?:DECLARE|DEF|CREATE|IMPLEMENT)_[A-Z0-9_]+)|(?:[A-Z0-9_]+_(?:INIT|FUNC|REGISTER|ENTRY|HANDLER|CALLBACK)))\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)`)
+	var result []SupplementDefinition
+	inBlockComment := false
+	for lineIndex, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "/*") {
+			inBlockComment = true
+		}
+		if inBlockComment {
+			if strings.Contains(trimmed, "*/") {
+				inBlockComment = false
+			}
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "*") {
+			continue
+		}
+		match := pattern.FindStringSubmatch(line)
+		if len(match) != 3 {
+			continue
+		}
+		if matchIndex := strings.Index(line, match[0]); matchIndex > 0 {
+			prefix := line[:matchIndex]
+			if strings.Contains(prefix, "//") || strings.Contains(prefix, "/*") {
+				continue
+			}
+		}
+		result = append(result, SupplementDefinition{
+			Name: match[2], Kind: "function", Signature: trimmed,
+			Docstring: fmt.Sprintf("由宏 %s 隐式生成的函数定义", match[1]),
+			StartLine: lineIndex + 1, EndLine: lineIndex + 1,
+		})
+	}
+	return result
+}
+
+func findDescendantByKind(node *sitter.Node, kind string) *sitter.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Kind() == kind {
+		return node
+	}
+	for i := uint(0); i < node.ChildCount(); i++ {
+		if found := findDescendantByKind(node.Child(i), kind); found != nil {
+			return found
+		}
+	}
+	return nil
+}
 
 func extractGoReceiverStruct(recv string) string {
 	recv = strings.Trim(recv, "()")
@@ -663,54 +670,7 @@ func containsNodeKind(n *sitter.Node, kind string) bool {
 }
 
 func getLangPrefix(lang string) string {
-	switch lang {
-	case "c":
-		return "c"
-	case "go":
-		return "go"
-	case "python":
-		return "py"
-	case "typescript":
-		return "ts"
-	case "cpp":
-		return "cxx"
-	case "java":
-		return "java"
-	}
-	return "unknown"
-}
-
-func normalizeImportText(s string) string {
-	s = strings.TrimSpace(s)
-	for _, prefix := range []string{"#include", "import", "from"} {
-		s = strings.TrimSpace(strings.TrimPrefix(s, prefix))
-	}
-	s = strings.Trim(s, `"'<> `)
-	return s
-}
-
-func hasProjectExtension(projectRoot string, extensions ...string) bool {
-	wanted := make(map[string]struct{}, len(extensions))
-	for _, ext := range extensions {
-		wanted[ext] = struct{}{}
-	}
-	found := false
-	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil || found {
-			return nil
-		}
-		if info.IsDir() {
-			if hasHiddenSegment(info.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if _, ok := wanted[strings.ToLower(filepath.Ext(path))]; ok {
-			found = true
-		}
-		return nil
-	})
-	return found
+	return LanguageIDPrefix(lang)
 }
 
 func nodeText(n *sitter.Node, code []byte) string {
@@ -837,6 +797,31 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 		}
 	}
 
+	type preparedFile struct {
+		path  string
+		lines []string
+		funcs []funcNode
+	}
+	prepared := make([]preparedFile, 0, len(files))
+	for _, fp := range files {
+		if !filter.Allows(fp, StageTreeSitter) {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(projectRoot, fp))
+		if readErr != nil {
+			continue
+		}
+		var localFuncs []funcNode
+		if selectErr := db.Select(&localFuncs, "SELECT id, start_line, end_line FROM astramap_nodes WHERE file_path = ? AND kind IN ('function', 'method')", fp); selectErr != nil {
+			return fmt.Errorf("query callable ranges for %s: %w", fp, selectErr)
+		}
+		prepared = append(prepared, preparedFile{
+			path:  fp,
+			lines: strings.Split(string(data), "\n"),
+			funcs: localFuncs,
+		})
+	}
+
 	tx, err := db.Beginx()
 	if err != nil {
 		return err
@@ -859,10 +844,8 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 	}
 	defer insertStmt.Close()
 
-	for _, fp := range files {
-		if !filter.Allows(fp, StageTreeSitter) {
-			continue
-		}
+	for _, preparedFile := range prepared {
+		fp := preparedFile.path
 		if len(changedFiles) > 0 {
 			_, err = tx.Exec(`
 				DELETE FROM astramap_edges
@@ -878,27 +861,8 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 			}
 		}
 
-		absPath := filepath.Join(projectRoot, fp)
-		file, err := os.Open(absPath)
-		if err != nil {
-			continue
-		}
-
-		var lines []string
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-		}
-		file.Close()
-
-		var localFuncs []funcNode
-		err = tx.Select(&localFuncs, "SELECT id, start_line, end_line FROM astramap_nodes WHERE file_path = ? AND kind IN ('function', 'method')", fp)
-		if err != nil {
-			continue
-		}
-
 		inMultiLineComment := false
-		for i, line := range lines {
+		for i, line := range preparedFile.lines {
 			lineNum := i + 1
 			trimmed := strings.TrimSpace(line)
 
@@ -928,7 +892,7 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 
 			var callerID string
 			callerSpan := 0
-			for _, lf := range localFuncs {
+			for _, lf := range preparedFile.funcs {
 				if lineNum >= lf.StartLine && lineNum <= lf.EndLine {
 					span := lf.EndLine - lf.StartLine
 					if callerID == "" || span < callerSpan {
