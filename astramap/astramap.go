@@ -19,7 +19,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ===== AstraMap 日志辅助 (输出到 Stderr 不污染 stdio MCP 通道) =====
+// ===== AstraMap Log Helpers (Output to Stderr so as not to pollute stdio MCP channel) =====
 
 var quietLogging bool
 
@@ -38,7 +38,7 @@ func logError(format string, v ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[ERROR] "+format+"\n", v...)
 }
 
-// ===== AstraMap 核心数据模型 =====
+// ===== AstraMap Core Data Model =====
 
 type AstraMapNode struct {
 	ID            string `db:"id" json:"id"`
@@ -56,6 +56,7 @@ type AstraMapNode struct {
 	Visibility    string `db:"visibility" json:"visibility,omitempty"`
 	ReturnType    string `db:"return_type" json:"returnType,omitempty"`
 	IsExported    int    `db:"is_exported" json:"isExported"`
+	Provenance    string `db:"provenance" json:"provenance,omitempty"`
 	UpdatedAt     int64  `db:"updated_at" json:"updatedAt"`
 }
 
@@ -82,27 +83,54 @@ type AstraMapFile struct {
 	Errors       string `db:"errors" json:"errors,omitempty"`
 }
 
-// ===== SCIP 索引导入器 =====
+// ===== SCIP Index Importer =====
 
-// ImportScipIndexToAstraMap 解析 SCIP 索引并全量同步到 SQLite 的 AstraMap 表中
-func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error {
-	logInfo("ImportScipIndexToAstraMap: 开始导入 SCIP 索引: %s", scipPath)
-	logInfo("ImportScipIndexToAstraMap: 正在载入中，请稍后......")
-	filter, err := LoadIndexFilter(projectRoot)
-	if err != nil {
-		return fmt.Errorf("读取 AstraMap 配置失败: %w", err)
-	}
+func ValidateScipIndexFile(scipPath string) error {
 	data, err := os.ReadFile(scipPath)
 	if err != nil {
-		return fmt.Errorf("读取 SCIP 索引文件失败: %w", err)
+		return fmt.Errorf("failed to read SCIP index file: %w", err)
 	}
-
 	var index scip.Index
 	if err := proto.Unmarshal(data, &index); err != nil {
-		return fmt.Errorf("Protobuf 反序列化失败: %w", err)
+		return fmt.Errorf("SCIP Protobuf deserialization failed: %w", err)
+	}
+	if len(index.Documents) == 0 {
+		return fmt.Errorf("SCIP index contains no documents")
+	}
+	return nil
+}
+
+func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error {
+	return ImportScipIndexesToAstraMap(db, []string{scipPath}, projectRoot)
+}
+
+// ImportScipIndexesToAstraMap parses every provider output first, then replaces
+// the SCIP provenance in one transaction. No provider can erase another one.
+func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot string) error {
+	if len(scipPaths) == 0 {
+		return nil
+	}
+	logInfo("ImportScipIndexesToAstraMap: Starting batch import of %d SCIP indexes", len(scipPaths))
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return fmt.Errorf("failed to read AstraMap config: %w", err)
+	}
+	profile := BuildProjectProfile(projectRoot, filter, StageScip)
+	var index scip.Index
+	for _, scipPath := range scipPaths {
+		data, readErr := os.ReadFile(scipPath)
+		if readErr != nil {
+			return fmt.Errorf("failed to read SCIP index file %s: %w", scipPath, readErr)
+		}
+		var providerIndex scip.Index
+		if unmarshalErr := proto.Unmarshal(data, &providerIndex); unmarshalErr != nil {
+			return fmt.Errorf("SCIP Protobuf deserialization failed %s: %w", scipPath, unmarshalErr)
+		}
+		index.Documents = append(index.Documents, providerIndex.Documents...)
+		index.ExternalSymbols = append(index.ExternalSymbols, providerIndex.ExternalSymbols...)
 	}
 
-	// 1. 缓存 SymbolInformation 以进行富文本填充
+	// 1. Cache SymbolInformation for rich text enrichment
 	scipSymMap := make(map[string]*scip.SymbolInformation)
 	for _, extSym := range index.ExternalSymbols {
 		scipSymMap[extSym.Symbol] = extSym
@@ -146,7 +174,7 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 		}
 	}
 
-	// 2. 遍历 Documents 提取节点和边
+	// 2. Traverse Documents to extract nodes and edges
 	for _, doc := range index.Documents {
 		relPath := doc.RelativePath
 		if strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
@@ -155,10 +183,10 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 		if !filter.Allows(relPath, StageScip) {
 			continue
 		}
-		docLang := normalizeLanguage(doc.Language, relPath)
+		docLang := normalizeLanguage(profile, doc.Language, relPath)
 		fileLanguages[relPath] = docLang
 
-		// 排序 occurrences 从而计算精确的函数 end_line
+		// Sort occurrences to compute precise function end_line
 		type defInfo struct {
 			occ       *scip.Occurrence
 			startLine int
@@ -180,8 +208,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			return defs[i].startLine < defs[j].startLine
 		})
 
-		// 第一遍：创建节点
+		// First pass: Create nodes
 		scipToUsn := make(map[string]string)
+		var documentNodes []*AstraMapNode
 		sourceLines := readSourceLinesBestEffort(projectRoot, relPath)
 		for idx, d := range defs {
 			occ := d.occ
@@ -194,9 +223,9 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			}
 
 			startLine := d.startLine
-			endLine := startLine + 4 // 默认估算值
+			endLine := startLine + 4 // Default estimate
 
-			// 获取本文件下一个定义起始行作为 endLine
+			// Get next definition start line in the file as endLine
 			if idx+1 < len(defs) {
 				endLine = defs[idx+1].startLine - 1
 			}
@@ -216,7 +245,7 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				endCol = int(occ.Range[3]) + 1
 			}
 
-			// 获取富文本信息
+			// Get rich text information
 			docstring := ""
 			signature := ""
 			visibility := "public"
@@ -235,23 +264,11 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				}
 			}
 
-			if signature == "" && (docLang == "c" || docLang == "cpp") && len(sourceLines) >= startLine && startLine > 0 {
-				signature = strings.TrimSpace(sourceLines[startLine-1])
-			}
-
 			if docstring == "" && len(sourceLines) > 0 {
 				docstring = findLeadingComments(sourceLines, startLine)
 			}
 
-			// isExported: Go 语言按首字母大写判断; 其他语言默认 0
-			if docLang == "go" {
-				r, _ := utf8.DecodeRuneInString(info.name)
-				if r != utf8.RuneError && unicode.IsUpper(r) {
-					isExported = 1
-				}
-			}
-
-			// 格式化 QualifiedName
+			// Format QualifiedName
 			qname := info.name
 			parts := strings.Split(occ.Symbol, " ")
 			if len(parts) > 0 {
@@ -263,20 +280,15 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				qname = strings.ReplaceAll(qname, "`", "")
 			}
 
-			// 缩短超长 ID 保证物理主键稳定性
+			// Shorten long ID to ensure physical primary key stability
 			usn := occ.Symbol
 			if len(usn) > 200 {
 				usn = fmt.Sprintf("scip:%s::%s", relPath, info.name)
 			}
 
-			nodeKind := info.symType
-			if docLang == "c" || docLang == "cpp" {
-				nodeKind = normalizeCDeclarationKind(nodeKind, signature)
-			}
-
 			node := &AstraMapNode{
 				ID:            usn,
-				Kind:          nodeKind,
+				Kind:          info.symType,
 				Name:          info.name,
 				QualifiedName: qname,
 				FilePath:      relPath,
@@ -292,13 +304,17 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				IsExported:    isExported,
 				UpdatedAt:     now,
 			}
+			normalizeSemanticNode(docLang, node, occ.Symbol, sourceLines)
 			nodes = append(nodes, node)
+			documentNodes = append(documentNodes, node)
 			fileNodeCounts[relPath]++
 			scipToUsn[occ.Symbol] = usn
 			globalScipToUsn[occ.Symbol] = usn
 		}
 
-		// 第二遍：创建边 (调用边)
+		documentScopes := newCallableScopeIndex(documentNodes)
+
+		// Second pass: Create edges (call edges)
 		for _, occ := range doc.Occurrences {
 			if occ.Symbol == "" || len(occ.Range) == 0 {
 				continue
@@ -318,19 +334,11 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 				continue
 			}
 
-			// 找到包围该 Occurrence 的 Caller 函数
-			callerUSN := ""
-			for _, node := range nodes {
-				if node.FilePath == relPath && (node.Kind == "function" || node.Kind == "method") &&
-					occLine >= node.StartLine && occLine <= node.EndLine {
-					callerUSN = node.ID
-					break
-				}
-			}
-
-			if callerUSN == "" {
+			callerNode := documentScopes.Enclosing(occLine)
+			if callerNode == nil {
 				continue
 			}
+			callerUSN := callerNode.ID
 
 			targetUSN := scipToUsn[occ.Symbol]
 			if targetUSN == "" {
@@ -354,36 +362,26 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			})
 		}
 	}
-	logInfo("ImportScipIndexToAstraMap: 正在写入索引，请稍后......")
+	logInfo("ImportScipIndexToAstraMap: Writing index, please wait...")
 
-	// 3. 执行数据库批量写入 (Transaction)
+	// 3. Perform database batch write (Transaction)
 	tx, err := db.Beginx()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// 清理该项目下旧的 SCIP 数据
+	// Replace symmetrically by provenance, leaving recoverable Tree-sitter nodes untouched.
 	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'scip'")
-	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE id LIKE 'scip%' OR id LIKE 'go:%' OR id LIKE 'cxx:%'")
-	conflictSeen := make(map[string]bool)
-	for _, n := range nodes {
-		key := n.FilePath + "\x00" + n.Name
-		if conflictSeen[key] {
-			continue
-		}
-		conflictSeen[key] = true
-		_, _ = tx.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND name = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND name = ? AND id NOT LIKE 'external%')", n.FilePath, n.Name, n.FilePath, n.Name)
-		_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND name = ? AND id NOT LIKE 'external%'", n.FilePath, n.Name)
-	}
+	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE provenance = 'scip' AND kind != 'external'")
 
-	// 批量插入 Nodes
+	// Batch insert Nodes
 	nodeStmt, err := tx.Preparex(`
 		INSERT INTO astramap_nodes (
 			id, kind, name, qualified_name, file_path, language,
 			start_line, end_line, start_column, end_column,
-			signature, docstring, visibility, return_type, is_exported, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			signature, docstring, visibility, return_type, is_exported, provenance, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			kind=excluded.kind,
 			name=excluded.name,
@@ -392,6 +390,7 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 			end_line=excluded.end_line,
 			signature=excluded.signature,
 			docstring=excluded.docstring,
+			provenance=excluded.provenance,
 			updated_at=excluded.updated_at
 	`)
 	if err != nil {
@@ -403,10 +402,10 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 		_, err = nodeStmt.Exec(
 			n.ID, n.Kind, n.Name, n.QualifiedName, n.FilePath, n.Language,
 			n.StartLine, n.EndLine, n.StartColumn, n.EndColumn,
-			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, n.UpdatedAt,
+			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, "scip", n.UpdatedAt,
 		)
 		if err != nil {
-			return fmt.Errorf("插入节点失败 (%s): %w", n.ID, err)
+			return fmt.Errorf("failed to insert node (%s): %w", n.ID, err)
 		}
 	}
 
@@ -439,20 +438,20 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 		_, _ = fileStmt.Exec(relPath, contentHash, lang, size, modifiedAt, now, fileNodeCounts[relPath])
 	}
 
-	// 插入 external: 占位节点（FK 约束要求边目标必须存在于 nodes 表）
+	// Insert external: placeholder nodes (FK constraint requires edge targets to exist in nodes table)
 	externalSeen := make(map[string]bool)
 	for _, e := range edges {
 		if strings.HasPrefix(e.Target, "external:") && !externalSeen[e.Target] {
 			externalSeen[e.Target] = true
 			name := e.Target[len("external:"):]
 			_, _ = tx.Exec(`INSERT OR IGNORE INTO astramap_nodes
-				(id, kind, name, qualified_name, file_path, language, is_exported, updated_at)
-				VALUES (?, 'external', ?, ?, '', '', 0, ?)`,
+				(id, kind, name, qualified_name, file_path, language, is_exported, provenance, updated_at)
+				VALUES (?, 'external', ?, ?, '', '', 0, 'scip', ?)`,
 				e.Target, name, name, time.Now().Unix())
 		}
 	}
 
-	// 批量插入 Edges
+	// Batch insert Edges
 	edgeStmt, err := tx.Preparex(`
 		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, line, col, metadata)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -465,16 +464,23 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 	for _, e := range edges {
 		_, err = edgeStmt.Exec(e.Source, e.Target, e.Kind, e.Provenance, e.Line, e.Col, e.Metadata)
 		if err != nil {
-			return fmt.Errorf("插入边失败 (%s -> %s): %w", e.Source, e.Target, err)
+			return fmt.Errorf("failed to insert edge (%s -> %s): %w", e.Source, e.Target, err)
 		}
 	}
+	_, _ = tx.Exec(`
+		DELETE FROM astramap_nodes
+		WHERE kind = 'external'
+		  AND provenance = 'scip'
+		  AND id NOT IN (SELECT source FROM astramap_edges)
+		  AND id NOT IN (SELECT target FROM astramap_edges)
+	`)
 
-	// 提交事务
+	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 
-	// 4. 触发启发式边粘合
+	// 4. Trigger heuristic edge resolution
 	_ = ResolveGoInterfaces(db)
 	_ = ResolveWebRoutes(db, projectRoot)
 
@@ -483,14 +489,32 @@ func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error 
 	}
 
 	InvalidateOverviewCache()
-	logInfo("ImportScipIndexToAstraMap: 成功导入 %d 节点, %d 调用边", len(nodes), len(edges))
+	logInfo("ImportScipIndexesToAstraMap: Successfully imported %d nodes, %d call edges", len(nodes), len(edges))
 	return nil
 }
 
-// ===== 增量文件侦听同步 (Watcher & Incremental Sync) =====
+// ===== Watcher & Incremental Sync =====
 
-// SyncFileAstraMap 增量同步单文件，计算 Hash 脏状态进行过滤，并提供事务合并写入
+// SyncFileAstraMap incrementally syncs a single file, filtering via hash dirty states, and provides transactional batch writes
 func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
+	profile := BuildProjectProfile(projectRoot, nil, StageTreeSitter)
+	changed, err := syncFileAstraMapWithProfile(db, profile, filePath)
+	if err != nil || !changed {
+		return changed, err
+	}
+	relPath := filePath
+	if filepath.IsAbs(relPath) {
+		relPath, _ = filepath.Rel(projectRoot, relPath)
+	}
+	relPath = filepath.ToSlash(relPath)
+	if err := ResolveCrossFileCallsForFiles(db, projectRoot, []string{relPath}); err != nil {
+		return true, fmt.Errorf("resolve cross-file calls for %s: %w", relPath, err)
+	}
+	return true, nil
+}
+
+func syncFileAstraMapWithProfile(db *sqlx.DB, profile ProjectProfile, filePath string) (bool, error) {
+	projectRoot := profile.ProjectRoot
 	absPath := filePath
 	if !filepath.IsAbs(absPath) {
 		absPath = filepath.Join(projectRoot, filePath)
@@ -523,7 +547,7 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		return false, err
 	}
 	if existing.ContentHash == contentHash {
-		overlayChanged, overlayErr := ensureTreeSitterOverlay(db, projectRoot, relPath, absPath)
+		overlayChanged, overlayErr := ensureTreeSitterOverlay(db, profile, relPath, absPath)
 		if overlayErr != nil {
 			return false, overlayErr
 		}
@@ -534,7 +558,7 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		return overlayChanged, nil
 	}
 
-	nodes, edges, _, err := ParseFileIncremental(projectRoot, relPath)
+	nodes, edges, _, err := ParseFileIncrementalWithProfile(profile, relPath)
 	if err != nil {
 		return false, err
 	}
@@ -559,9 +583,6 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 	for _, dn := range deletedNodes {
 		if dn.Kind == "function" || dn.Kind == "method" {
 			prefix := getLangPrefix(dn.Language)
-			if prefix == "cpp" {
-				prefix = "cxx"
-			}
 			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, dn.Name)
 			_, _ = tx.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND provenance != 'heuristic'", extID, dn.ID)
 		}
@@ -574,8 +595,8 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		INSERT INTO astramap_nodes (
 			id, kind, name, qualified_name, file_path, language,
 			start_line, end_line, start_column, end_column,
-			signature, docstring, visibility, return_type, is_exported, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			signature, docstring, visibility, return_type, is_exported, provenance, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			kind=excluded.kind,
 			name=excluded.name,
@@ -584,6 +605,7 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 			end_line=excluded.end_line,
 			signature=excluded.signature,
 			docstring=excluded.docstring,
+			provenance=excluded.provenance,
 			updated_at=excluded.updated_at
 	`)
 	if err != nil {
@@ -595,7 +617,7 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		_, err = nodeStmt.Exec(
 			n.ID, n.Kind, n.Name, n.QualifiedName, n.FilePath, n.Language,
 			n.StartLine, n.EndLine, n.StartColumn, n.EndColumn,
-			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, n.UpdatedAt,
+			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, "tree-sitter", n.UpdatedAt,
 		)
 		if err != nil {
 			return false, err
@@ -610,8 +632,8 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		externalSeen[e.Target] = true
 		name := externalSymbolName(e.Target)
 		_, _ = tx.Exec(`INSERT OR IGNORE INTO astramap_nodes
-			(id, kind, name, qualified_name, file_path, language, is_exported, updated_at)
-			VALUES (?, 'external', ?, ?, '', '', 0, ?)`,
+			(id, kind, name, qualified_name, file_path, language, is_exported, provenance, updated_at)
+			VALUES (?, 'external', ?, ?, '', '', 0, 'tree-sitter', ?)`,
 			e.Target, name, name, time.Now().Unix())
 	}
 
@@ -631,7 +653,8 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 		}
 	}
 
-	language := ExtToLang[strings.ToLower(filepath.Ext(absPath))]
+	selection, _ := ResolveLanguageWithProfile(profile, absPath)
+	language := selection.ID
 	if len(nodes) > 0 {
 		language = nodes[0].Language
 	}
@@ -659,17 +682,9 @@ func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
 	for _, n := range nodes {
 		if n.Kind == "function" || n.Kind == "method" {
 			prefix := getLangPrefix(n.Language)
-			if prefix == "cpp" {
-				prefix = "cxx"
-			}
 			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, n.Name)
 			_, _ = db.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND kind = 'calls'", n.ID, extID)
 		}
-	}
-
-	// Rebuild heuristic calls for the updated file
-	if err2 := ResolveCrossFileCallsForFiles(db, projectRoot, []string{relPath}); err2 != nil {
-		logError("ResolveCrossFileCalls failed for %s: %v", relPath, err2)
 	}
 
 	InvalidateQueryHelperCacheForFile(relPath)
@@ -791,8 +806,9 @@ func reuseExistingExternalIDs(db *sqlx.DB, edges []*AstraMapEdge) error {
 	return nil
 }
 
-func ensureTreeSitterOverlay(db *sqlx.DB, projectRoot, relPath, absPath string) (bool, error) {
-	lang := ExtToLang[strings.ToLower(filepath.Ext(absPath))]
+func ensureTreeSitterOverlay(db *sqlx.DB, profile ProjectProfile, relPath, absPath string) (bool, error) {
+	selection, _ := ResolveLanguageWithProfile(profile, absPath)
+	lang := selection.ID
 	prefix := getLangPrefix(lang)
 	if prefix == "unknown" {
 		return false, nil
@@ -805,7 +821,7 @@ func ensureTreeSitterOverlay(db *sqlx.DB, projectRoot, relPath, absPath string) 
 		return false, nil
 	}
 
-	nodes, _, _, err := ParseFileIncremental(projectRoot, relPath)
+	nodes, _, _, err := ParseFileIncrementalWithProfile(profile, relPath)
 	if err != nil {
 		return false, err
 	}
@@ -832,8 +848,8 @@ func ensureTreeSitterOverlay(db *sqlx.DB, projectRoot, relPath, absPath string) 
 		INSERT OR IGNORE INTO astramap_nodes (
 			id, kind, name, qualified_name, file_path, language,
 			start_line, end_line, start_column, end_column,
-			signature, docstring, visibility, return_type, is_exported, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			signature, docstring, visibility, return_type, is_exported, provenance, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return false, err
@@ -848,7 +864,7 @@ func ensureTreeSitterOverlay(db *sqlx.DB, projectRoot, relPath, absPath string) 
 		res, err := nodeStmt.Exec(
 			n.ID, n.Kind, n.Name, n.QualifiedName, n.FilePath, n.Language,
 			n.StartLine, n.EndLine, n.StartColumn, n.EndColumn,
-			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, n.UpdatedAt,
+			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, "tree-sitter", n.UpdatedAt,
 		)
 		if err != nil {
 			return false, err
@@ -953,34 +969,7 @@ func stripLineForBraceScan(line string) string {
 	return b.String()
 }
 
-// SyncAllFilesAstraMap 扫描项目目录，增量同步所有脏文件
-// allIndexExts is the full set of extensions SyncAllFilesAstraMap will index when no filter is provided.
-var allIndexExts = map[string]bool{
-	".go": true, ".py": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true,
-	".c": true, ".cpp": true, ".cc": true, ".cxx": true, ".h": true, ".hpp": true, ".hxx": true, ".java": true,
-}
-
-// LangExts maps language name to its source file extensions (exported for CLI use).
-var LangExts = map[string][]string{
-	"go":         {".go"},
-	"typescript": {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
-	"python":     {".py"},
-	"java":       {".java"},
-	"c":          {".c", ".h"},
-	"cpp":        {".cc", ".cpp", ".cxx", ".hpp", ".hxx"},
-}
-
-// ExtToLang maps file extension back to its language name.
-var ExtToLang = func() map[string]string {
-	m := make(map[string]string)
-	for lang, exts := range LangExts {
-		for _, ext := range exts {
-			m[ext] = lang
-		}
-	}
-	return m
-}()
-
+// SyncAllFilesAstraMap scans the project directory, incrementally syncing all dirty files
 type SyncAllFilesResult struct {
 	Scanned       int
 	Updated       int
@@ -995,12 +984,13 @@ func SyncAllFilesAstraMap(db *sqlx.DB, projectRoot string, langFilter ...string)
 }
 
 func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...string) (SyncAllFilesResult, error) {
-	logInfo("SyncAllFilesAstraMap: 增量扫描 %s", projectRoot)
+	logInfo("SyncAllFilesAstraMap: Incremental scan %s", projectRoot)
 	result := SyncAllFilesResult{}
 	filter, err := LoadIndexFilter(projectRoot)
 	if err != nil {
-		return result, fmt.Errorf("读取 AstraMap 配置失败: %w", err)
+		return result, fmt.Errorf("failed to read AstraMap config: %w", err)
 	}
+	profile := BuildProjectProfile(projectRoot, filter, StageTreeSitter)
 	pruned, err := PruneExcludedFiles(db, filter)
 	if err != nil {
 		return result, err
@@ -1012,19 +1002,19 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 		logError("PruneDeletedFiles failed: %v", err)
 	} else if prunedDeleted > 0 {
 		result.PrunedDeleted = prunedDeleted
-		logInfo("PruneDeletedFiles: 清理 %d 个已删除文件的残留记录", prunedDeleted)
+		logInfo("PruneDeletedFiles: Cleaned up residual records for %d deleted files", prunedDeleted)
 	}
 
 	extensions := make(map[string]bool)
 	if len(langFilter) > 0 {
 		for _, lang := range langFilter {
-			for _, ext := range LangExts[lang] {
+			for _, ext := range LanguageExtensions(lang) {
 				extensions[ext] = true
 			}
 		}
 	}
 	if len(extensions) == 0 {
-		for ext := range allIndexExts {
+		for _, ext := range SupportedExtensions() {
 			extensions[ext] = true
 		}
 	}
@@ -1054,8 +1044,11 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 
 		scanned++
 
-		changed, err := SyncFileAstraMap(db, projectRoot, path)
-		if err == nil && changed {
+		changed, syncErr := syncFileAstraMapWithProfile(db, profile, path)
+		if syncErr != nil {
+			return syncErr
+		}
+		if changed {
 			updated++
 			updatedFiles = append(updatedFiles, relPath)
 		}
@@ -1064,21 +1057,24 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 	result.Scanned = scanned
 	result.Updated = updated
 	result.UpdatedFiles = updatedFiles
-
-	logInfo("SyncAllFilesAstraMap: 扫描完成 %d 文件, %d 更新, 解析变更关系", scanned, updated)
-	if updated == 0 && !pruned && prunedDeleted == 0 {
-		logInfo("SyncAllFilesAstraMap: 文件无变更，刷新启发式调用关系")
+	if err != nil {
+		return result, fmt.Errorf("sync files: %w", err)
 	}
 
-	// 触发跨文件调用解析
+	logInfo("SyncAllFilesAstraMap: Scan complete, %d files, %d updated, resolving call relationships", scanned, updated)
+	if updated == 0 && !pruned && prunedDeleted == 0 {
+		logInfo("SyncAllFilesAstraMap: No file changes, refreshing heuristic call relationships")
+	}
+
+	// Trigger cross-file call resolution
 	_ = ResolveGoInterfaces(db)
 	_ = ResolveWebRoutesForFiles(db, projectRoot, result.UpdatedFiles)
-	if err2 := ResolveCrossFileCallsForFiles(db, projectRoot, updatedFiles); err2 != nil {
-		logError("ResolveCrossFileCalls failed: %v", err2)
+	if err := ResolveCrossFileCallsForFiles(db, projectRoot, updatedFiles); err != nil {
+		return result, fmt.Errorf("resolve cross-file calls: %w", err)
 	}
 	InvalidateOverviewCache()
 
-	logInfo("SyncAllFilesAstraMap: 就绪, %d 文件, %d 更新", scanned, updated)
+	logInfo("SyncAllFilesAstraMap: Ready, %d files, %d updated", scanned, updated)
 	return result, err
 }
 
@@ -1090,8 +1086,9 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 
 	filter, err := LoadIndexFilter(projectRoot)
 	if err != nil {
-		return result, fmt.Errorf("读取 AstraMap 配置失败: %w", err)
+		return result, fmt.Errorf("failed to read AstraMap config: %w", err)
 	}
+	profile := BuildProjectProfile(projectRoot, filter, StageTreeSitter)
 
 	extensions := indexExtensions(langFilter...)
 	seen := make(map[string]bool)
@@ -1143,7 +1140,7 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 		}
 
 		result.Scanned++
-		changed, err := SyncFileAstraMap(db, projectRoot, absPath)
+		changed, err := syncFileAstraMapWithProfile(db, profile, absPath)
 		if err != nil {
 			return result, err
 		}
@@ -1160,7 +1157,7 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 	_ = ResolveGoInterfaces(db)
 	_ = ResolveWebRoutesForFiles(db, projectRoot, result.UpdatedFiles)
 	if err := ResolveCrossFileCallsForFiles(db, projectRoot, result.UpdatedFiles); err != nil {
-		logError("ResolveCrossFileCalls failed: %v", err)
+		return result, fmt.Errorf("resolve cross-file calls: %w", err)
 	}
 	InvalidateOverviewCache()
 	return result, nil
@@ -1169,12 +1166,12 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 func indexExtensions(langFilter ...string) map[string]bool {
 	extensions := make(map[string]bool)
 	for _, lang := range langFilter {
-		for _, ext := range LangExts[lang] {
+		for _, ext := range LanguageExtensions(lang) {
 			extensions[ext] = true
 		}
 	}
 	if len(extensions) == 0 {
-		for ext := range allIndexExts {
+		for _, ext := range SupportedExtensions() {
 			extensions[ext] = true
 		}
 	}
@@ -1329,16 +1326,16 @@ func ProvenanceStats(db *sqlx.DB) (map[string]int, map[string]int, error) {
 	return nodeStats, edgeStats, nil
 }
 
-// ===== Heuristic Resolvers (启发式粘合解析器) =====
+// ===== Heuristic Resolvers =====
 
-// ResolveGoInterfaces Go 隐式接口解析器：struct 方法集完全覆盖 interface 方法集则建立 implements 边
+// ResolveGoInterfaces Go implicit interface resolver: establishes implements edges when struct method set fully covers interface method set
 func ResolveGoInterfaces(db *sqlx.DB) error {
 	type idName struct {
 		ID   string `db:"id"`
 		Name string `db:"name"`
 	}
 
-	// 1. 查出所有 interface 和 struct 节点
+	// 1. Query all interface and struct nodes
 	var interfaces []idName
 	if err := db.Select(&interfaces, "SELECT id, name FROM astramap_nodes WHERE kind = 'interface'"); err != nil {
 		return err
@@ -1352,7 +1349,7 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 		return err
 	}
 
-	// 2. 构建 contains 边查询: 获取 interface/struct 通过 contains 边关联的方法名集合
+	// 2. Build contains edge query: get the set of method names associated with interface/struct via contains edges
 	type containsRow struct {
 		Source     string `db:"source"`
 		MethodName string `db:"name"`
@@ -1368,7 +1365,7 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 		return err
 	}
 
-	// 按 source 分组方法名
+	// Group method names by source
 	ownerMethods := make(map[string]map[string]struct{})
 	for _, row := range containsEdges {
 		if ownerMethods[row.Source] == nil {
@@ -1377,7 +1374,7 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 		ownerMethods[row.Source][row.MethodName] = struct{}{}
 	}
 
-	// 3. 事务: 清理旧 heuristic implements 边并重建
+	// 3. Transaction: clean up old heuristic implements edges and rebuild
 	tx, err := db.Beginx()
 	if err != nil {
 		return err
@@ -1395,11 +1392,11 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 	}
 	defer edgeStmt.Close()
 
-	// 4. 对每个 interface，检查每个 struct 是否完全覆盖其方法集
+	// 4. For each interface, check if each struct fully covers its method set
 	for _, iface := range interfaces {
 		ifaceMethods := ownerMethods[iface.ID]
 		if len(ifaceMethods) == 0 {
-			continue // 空接口不建立 implements 边
+			continue // Empty interfaces do not establish implements edges
 		}
 
 		for _, st := range structs {
@@ -1408,7 +1405,7 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 				continue
 			}
 
-			// 检查完全覆盖
+			// Check full coverage
 			covers := true
 			for mName := range ifaceMethods {
 				if _, ok := structMethods[mName]; !ok {
@@ -1425,7 +1422,7 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 	return tx.Commit()
 }
 
-// ResolveWebRoutes Web 路由反射处理器：扫描路由绑定并建立从路由到控制层 Handler 的边
+// ResolveWebRoutes Web route reflection handler: scans route bindings and establishes edges from routes to controller Handlers
 func ResolveWebRoutes(db *sqlx.DB, projectRoot string) error {
 	return resolveWebRoutes(db, projectRoot, nil)
 }
@@ -1530,8 +1527,8 @@ func resolveWebRoutes(db *sqlx.DB, projectRoot string, files []string) error {
 			for _, handlerID := range handlersByName[handlerName] {
 				routeUSN := fmt.Sprintf("route:%s", routePath)
 				_, _ = tx.Exec(`
-					INSERT INTO astramap_nodes (id, kind, name, qualified_name, file_path, language, start_line, end_line, updated_at)
-					VALUES (?, 'route', ?, ?, ?, 'http', 0, 0, ?)
+					INSERT INTO astramap_nodes (id, kind, name, qualified_name, file_path, language, start_line, end_line, provenance, updated_at)
+					VALUES (?, 'route', ?, ?, ?, 'http', 0, 0, 'heuristic', ?)
 					ON CONFLICT(id) DO NOTHING
 				`, routeUSN, routePath, routePath, filePath, time.Now().Unix())
 
@@ -1546,7 +1543,7 @@ func resolveWebRoutes(db *sqlx.DB, projectRoot string, files []string) error {
 	return tx.Commit()
 }
 
-// ===== SCIP 辅组函数移接 =====
+// ===== SCIP Helper Functions =====
 
 type scipSymbolInfo struct {
 	name    string
@@ -1678,23 +1675,34 @@ func parseSymbolNameFallback(sym string) string {
 	return rest
 }
 
-func normalizeLanguage(lang, filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".py":
-		return "python"
-	case ".ts", ".tsx", ".js", ".jsx":
-		return "typescript"
-	case ".c", ".h":
-		return "c"
-	case ".cpp", ".cc", ".cxx", ".hpp", ".hxx":
-		return "cpp"
-	case ".java":
-		return "java"
+func normalizeLanguage(profile ProjectProfile, lang, filePath string) string {
+	if selection, ok := ResolveLanguageWithProfile(profile, filePath); ok {
+		return selection.ID
 	}
-	return "cxx"
+	if spec, ok := LanguageSpecByID(strings.ToLower(strings.TrimSpace(lang))); ok {
+		return spec.ID
+	}
+	return "unknown"
+}
+
+func normalizeGoScipNode(node *AstraMapNode, _ string, _ []string) {
+	if node == nil || node.Name == "" {
+		return
+	}
+	r, _ := utf8.DecodeRuneInString(node.Name)
+	if r != utf8.RuneError && unicode.IsUpper(r) {
+		node.IsExported = 1
+	}
+}
+
+func normalizeCScipNode(node *AstraMapNode, _ string, sourceLines []string) {
+	if node == nil {
+		return
+	}
+	if node.Signature == "" && node.StartLine > 0 && len(sourceLines) >= node.StartLine {
+		node.Signature = strings.TrimSpace(sourceLines[node.StartLine-1])
+	}
+	node.Kind = normalizeCDeclarationKind(node.Kind, node.Signature)
 }
 
 func normalizeCDeclarationKind(kind, signature string) string {
@@ -1726,7 +1734,7 @@ func findLeadingComments(lines []string, startLine int) string {
 				continue
 			}
 			emptyLineCount++
-			if emptyLineCount > 2 { // 允许最多 2 个空行
+			if emptyLineCount > 2 { // Allow at most 2 empty lines
 				break
 			}
 			continue
