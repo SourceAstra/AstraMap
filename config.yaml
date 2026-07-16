@@ -1,0 +1,16 @@
+# AstraMap index filter config.
+# Built-in rules automatically exclude: hidden paths, VCS metadata,
+# dependencies, build artifacts, generated code, caches, and binaries.
+# You only need to configure project-specific patterns.
+
+index:
+  languages:
+    - go
+    - typescript
+  # include:
+  #   - "src/**"
+  # exclude:
+  #   - "examples/legacy/**"
+  # advanced:
+  #   forceInclude:
+  #     - "src/.domain/**"
