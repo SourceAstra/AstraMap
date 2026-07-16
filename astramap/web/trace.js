@@ -1,10 +1,10 @@
 /**
- * SourceAstra - Understand Module v2.0 (完全重写)
+ * SourceAstra - Understand Module v2.0 (Fully rewritten)
  * Design.md 3.0 规格：追踪视图 (核心攻坚区)
  *
  * 架构：双面板布局
  *   左: D3 Canvas 追踪拓扑图 (DAG flow + 流光动画)
- *   右: C 源码预览 (语法高亮)
+ *   右: C Source Preview (语法高亮)
  *
  * 核心能力：
  *   - 多终点路径裁剪 (Path Clipping)
@@ -19,11 +19,11 @@
     let traceXform = { k: 1, x: 0, y: 0 };
     let traceNodes = [];
     let traceLinks = [];
-    let traceNodeMap = new Map(); // O(1) 节点索引
-    let traceLinkMap = new Map(); // O(1) 边索引
-    let visibleNodeSet = new Set(); // O(1) 可见节点索引
-    let _graphDirty = true; // 脏标记：仅数据/变换变更时全量重绘
-    let _cachedNodeGrads = {}; // 缓存节点渐变，按类型复用
+    let traceNodeMap = new Map(); // O(1) 
+    let traceLinkMap = new Map(); // O(1) 
+    let visibleNodeSet = new Set(); // O(1) 
+    let _graphDirty = true; // ：/
+    let _cachedNodeGrads = {}; // ，
     let rawNodes = [];
     let rawLinks = [];
     let _cachedComplexity = {};
@@ -32,7 +32,7 @@
     let _cachedThemeColors = null;
     let _traceAbortCtrl = null;
 
-    // 页面级工具函数
+    // Function
     function hexToRgbA(hex, alpha) {
         let c = hex.substring(1);
         if (c.length === 3) c = c[0] + c[0] + c[1] + c[1] + c[2] + c[2];
@@ -55,7 +55,7 @@
     function directoryGroupForNode(node) {
         if (!node || !node.file) {
             return node && node.type === 'unknown'
-                ? { id: 'external', name: '外部依赖', level: 6 }
+                ? { id: 'external', name: 'External Dependency', level: 6 }
                 : { id: '(root)', name: '(root)', level: 3 };
         }
         const parts = node.file.replace(/\\/g, '/').split('/');
@@ -148,9 +148,9 @@
     }
 
     let showSystem = false;
-    let useGrouping = true; // 默认开启目录分组与层级布局
-    let selectedModuleFilter = 'all'; // 选中的目录过滤器，'all'表示不进行目录级过滤
-    let modulesList = []; // 保留兼容变量，独立 AstraMap 不依赖模块注册表
+    let useGrouping = true; // Directory Grouping
+    let selectedModuleFilter = 'all'; // ，'all'
+    let modulesList = []; // ， AstraMap 
     let rootNodeId = null;
     let selectedNodeId = null;
     let flowAnimFrame = null;
@@ -206,19 +206,19 @@
                 <div class="und-layout">
                     <div class="und-tree-panel">
                         <div class="und-tree-header">
-                            <div class="und-tree-title">相关函数</div>
-                            <input id="und-function-search" class="und-function-search" placeholder="搜索函数..." autocomplete="off">
+                            <div class="und-tree-title">Related functions</div>
+                            <input id="und-function-search" class="und-function-search" placeholder="Search functions..." autocomplete="off">
                         </div>
                         <div id="und-function-tree" class="und-function-tree"></div>
                     </div>
                     <div class="und-graph-panel">
                         <div class="und-graph-toolbar">
                             <div class="und-toolbar-left">
-                                <span class="und-toolbar-title">🧠 相关调用链</span>
+                                <span class="und-toolbar-title">🧠 Related Call Chains</span>
                                 <span class="und-root-label" id="und-root-label"></span>
                             </div>
                             <div class="und-toolbar-right">
-                                <label class="und-depth-label">深度
+                                <label class="und-depth-label">Depth
                                     <select id="und-depth-select" class="und-select">
                                         <option value="1" selected>1</option>
                                         <option value="2">2</option>
@@ -229,52 +229,52 @@
                                         <option value="8">8</option>
                                     </select>
                                 </label>
-                                <label class="und-depth-label" style="margin-right:8px;">透视目录
+                                <label class="und-depth-label" style="margin-right:8px;">Perspective Directory
                                     <select id="und-module-select" class="und-select" style="min-width:110px;">
-                                        <option value="all" selected>全部目录</option>
+                                        <option value="all" selected>All Directories</option>
                                     </select>
                                 </label>
-                                <button id="und-btn-group" class="und-btn" title="切换目录与层级分组布局">📂 目录分组</button>
-                                <button id="und-btn-impact" class="und-btn" title="查看与当前函数相关的调用影响">⚡ 相关影响</button>
-                                <button id="und-btn-blast" class="und-btn" title="查看与当前函数相关的覆盖范围">💣 相关范围</button>
-                                <button id="und-btn-fit" class="und-btn" title="适应画布">⊞ 适应</button>
-                                <button id="und-btn-detail" class="und-btn" title="显示更完整的相关调用关系">📋 详细关系</button>
+                                <button id="und-btn-group" class="und-btn" title="切换目录与层级分组布局">📂 Directory Grouping</button>
+                                <button id="und-btn-impact" class="und-btn" title="Function">⚡ Related Impact</button>
+                                <button id="und-btn-blast" class="und-btn" title="Function">💣 Related Scope</button>
+                                <button id="und-btn-fit" class="und-btn" title="Fit View">⊞ Fit</button>
+                                <button id="und-btn-detail" class="und-btn" title="Show more complete call relationships">📋 Detailed Relations</button>
                             </div>
                         </div>
                         <canvas id="und-canvas"></canvas>
                         <div id="und-loading-overlay" class="und-loading-overlay">
                             <div class="und-spinner-container">
                                 <div class="und-spinner"></div>
-                                <div class="und-loading-text">正在载入中...</div>
+                                <div class="und-loading-text">Loading...</div>
                             </div>
                         </div>
                         <div class="und-legend">
-                            <div class="und-legend-item"><span class="und-dot" style="background:#f59e0b"></span>起点</div>
-                            <div class="und-legend-item"><span class="und-dot" style="background:#38bdf8"></span>函数</div>
-                            <div class="und-legend-item"><span class="und-dot" style="background:#64748b"></span>外部</div>
-                            <div class="und-legend-item"><span class="und-dot" style="background:#ef4444"></span>影响路径</div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#f59e0b"></span>Start</div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#38bdf8"></span>Function</div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#64748b"></span>External</div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#ef4444"></span>Impact Path</div>
                         </div>
-                        <div class="und-code-toggle" id="und-code-toggle" title="收起源码预览">›</div>
+                        <div class="und-code-toggle" id="und-code-toggle" title="Collapse Source Preview">›</div>
                     </div>
                     <div class="und-resizer" id="und-resizer"></div>
                     <div class="und-code-panel">
                         <div class="und-code-header">
-                            <span id="und-code-title">📄 源码预览</span>
+                            <span id="und-code-title">📄 Source Preview</span>
                             <span id="und-code-file" class="und-code-file"></span>
                         </div>
                         <div id="und-quality-panel" class="und-quality-panel" style="display:none;"></div>
                         <div class="und-code-body" id="und-code-body">
                             <div class="und-code-empty">
                                 <div style="font-size:32px">📋</div>
-                                <div>点击拓扑图中的节点查看源码</div>
+                                <div>Click a node in topology map to preview source</div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="und-empty-state" id="und-empty">
                     <div style="font-size:48px">🧠</div>
-                    <h3>相关调用视图</h3>
-                    <p>从左侧函数树选择入口，查看与当前函数相关的祖先链和子孙链</p>
+                    <h3>Related Call View</h3>
+                    <p>Select an entry from the left function tree，Function</p>
                 </div>
             `;
 
@@ -336,7 +336,7 @@
             const btnDetail = document.getElementById('und-btn-detail');
             if (btnDetail) {
                 btnDetail.onclick = () => this.toggleSystemFunctions();
-                // 初始状态同步按钮样式
+                // Initial state sync button style
                 if (showSystem) btnDetail.classList.add('active');
                 else btnDetail.classList.remove('active');
             }
@@ -374,15 +374,15 @@
 
             const hasSymbols = !!(window.G_DATA && window.G_DATA.symbols && Object.keys(window.G_DATA.symbols).length > 0);
             if (!hasSymbols && window._functionsLoading) {
-                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">正在加载函数与目录树...</div>';
+                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">Loading functions and directory tree...</div>';
                 return;
             }
 
-            // 依赖分析视图必须能独立加载函数/目录树，不能依赖探索视界先完成全局图初始化。
+            // Dependency analysis view must load independentlyFunction/，。
             if (!hasSymbols) {
 
                 window._functionsLoading = true;
-                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">正在加载函数与目录树...</div>';
+                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">Loading functions and directory tree...</div>';
 
                 fetch('/api/astramap/functions')
                     .then(res => res.json())
@@ -401,13 +401,13 @@
                             }
                             this.renderFunctionTree(filterText);
                         } else {
-                            tree.innerHTML = '<div class="und-tree-empty">加载函数列表失败</div>';
+                            tree.innerHTML = '<div class="und-tree-empty">Failed to load function list</div>';
                         }
                     })
                     .catch(err => {
                         window._functionsLoading = false;
-                        console.error("[Trace] 懒加载函数列表失败:", err);
-                        tree.innerHTML = '<div class="und-tree-empty">加载函数列表失败</div>';
+                        console.error("[Trace] Failed to load function list:", err);
+                        tree.innerHTML = '<div class="und-tree-empty">Failed to load function list</div>';
                     });
                 return;
             }
@@ -429,7 +429,7 @@
                 });
 
             if (!funcs.length) {
-                tree.innerHTML = '<div class="und-tree-empty">没有匹配的函数</div>';
+                tree.innerHTML = '<div class="und-tree-empty">No matching functions</div>';
                 return;
             }
 
@@ -782,7 +782,7 @@
             const canvas = document.getElementById('und-canvas');
             if (!canvas || !traceNodes.length) return;
 
-            // 重建 O(1) 图索引
+            // Rebuild O(1) graph index
             rebuildTraceIndexes();
 
             window.SourceAstra.traceNodes = traceNodes;
@@ -796,14 +796,14 @@
                 tempCtx.save();
                 tempCtx.font = 'bold 12px "Inter", "Outfit", sans-serif';
                 const nameWidth = tempCtx.measureText(n.name).width;
-                const fileShort = n.file ? n.file.split('/').pop() : (isUnknown ? '外部依赖' : '系统模块');
+                const fileShort = n.file ? n.file.split('/').pop() : (isUnknown ? 'External Dependency' : 'System Module');
                 tempCtx.font = '500 9px "JetBrains Mono", monospace';
                 const fileWidth = tempCtx.measureText(fileShort).width + (n.line ? 40 : 0);
                 tempCtx.restore();
                 n._nw = Math.max(220, Math.max(nameWidth, fileWidth) + 36);
             });
 
-            // 保持由 applyFilters 预先计算的完整图 _layer 拓扑深度属性
+            //  applyFilters  _layer Depth
             traceNodes.forEach(n => {
                 if (n._layer === undefined) {
                     n._layer = 0;
@@ -813,7 +813,7 @@
             });
 
             if (useGrouping) {
-                // ===== 目录与层级分组布局定位算法 =====
+                // ===== Directory and hierarchical grouping layout algorithm =====
                 traceNodes.forEach(n => {
                     const group = directoryGroupForNode(n);
                     n._groupModuleId = group.id;
@@ -823,7 +823,7 @@
                     n.fy = null;
                 });
 
-                // 对于 virtual_aggregate，其 module 继承自其 parentId 节点
+                // For virtual_aggregate, its module inherits from its parentId node
                 traceNodes.forEach(n => {
                     if (n.type === 'virtual_aggregate' && n.parentId) {
                         const parent = traceNodeMap.get(n.parentId);
@@ -835,7 +835,7 @@
                     }
                 });
 
-                // 按照 level 和 module 聚类
+                // Cluster by level and module
                 const levelGroups = {};
                 traceNodes.forEach(n => {
                     const l = n._groupLevel;
@@ -845,7 +845,7 @@
                     levelGroups[l][m].push(n);
                 });
 
-                // 计算当前视图拥有的目录总数
+                // Calculate total number of directories in the current view
                 let totalModuleCount = 0;
                 Object.keys(levelGroups).forEach(l => {
                     totalModuleCount += Object.keys(levelGroups[l]).length;
@@ -862,12 +862,12 @@
                     modIds.forEach(mId => {
                         const nodes = mods[mId];
 
-                        // 根据当前视图拥有的目录数量动态决定目标宽度和最大列数以利用大空间
+                        // Dynamically determine target width and max columns based on directories in the current view
                         const availableWidth = traceCanvas ? Math.max(800, traceCanvas.width - 160) : 1200;
                         const maxCols = totalModuleCount === 1 ? 8 : 4;
                         const targetWidth = totalModuleCount === 1 ? availableWidth : 820;
 
-                        // 1. 按照 _layer 属性（拓扑深度）对节点进行分组以体现真实的层级关系
+                        // 1. Group nodes by _layer (topological depth) to reflect hierarchy
                         const layerMap = {};
                         nodes.forEach(n => {
                             const ly = n._layer != null ? n._layer : 0;
@@ -877,7 +877,7 @@
 
                         const sortedLayers = Object.keys(layerMap).map(Number).sort((a, b) => a - b);
 
-                        // 计算每个层级格栅的物理宽度，并求得最大宽度 innerW 以确保整个目录框整齐划一
+                        // Calculate physical width of each level grid, and find max width innerW 
                         const layerLayouts = [];
                         let maxLayerW = 220;
 
@@ -886,15 +886,15 @@
                             rowNodes.sort((a, b) => a.name.localeCompare(b.name));
 
                             const count = rowNodes.length;
-                            // 动态计算该层级内卡片的平均宽度
+                            // Dynamically calculate average card width in this level
                             let sumW = 0;
                             rowNodes.forEach(n => sumW += n._nw);
                             const avgW = sumW / count;
 
-                            // 根据卡片平均宽度动态计算列数
+                            // Dynamically calculate columns based on average card width
                             const cols = Math.max(1, Math.min(count, Math.min(maxCols, Math.floor(targetWidth / (avgW + 40)))));
 
-                            // 初始化每列的最大卡片宽度数组
+                            // Initialize max card width array for each column
                             const colMaxW = Array(cols).fill(0);
                             rowNodes.forEach((node, idx) => {
                                 const col = idx % cols;
@@ -903,12 +903,12 @@
                                 }
                             });
 
-                            // 计算每一列的中心点 X 坐标
+                            // Calculate center X coordinate of each column
                             const colCenters = [];
                             let currentX = 0;
                             for (let c = 0; c < cols; c++) {
                                 colCenters[c] = currentX + colMaxW[c] / 2;
-                                currentX += colMaxW[c] + 40; // 40px 列间距
+                                currentX += colMaxW[c] + 40; // 40px 
                             }
 
                             const layerW = currentX - 40;
@@ -926,14 +926,14 @@
                         const innerW = maxLayerW;
                         let currentY = 0;
                         const cardH = 50;
-                        const rowGapY = 16;    // 层内行与行之间的垂直间距
-                        const layerGapY = 40;  // 层与层之间的垂直间距
+                        const rowGapY = 16;    // 
+                        const layerGapY = 40;  // 
                         const dividers = [];
 
-                        // 2. 依次纵向排布每个层级。层级内节点根据自适应列数折行，均衡排布。
+                        // 2. 。Fit，。
                         layerLayouts.forEach((layout, rowIdx) => {
                             const { nodes: rowNodes, cols, colCenters, layerW } = layout;
-                            const layerOffset = (innerW - layerW) / 2; // 用于在目录内水平居中该层级
+                            const layerOffset = (innerW - layerW) / 2; // 
 
                             const startY = currentY;
                             let maxRowInLayer = 0;
@@ -951,7 +951,7 @@
                             const layerHeight = layerRowsCount * cardH + (layerRowsCount - 1) * rowGapY;
                             currentY = startY + layerHeight;
 
-                            // 如果不是最后一层，在当前层 and 下一层之间记录分割线位置
+                            // If not the last layer, record divider position between current and next layer
                             if (rowIdx < layerLayouts.length - 1) {
                                 dividers.push(currentY + layerGapY / 2);
                                 currentY += layerGapY;
@@ -962,7 +962,7 @@
                         const paddingX = 32;
                         const paddingY = 32;
                         const boxW = innerW + paddingX * 2;
-                        const boxH = innerH + paddingY * 2 + 35; // 35px 标题栏高度
+                        const boxH = innerH + paddingY * 2 + 35; // 35px 
 
                         moduleBoxes.push({
                             level: l,
@@ -973,12 +973,12 @@
                             nodes: nodes,
                             paddingX: paddingX,
                             paddingY: paddingY,
-                            dividers: dividers  // 传递分割线相对 Y 坐标数组给渲染层
+                            dividers: dividers  // Pass divider relative Y coordinates to the rendering layer
                         });
                     });
                 });
 
-                // 计算水平排布
+                // Calculate horizontal layout
                 levelList.forEach(l => {
                     const levelBoxes = moduleBoxes.filter(b => b.level === l);
                     const gapX = 60;
@@ -995,7 +995,7 @@
                     levelHeight[l] = maxH;
                 });
 
-                // 计算垂直排布
+                // Calculate vertical layout
                 const gapY = 140;
                 let currentY = 100;
                 levelList.forEach(l => {
@@ -1014,7 +1014,7 @@
                     b.absY = b.boxY;
 
                     b.nodes.forEach(node => {
-                        // node.relX 已经是节点中心的相对坐标，直接加偏移即为绝对中心 X
+                        // node.relX ， X
                         node.x = b.absX + b.paddingX + node.relX;
                         node.y = b.absY + b.paddingY + 35 + node.relY + 25;
                     });
@@ -1023,7 +1023,7 @@
                 this.renderedModuleBoxes = moduleBoxes;
             } else {
                 this.renderedModuleBoxes = [];
-                // ===== 双向发散树形布局定位算法 =====
+                // ===== Bidirectional divergent tree layout algorithm =====
                 const viewW = canvas.width || 1000;
                 const viewH = canvas.height || 600;
                 const nodeSpacingX = 260;
@@ -1119,7 +1119,7 @@
                 }
             }
 
-            // 直接触发自适应缩放并重绘，不需要任何慢吞吞的力导向计算！
+            // Fit，！
             this.fitToCanvas();
             this.renderGraph();
         },
@@ -1132,7 +1132,7 @@
 
             ctx.save();
 
-            // 缓存 CSS 变量与主题状态，仅在主题切换时刷新
+            //  CSS ，
             if (!_cachedThemeColors) {
                 const bodyStyle = getComputedStyle(document.body);
                 _cachedThemeColors = {
@@ -1157,7 +1157,7 @@
 
             const isLightTheme = document.body.classList.contains('theme-light');
 
-            // 计算视口边界（变换空间坐标），用于裁剪不可见节点
+            // （），
             const k = traceXform.k;
             const tx = traceXform.x;
             const ty = traceXform.y;
@@ -1167,7 +1167,7 @@
             const viewTop = -ty / k - margin;
             const viewBottom = (h - ty) / k + margin;
 
-            // 绘制背景色
+            // Draw background color
             if (isLightTheme) {
                 const radialGrad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h));
                 radialGrad.addColorStop(0, '#ffffff');
@@ -1186,7 +1186,7 @@
                 ctx.fillRect(0, 0, w, h);
             }
 
-            // 绘制细密的高科技 CAD 坐标网格
+            // Draw fine high-tech CAD coordinate grid
             ctx.save();
             ctx.translate(traceXform.x, traceXform.y);
             ctx.scale(traceXform.k, traceXform.k);
@@ -1307,12 +1307,12 @@
                     ctx.fillStyle = strokeColor;
                     ctx.font = 'bold 9px "JetBrains Mono", monospace';
                     ctx.textAlign = 'right';
-                    const levelLabel = box.level === 0 ? (window.i18n.locale === 'zh' ? 'L0 (最顶层)' : 'L0 (Top)') : `Level ${box.level}`;
+                    const levelLabel = box.level === 0 ? (window.i18n.locale === 'zh' ? 'L0 (Top)' : 'L0 (Top)') : `Level ${box.level}`;
                     ctx.fillText(`[${box.moduleId}]  ${levelLabel}`, rx + rw - 16, ry + 18);
 
                     // Draw horizontal dashed divider lines between calling layers
                     if (box.dividers && box.dividers.length > 0) {
-                        ctx.strokeStyle = isLightTheme ? 'rgba(225, 29, 72, 0.35)' : 'rgba(239, 68, 68, 0.35)'; // 温暖微红高亮色
+                        ctx.strokeStyle = isLightTheme ? 'rgba(225, 29, 72, 0.35)' : 'rgba(239, 68, 68, 0.35)'; // 
                         ctx.lineWidth = 1.25;
                         ctx.setLineDash([4, 4]); // Dashed style
                         box.dividers.forEach(divY => {
@@ -1334,7 +1334,7 @@
                 const src = typeof l.source === 'object' ? l.source : traceNodeMap.get(l.source);
                 const tgt = typeof l.target === 'object' ? l.target : traceNodeMap.get(l.target);
                 if (!src || !tgt || src.x == null || tgt.x == null) return;
-                // 视口裁剪：边两端都在视口外则跳过
+                // Viewport clipping: skip if both ends of the edge are outside the viewport
                 const srcVis = src.x >= viewLeft && src.x <= viewRight && src.y >= viewTop && src.y <= viewBottom;
                 const tgtVis = tgt.x >= viewLeft && tgt.x <= viewRight && tgt.y >= viewTop && tgt.y <= viewBottom;
                 if (!srcVis && !tgtVis) return;
@@ -1350,9 +1350,9 @@
                 }
 
                 const x1 = src.x;
-                const y1 = src.y + 25; // 节点底部
+                const y1 = src.y + 25; // 
                 const x2 = tgt.x;
-                const y2 = tgt.y - 25; // 节点顶部
+                const y2 = tgt.y - 25; // 
                 const midY = (y1 + y2) / 2;
 
                 ctx.beginPath();
@@ -1421,7 +1421,7 @@
             // Draw nodes
             traceNodes.forEach(n => {
                 if (n.x == null) return;
-                // 视口裁剪：跳过不可见节点
+                // Viewport clipping: skip invisible nodes
                 const nw = n._nw || 220;
                 if (n.x + nw/2 < viewLeft || n.x - nw/2 > viewRight || n.y + 25 < viewTop || n.y - 25 > viewBottom) return;
                 const isRoot = n.id === rootNodeId;
@@ -1436,7 +1436,7 @@
                 const ry = cy - nh / 2;
                 const radius = 8;
 
-                // 绘制圆角卡片路径
+                // Draw rounded card path
                 ctx.beginPath();
                 ctx.moveTo(rx + radius, ry);
                 ctx.lineTo(rx + nw - radius, ry);
@@ -1449,7 +1449,7 @@
                 ctx.quadraticCurveTo(rx, ry, rx + radius, ry);
                 ctx.closePath();
 
-                // 极具质感的线性渐变填充
+                // Rich linear gradient fill
                 const bgGrad = ctx.createLinearGradient(rx, ry, rx, ry + nh);
                 if (isLightTheme) {
                     if (n.type === 'virtual_aggregate') {
@@ -1488,7 +1488,7 @@
                 }
                 ctx.fillStyle = bgGrad;
 
-                // 霓虹发光边框样式
+                // Neon glowing border style
                 if (n.type === 'virtual_aggregate') {
                     ctx.shadowBlur = 0;
                     ctx.strokeStyle = isLightTheme ? 'rgba(139, 92, 246, 0.6)' : 'rgba(167, 139, 250, 0.5)';
@@ -1515,10 +1515,10 @@
 
                 ctx.fill();
                 ctx.stroke();
-                ctx.setLineDash([]); // 重置虚线样式
-                ctx.shadowBlur = 0;  // 重置发光
+                ctx.setLineDash([]); // 
+                ctx.shadowBlur = 0;  // 
 
-                // --- 绘制首行：函数名称 ---
+                // --- ：Function ---
                 if (n.type === 'virtual_aggregate') {
                     ctx.fillStyle = isLightTheme ? '#7c3aed' : '#c084fc';
                     ctx.textAlign = 'left';
@@ -1536,14 +1536,14 @@
                     ctx.fillText(displayName, rx + 15, ry + 22);
                 }
 
-                // --- 绘制次行：真实的源码文件归属与行号 ---
+                // --- ： ---
                 if (n.type === 'virtual_aggregate') {
                     ctx.font = '500 9px "JetBrains Mono", monospace';
                     ctx.fillStyle = isLightTheme ? '#6d28d9' : '#a78bfa';
                     ctx.textAlign = 'left';
-                    ctx.fillText(window.i18n.locale === 'zh' ? '点击右侧面板查看列表' : 'View list on right panel', rx + 15, ry + 38);
+                    ctx.fillText(window.i18n.locale === 'zh' ? 'Click right panel to view list' : 'View list on right panel', rx + 15, ry + 38);
                 } else {
-                    const fileShort = n.file ? n.file.split('/').pop() : (isUnknown ? (window.i18n.locale === 'zh' ? '外部依赖' : 'External') : (window.i18n.locale === 'zh' ? '系统模块' : 'System Module'));
+                    const fileShort = n.file ? n.file.split('/').pop() : (isUnknown ? (window.i18n.locale === 'zh' ? 'External Dependency' : 'External') : (window.i18n.locale === 'zh' ? 'System Module' : 'System Module'));
                     ctx.font = '500 9px "JetBrains Mono", monospace';
                     ctx.fillStyle = isLightTheme ? (isRoot ? '#e11d48' : (isUnknown ? '#6b7280' : '#059669')) : (isRoot ? '#f59e0b' : (isUnknown ? '#94a3b8' : '#38bdf8'));
                     ctx.textAlign = 'left';
@@ -1557,7 +1557,7 @@
                     }
                 }
 
-                // 绘制复杂度热度色条
+                // Draw complexity heatmap bar
                 const metrics = _cachedComplexity[n.id];
                 if (metrics && metrics.cyclomatic_complexity) {
                     const cc = metrics.cyclomatic_complexity;
@@ -1571,7 +1571,7 @@
                     ctx.fill();
                 }
 
-                // 绘制爆炸半径影响数量徽标
+                // Draw blast radius impact number badge
                 if (showBlastRadius) {
                     const blastCount = _blastRadiusCache[n.id] || 0;
                     ctx.fillStyle = isLightTheme ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.25)';
@@ -1703,15 +1703,15 @@
 
             if (node.type === 'virtual_aggregate') {
                 titleLabel.textContent = '📁 ' + node.name;
-                fileLabel.textContent = '被折叠的辅助工具函数';
+                fileLabel.textContent = 'Folded utility functions';
 
                 let listHtml = `<div class="und-aggregate-list">`;
-                listHtml += `<div class="und-agg-tip">为了防止调用图连线交叉错乱，以下低入度或纯依赖性质的辅助函数已被智能折叠。点击任意函数可预览其源码：</div>`;
+                listHtml += `<div class="und-agg-tip">To avoid spaghetti edges, the following utility/low-in-degree helper functions have been folded. Click to preview source code:</div>`;
 
                 node.foldedNodeIds.forEach(fnId => {
                     const sym = window.G_DATA && window.G_DATA.symbols[fnId];
                     const displayName = sym ? (sym.qualifiedName || sym.name) : fnId;
-                    const displayFile = (sym && sym.file) ? sym.file.split('/').pop() : '外部符号';
+                    const displayFile = (sym && sym.file) ? sym.file.split('/').pop() : 'External Symbol';
                     listHtml += `<div class="und-agg-item" onclick="window.SourceAstra.loadAggregaterSource('${fnId}')">` +
                         `<span>fn</span><strong>${displayName}</strong>` +
                         `<small>${displayFile}</small>` +
@@ -1723,13 +1723,13 @@
             }
 
             if (!node.file) {
-                body.innerHTML = '<div class="und-code-empty"><div style="font-size:24px">⚠️</div><div>外部符号，无源码可用</div></div>';
+                body.innerHTML = '<div class="und-code-empty"><div style="font-size:24px">⚠️</div><div>External symbol, no source code available</div></div>';
                 return;
             }
 
             titleLabel.textContent = '📄 ' + (node.qualifiedName || node.name);
             fileLabel.textContent = node.file + ':' + (node.line || '?');
-            body.innerHTML = '<div class="und-code-loading">加载源码中...</div>';
+            body.innerHTML = '<div class="und-code-loading">Loading source code...</div>';
 
             const jobId = sessionStorage.getItem('sourceastra_job_id');
             const url = `/api/snippet?file=${encodeURIComponent(node.file)}&line=${node.line || 1}&count=10000${jobId ? '&job=' + jobId : ''}`;
@@ -1740,7 +1740,7 @@
                 if (data.error) throw new Error(data.error);
 
                 if (data.fallback) {
-                    // SCIP 模式下降级：源码文件不可达，展示符号元信息
+                    // SCIP ：，
                     let html = '<div class="und-code-fallback">';
                     html += '<div class="und-fallback-header">';
                     html += `<span class="und-fallback-type">${this.escapeHtml(data.type || 'function')}</span>`;
@@ -1749,7 +1749,7 @@
                     if (data.module_id) html += `<span class="und-fallback-mod">📦 ${this.escapeHtml(data.module_id)}</span>`;
                     html += '</div>';
                     if (data.callers && data.callers.length > 0) {
-                        html += '<div class="und-fallback-section"><div class="und-fallback-title">↑ 被调用 (' + data.callers.length + ')</div>';
+                        html += '<div class="und-fallback-section"><div class="und-fallback-title">↑ Callers (' + data.callers.length + ')</div>';
                         data.callers.forEach(c => {
                             html += `<div class="und-fallback-item und-clickable" data-node-id="${this.escapeHtml(c.id)}">`;
                             html += `<span class="und-fi-name">${this.escapeHtml(c.name)}</span>`;
@@ -1759,7 +1759,7 @@
                         html += '</div>';
                     }
                     if (data.callees && data.callees.length > 0) {
-                        html += '<div class="und-fallback-section"><div class="und-fallback-title">↓ 调用 (' + data.callees.length + ')</div>';
+                        html += '<div class="und-fallback-section"><div class="und-fallback-title">↓ Callees (' + data.callees.length + ')</div>';
                         data.callees.forEach(c => {
                             html += `<div class="und-fallback-item und-clickable" data-node-id="${this.escapeHtml(c.id)}">`;
                             html += `<span class="und-fi-name">${this.escapeHtml(c.name)}</span>`;
@@ -1769,11 +1769,11 @@
                         html += '</div>';
                     }
                     if (!data.callers?.length && !data.callees?.length) {
-                        html += '<div class="und-fallback-empty">该函数无调用关系记录</div>';
+                        html += '<div class="und-fallback-empty">No call relationship recorded for this function</div>';
                     }
                     html += '</div>';
                     body.innerHTML = html;
-                    // 点击调用者/被调用者跳转
+                    // Click caller/callee to jump
                     body.querySelectorAll('.und-clickable').forEach(el => {
                         el.onclick = () => {
                             const nid = el.getAttribute('data-node-id');
@@ -1796,10 +1796,10 @@
                     const hlLine = body.querySelector('.und-code-hl');
                     if (hlLine) hlLine.scrollIntoView({ block: 'center', behavior: 'smooth' });
                 } else {
-                    body.innerHTML = '<div class="und-code-empty">无预览可用</div>';
+                    body.innerHTML = '<div class="und-code-empty">No preview available</div>';
                 }
             } catch (e) {
-                body.innerHTML = '<div class="und-code-empty">加载失败: ' + e.message + '</div>';
+                body.innerHTML = '<div class="und-code-empty">Load failed: ' + e.message + '</div>';
             }
         },
 
@@ -1812,7 +1812,7 @@
             }
 
             panel.style.display = 'flex';
-            panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">加载质量指标中...</div>`;
+            panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">Loading quality metrics...</div>`;
 
             try {
                 let metrics = _cachedComplexity[node.id];
@@ -1834,9 +1834,9 @@
                 if (metrics) {
                     const cc = metrics.cyclomatic_complexity || 0;
                     let ccBadge = 'green';
-                    let ccLabel = '🟢 偏低';
-                    if (cc > 20) { ccBadge = 'red'; ccLabel = '🔴 极高'; }
-                    else if (cc > 10) { ccBadge = 'yellow'; ccLabel = '🟡 较高'; }
+                    let ccLabel = '🟢 Low';
+                    if (cc > 20) { ccBadge = 'red'; ccLabel = '🔴 Critical'; }
+                    else if (cc > 10) { ccBadge = 'yellow'; ccLabel = '🟡 High'; }
 
                     const loc = metrics.lines_of_code || 0;
                     const depth = metrics.nesting_depth || 0;
@@ -1844,36 +1844,36 @@
 
                     panel.innerHTML = `
                         <div class="und-qp-item">
-                            <span class="und-qp-label">圈复杂度</span>
+                            <span class="und-qp-label">Complexity</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${cc}</span>
                                 <span class="und-qp-badge ${ccBadge}">${ccLabel}</span>
                             </div>
                         </div>
                         <div class="und-qp-item">
-                            <span class="und-qp-label">代码行数</span>
+                            <span class="und-qp-label">Lines</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${loc}</span>
                             </div>
                         </div>
                         <div class="und-qp-item">
-                            <span class="und-qp-label">嵌套深度</span>
+                            <span class="und-qp-label">Nesting Depth</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${depth}</span>
                             </div>
                         </div>
                         <div class="und-qp-item">
-                            <span class="und-qp-label">返回点数</span>
+                            <span class="und-qp-label">Return Points</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${returnCount}</span>
                             </div>
                         </div>
                     `;
                 } else {
-                    panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">暂无复杂度度量数据</div>`;
+                    panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">No complexity metrics available</div>`;
                 }
             } catch (err) {
-                panel.innerHTML = `<div style="font-size:11px;color:#ef4444">度量失败: ${err.message}</div>`;
+                panel.innerHTML = `<div style="font-size:11px;color:#ef4444">Metrics failed: ${err.message}</div>`;
             }
         },
 
@@ -1920,7 +1920,7 @@
         },
 
         applyFilters() {
-            // 声明/接口文件过滤规则：非起点节点不参与默认调用流展示。
+            // Declaration/interface file filtering rules：Start。
             const isDeclarationFileNode = (n) => {
                 if (n.id === rootNodeId) return false;
                 const file = n.file || n.filePath;
@@ -1935,7 +1935,7 @@
             };
 
             if (showSystem) {
-                // 当开启 showSystem 时，显示更完整的关系，但也过滤掉声明文件节点，避免过度混乱
+                // Show more complete relations when showSystem is enabled，，
                 traceNodes = rawNodes.filter(n => !isDeclarationFileNode(n)).map(n => ({ ...n }));
                 const nodeIds = new Set(traceNodes.map(n => n.id));
                 traceLinks = rawLinks.filter(l => {
@@ -1944,7 +1944,7 @@
                     return nodeIds.has(src) && nodeIds.has(tgt);
                 }).map(l => ({ ...l }));
             } else {
-                // 默认仅展示控制流/调用流节点，默认隐藏无关节点与生成代码
+                // Show control/call flow nodes by default, hide irrelevant nodes and generated code by default
                 traceNodes = rawNodes.filter(n => {
                     if (n.id === rootNodeId || n.name === rootNodeId) return true;
                     if (isDeclarationFileNode(n)) return false;
@@ -1962,7 +1962,7 @@
                 }).map(l => ({ ...l }));
             }
 
-            // 1. 构建完整图的双向邻接表，并计算所有节点在调用树中的拓扑深度 _layer (基于未过滤的完整调用流关系)
+            // 1. Build bidirectional adjacency list of the complete graph，Depth _layer ()
             const calleeMap = {};
             const callerMap = {};
             traceLinks.forEach(l => {
@@ -2017,7 +2017,7 @@
                 n._layer = depthMap[n.id] !== undefined ? depthMap[n.id] : 0;
             });
 
-            // 预先计算目录和层级关系
+            // Precompute directory and hierarchical relationships
             traceNodes.forEach(n => {
                 const group = directoryGroupForNode(n);
                 n._groupModuleId = group.id;
@@ -2025,7 +2025,7 @@
                 n._groupLevel = group.level;
             });
 
-            // 虚拟聚合节点继承父节点的目录属性
+            // Virtual aggregate node inherits parent's directory attributes
             traceNodes.forEach(n => {
                 if (n.type === 'virtual_aggregate' && n.parentId) {
                     const parent = traceNodeMap.get(n.parentId);
@@ -2037,11 +2037,11 @@
                 }
             });
 
-            // 动态填充目录透视过滤下拉菜单
+            // Dynamically populate directory perspective filter dropdown
             const moduleSelect = document.getElementById('und-module-select');
             if (moduleSelect) {
                 const currentSelected = selectedModuleFilter || 'all';
-                moduleSelect.innerHTML = '<option value="all">全部目录</option>';
+                moduleSelect.innerHTML = '<option value="all">All Directories</option>';
 
                 const uniqueModules = new Set();
                 traceNodes.forEach(n => {
@@ -2066,7 +2066,7 @@
                     selectedModuleFilter = 'all';
                 }
 
-                // 若处于透视状态，高亮显示下拉菜单
+                // Highlight dropdown menu if in perspective state
                 if (selectedModuleFilter !== 'all') {
                     moduleSelect.style.borderColor = 'var(--accent-primary)';
                     moduleSelect.style.color = 'var(--accent-primary)';
@@ -2078,7 +2078,7 @@
                 }
             }
 
-            // 过滤不属于选定目录的节点和连线
+            // Filter nodes and edges not belonging to the selected directory
             if (selectedModuleFilter !== 'all') {
                 traceNodes = traceNodes.filter(n => n._groupModuleId === selectedModuleFilter);
                 const activeNodeIds = new Set(traceNodes.map(n => n.id));
@@ -2186,7 +2186,7 @@
                 }
             });
 
-            // 初始化源码面板折叠/展开
+            // Initialize source panel collapse/expand
             const toggleBtn = document.getElementById('und-code-toggle');
             const layout = document.querySelector('.und-layout');
             if (toggleBtn && layout) {
@@ -2194,9 +2194,9 @@
                     e.stopPropagation();
                     const collapsed = layout.classList.toggle('code-collapsed');
                     toggleBtn.textContent = collapsed ? '‹' : '›';
-                    toggleBtn.title = collapsed ? '展开源码预览' : '收起源码预览';
+                    toggleBtn.title = collapsed ? 'Expand Source Preview' : 'Collapse Source Preview';
 
-                    // 重新计算并缩放画布
+                    // Recalculate and zoom canvas
                     setTimeout(() => {
                         if (traceCanvas) {
                             self.resizeTraceCanvas();
@@ -2236,7 +2236,7 @@
     window.SourceAstra.isolateModule = (moduleId) => {
         selectedModuleFilter = moduleId;
 
-        // 同步更新界面上的目录选择下拉菜单的值
+        // Synchronize directory selection dropdown value
         const moduleSelect = document.getElementById('und-module-select');
         if (moduleSelect) moduleSelect.value = moduleId;
 
@@ -2251,7 +2251,7 @@
     window.SourceAstra.clearModuleIsolation = () => {
         selectedModuleFilter = 'all';
 
-        // 同步更新界面上的目录选择下拉菜单的值为"all"
+        // Synchronize directory selection dropdown value"all"
         const moduleSelect = document.getElementById('und-module-select');
         if (moduleSelect) moduleSelect.value = 'all';
 

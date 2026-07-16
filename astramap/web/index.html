@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AstraMap - 星辰地图独立控制台</title>
+    <title>AstraMap - Starfield Independent Console</title>
     <script src="d3.min.js" defer></script>
     <link rel="stylesheet" href="index.css">
     <link rel="stylesheet" href="explore.css">
@@ -352,7 +352,7 @@
                     </div>
                     
                     <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
-                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">🖥️ 第四步，进入所在项目，可使用代码看函数调用链图</div>
+                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">🖥️ 第四步，进入所在项目，可使用代码看Function调用链图</div>
                         <div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">
                             <code style="background: rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 3px; font-size: 12px;">amap dashboard</code><br>
                             默认端口 3000，冲突自动+1<br>
@@ -469,7 +469,7 @@
                 };
                 menu.appendChild(item);
             };
-            addItem(isFunction ? '进入依赖分析' : '仅函数可进入依赖分析', isFunction, () => {
+            addItem(isFunction ? '进入依赖分析' : '仅Function可进入依赖分析', isFunction, () => {
                 openTraceForSymbol(key, name);
             });
 

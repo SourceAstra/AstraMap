@@ -22,7 +22,7 @@
     cursor: grabbing;
 }
 
-/* 探索视图工具栏 */
+/* Comment translation */
 #explore-toolbar {
     position: absolute;
     top: 12px;
@@ -33,7 +33,7 @@
     align-items: center;
 }
 
-/* 面包屑 - 在视图容器内部，不需要额外定位 */
+/* Comment translation */
 #explore-breadcrumb {
     display: flex;
     gap: 4px;
@@ -42,7 +42,7 @@
     max-width: 600px;
 }
 
-/* 浮层信息 */
+/* Comment translation */
 #explore-info {
     position: absolute;
     bottom: 20px;
@@ -71,13 +71,13 @@
     margin-bottom: 4px;
 }
 
-/* 边标签 */
+/* Comment translation */
 .edge-label {
     pointer-events: none;
     user-select: none;
 }
 
-/* 卡片交互 */
+/* Comment translation */
 .explore-card {
     transition: opacity 0.2s;
 }
@@ -101,10 +101,10 @@ body.theme-light #explore-info {
 }
 body.theme-light #explore-info b { color: #6366f1; }
 
-/* ==================== 智能文档抽屉面板 ==================== */
+/* Comment translation */
 .explore-doc-drawer {
     position: absolute;
-    top: 40px; /* 避开面包屑 */
+    top: 40px; /* Comment translation */
     right: 0;
     width: 400px;
     bottom: 0;
@@ -132,7 +132,7 @@ body.theme-light .explore-doc-drawer {
     color: #334155;
 }
 
-/* 拖拽拉伸条 */
+/* Comment translation */
 .explore-doc-resizer {
     position: absolute;
     left: 0;
@@ -217,7 +217,7 @@ body.theme-light .explore-doc-close:hover {
     scroll-behavior: smooth;
 }
 
-/* 优雅排版定义 */
+/* Comment translation */
 .explore-doc-markdown {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 13.5px;
@@ -353,7 +353,7 @@ body.theme-light .explore-doc-markdown blockquote {
     color: #475569;
 }
 
-/* ===== 智能文档配置卡片 ===== */
+/* Comment translation */
 .explore-doc-config {
     display: flex;
     flex-direction: column;
@@ -413,7 +413,7 @@ body.theme-light .explore-doc-select:hover {
     box-shadow: 0 0 8px rgba(99, 102, 241, 0.15);
 }
 
-/* ===== 核心流光按钮 ===== */
+/* Comment translation */
 .explore-doc-btn {
     background: linear-gradient(135deg, #6366f1 0%, #a855f7 45%, #ec4899 90%);
     background-size: 200% auto;
@@ -446,7 +446,7 @@ body.theme-light .explore-doc-select:hover {
     box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
 }
 
-/* 按钮微光闪烁特效 */
+/* Comment translation */
 .explore-doc-btn::after {
     content: '';
     position: absolute;
@@ -463,7 +463,7 @@ body.theme-light .explore-doc-select:hover {
     transition: all 0.8s ease-in-out;
 }
 
-/* ===== 暂无文档的艺术空状态 ===== */
+/* Comment translation */
 .explore-doc-empty-container {
     display: flex;
     flex-direction: column;
@@ -538,7 +538,7 @@ body.theme-light .explore-doc-empty-desc {
     color: #475569;
 }
 
-/* ===== 分步指示器与骨架屏 ===== */
+/* Comment translation */
 .explore-doc-loading-wrapper {
     display: flex;
     flex-direction: column;
@@ -630,7 +630,7 @@ body.theme-light .explore-doc-step-item.active .step-dot {
     background: #10b981;
 }
 
-/* 骨架屏动画 */
+/* Comment translation */
 .explore-doc-skeleton-container {
     display: flex;
     flex-direction: column;
@@ -657,7 +657,7 @@ body.theme-light .explore-doc-skeleton-bar {
     100% { background-position: -200% 0; }
 }
 
-/* 代码复制悬浮按钮 */
+/* Comment translation */
 .explore-doc-code-actions {
     position: absolute;
     top: 8px;
@@ -706,7 +706,7 @@ body.theme-light .explore-doc-code-btn:hover {
     background: rgba(99, 102, 241, 0.08);
 }
 
-/* 复制成功气泡 */
+/* Comment translation */
 .copy-tooltip {
     position: absolute;
     background: #10b981;
@@ -727,7 +727,7 @@ body.theme-light .explore-doc-code-btn:hover {
     transform: translateY(0);
 }
 
-/* 底部操作区面板 */
+/* Comment translation */
 .explore-doc-footer-panel {
     border-top: 1px solid rgba(255, 255, 255, 0.05);
     padding: 16px 24px;
@@ -778,7 +778,7 @@ body.theme-light .explore-doc-footer-btn:hover {
     color: #6366f1;
 }
 
-/* 顶部粘性栏 */
+/* Comment translation */
 .explore-doc-sticky-bar {
     position: sticky;
     top: 0;

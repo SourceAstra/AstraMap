@@ -1,6 +1,6 @@
 /**
  * SourceAstra - Explore Module JS v26
- * 两层导航架构：概览层(目录聚合大卡片) + 详情层(函数节点展开)
+ * 两层导航架构：概览层(目录聚合大卡片) + 详情层(Function节点展开)
  * 微服务卡片风格：圆角矩形 + 金色标题 + 虚线连接 + 深色背景
  */
 
@@ -8,24 +8,24 @@
     "use strict";
     const d3 = window.d3;
 
-    // ── 主题色（全面升级对齐星云图：深靛蓝背景 + 极客酷色调）──
+    // ── （： + ）──
     const THEME = {
-        bg: "transparent",                          // 让底层的 radial-gradient 极客背景透露出来
-        cardBg: "url(#card-bg-grad)",               // 与追踪视图、星云图统一的深靛蓝背景，渐变形式提升对比度
-        cardBorder: "url(#card-border-grad)",       // 半透明渐变微光边框
-        cardBorderHover: "#38bdf8",                 // 悬浮态霓虹青色
-        titleColor: "#f1f5f9",                      // 纯白高亮标题
-        descColor: "#94a3b8",                       // 优雅的石板灰描述
-        tagColor: "#cbd5e1",                        // 标签文字色
-        tagBg: "rgba(99, 102, 241, 0.15)",         // 标签半透明蓝底
-        linkColor: "rgba(255, 255, 255, 0.08)",    // 默认连线：与星云图一致的超细微半透明白线
-        linkHighlight: "rgba(56, 189, 248, 0.85)", // 激活态连线：霓虹青色 (Cyan)
-        separatorColor: "rgba(99, 102, 241, 0.15)",// 卡片内部分割线
+        bg: "transparent",                          //  radial-gradient 
+        cardBg: "url(#card-bg-grad)",               // 、，
+        cardBorder: "url(#card-border-grad)",       // 
+        cardBorderHover: "#38bdf8",                 // 
+        titleColor: "#f1f5f9",                      // 
+        descColor: "#94a3b8",                       // 
+        tagColor: "#cbd5e1",                        // 
+        tagBg: "rgba(99, 102, 241, 0.15)",         // 
+        linkColor: "rgba(255, 255, 255, 0.08)",    // ：
+        linkHighlight: "rgba(56, 189, 248, 0.85)", // ： (Cyan)
+        separatorColor: "rgba(99, 102, 241, 0.15)",// 
         separatorColor2: "rgba(99, 102, 241, 0.1)",
-        breadcrumbBg: "rgba(15, 23, 42, 0.85)",    // 面包屑背景
-        breadcrumbActive: "#38bdf8",               // 激活态面包屑 (Cyan)
+        breadcrumbBg: "rgba(15, 23, 42, 0.85)",    // 
+        breadcrumbActive: "#38bdf8",               //  (Cyan)
         textDim: "#64748b",
-        circleNode: "#38bdf8",                     // 节点圆圈颜色 (Cyan)
+        circleNode: "#38bdf8",                     //  (Cyan)
         lightTextColor: "#cbd5e1",
     };
 
@@ -113,7 +113,7 @@
             kind.includes('handler') || kind.includes('main') || kind.includes('callback');
     }
 
-    // ── 卡片尺寸 ──
+    // ──  ──
     const CARD = {
         width: 220,
         headerHeight: 32,
@@ -140,7 +140,7 @@
             this.nodeElements = null;
             this.labelElements = null;
 
-            // 两层导航状态
+            // 
             this.currentLevel = 'top'; // 'top' | 'module' | 'file' | 'trace'
             this.currentDir = null;
             this.currentFile = null;
@@ -149,7 +149,7 @@
             this.fileMap = null;
             this.fileEdges = null;
 
-            // 聚合数据缓存
+            // 
             this.dirMap = null;
             this.dirEdges = null;
             this.allNodesMap = null;
@@ -200,7 +200,7 @@
         }
         updateSize() {
             if (!this.container) return;
-            // 使用container（view-explore）的高度，而不是canvasContainer（会被SVG撑大）
+            // container（view-explore），canvasContainer（SVG）
             const parentRect = this.container.getBoundingClientRect();
             let w = Math.max(100, parentRect.width || window.innerWidth);
             let h = Math.max(100, parentRect.height || window.innerHeight - 88);
@@ -223,7 +223,7 @@
 
             const defs = this.svg.append('defs');
 
-            // ── 技术点阵网格背景 ──
+            // ──  ──
             const gridPattern = defs.append('pattern')
                 .attr('id', 'tech-grid')
                 .attr('width', 60)
@@ -242,7 +242,7 @@
                 .attr('r', 1.5)
                 .attr('fill', document.body.classList.contains('theme-light') ? 'rgba(79, 70, 229, 0.15)' : 'rgba(56, 189, 248, 0.25)');
 
-            // ── 卡片常规背景渐变 ──
+            // ──  ──
             const cardBgGrad = defs.append('linearGradient')
                 .attr('id', 'card-bg-grad')
                 .attr('x1', '0%').attr('y1', '0%')
@@ -255,7 +255,7 @@
                 cardBgGrad.append('stop').attr('offset', '100%').attr('stop-color', '#121724');
             }
 
-            // ── 卡片激活（起点）背景渐变 ──
+            // ── （Start） ──
             const cardBgGradActive = defs.append('linearGradient')
                 .attr('id', 'card-bg-grad-active')
                 .attr('x1', '0%').attr('y1', '0%')
@@ -268,7 +268,7 @@
                 cardBgGradActive.append('stop').attr('offset', '100%').attr('stop-color', '#1e1b4b');
             }
 
-            // ── 卡片常规微光渐变边框 ──
+            // ──  ──
             const cardBorderGrad = defs.append('linearGradient')
                 .attr('id', 'card-border-grad')
                 .attr('x1', '0%').attr('y1', '0%')
@@ -283,7 +283,7 @@
                 cardBorderGrad.append('stop').attr('offset', '100%').attr('stop-color', 'rgba(56, 189, 248, 0.3)');
             }
 
-            // ── 卡片激活（起点）霓虹渐变边框 ──
+            // ── （Start） ──
             const cardBorderGradActive = defs.append('linearGradient')
                 .attr('id', 'card-border-grad-active')
                 .attr('x1', '0%').attr('y1', '0%')
@@ -296,12 +296,12 @@
                 cardBorderGradActive.append('stop').attr('offset', '100%').attr('stop-color', '#f59e0b');
             }
 
-            // 发光滤镜
+            // 
             const glow = defs.append('filter').attr('id', 'card-glow');
             glow.append('feGaussianBlur').attr('stdDeviation', '4').attr('result', 'blur');
             glow.append('feComposite').attr('in', 'SourceGraphic').attr('in2', 'blur').attr('operator', 'over');
 
-            // 箭头标记（白色小圆点）
+            // （）
             defs.append('marker')
                 .attr('id', 'circle-end')
                 .attr('viewBox', '0 0 10 10')
@@ -324,7 +324,7 @@
 
             this.g = this.svg.append('g');
 
-            // ── 在 zoom 容器最底层渲染网格背景 ──
+            // ──  zoom  ──
             this.g.append('rect')
                 .attr('x', -50000)
                 .attr('y', -50000)
@@ -348,7 +348,7 @@
                 if (event.target.closest('.explore-card')) return;
                 event.preventDefault();
                 if (window.SourceAstra && window.SourceAstra.showContextMenu) {
-                    window.SourceAstra.showContextMenu(event.clientX, event.clientY, '__project__', '整个项目', {
+                    window.SourceAstra.showContextMenu(event.clientX, event.clientY, '__project__', 'Entire Project', {
                         docTargets: [{ docType: 'project', docKey: '__project__', autoGenerate: true }]
                     });
                 }
@@ -372,9 +372,9 @@
 
         async load() {
             if (this.loading) return;
-            // 如果已有缓存数据，直接重绘（切回视图时）
+            // ，（）
             if (this.rawData) {
-                // 强制重建 SVG（切走再切回来时尺寸可能变化）
+                //  SVG（）
                 this.width = 0;
                 this.height = 0;
                 this.svg = null;
@@ -441,7 +441,7 @@
             }
         }
 
-        // ── 构建目录聚合 ──
+        // ──  ──
         _buildAggregation() {
             if (window.G_GRAPH_MODE === 'projected' && window.G_PROJECTED_GRAPH) {
                 this.dirMap = {};
@@ -480,8 +480,8 @@
                 return;
             }
 
-            // 兼容两种数据格式：/api/data 返回 {symbols, edges}，/api/hierarchy 返回 {nodes, links}
-            // 同时过滤声明/接口文件中的孤立节点、生成代码以及非控制流节点，保持探索视图与源码星图口径一致。
+            // ：/api/data  {symbols, edges}，/api/hierarchy  {nodes, links}
+            // /、，。
             const rawNodes = (this.rawData.symbols || this.rawData.nodes || []).filter(n => isTraceableSymbol(n));
             const rawLinks = this.rawData.edges || this.rawData.links || [];
 
@@ -596,7 +596,7 @@
             return str.length > maxLen ? str.slice(0, maxLen - 1) + '…' : str;
         }
 
-        // ── 概览层：目录聚合大卡片 ──
+        // ── ： ──
         _drawOverview() {
             this.currentLevel = 'top';
             this.currentDir = null;
@@ -660,7 +660,7 @@
                 .force('x', d3.forceX(this.width / 2).strength(0.04))
                 .force('y', d3.forceY(d => {
                     const lvl = d.level != null ? d.level : 3;
-                    // 层级越高 (level 5/6) 约束在上方 (Y 越小)，层级越低在下方
+                    //  (level 5/6)  (Y )，
                     return this.height * (0.85 - (lvl / 6.0) * 0.7);
                 }).strength(0.18))
                 .alphaDecay(0.02);
@@ -687,7 +687,7 @@
             console.log('[Explore] _drawModule: dirPath =', dirPath, 'dirData =', dirData);
             if (!dirData) return;
 
-            // 大项目投影模式下动态加载模块详情
+            // 
             if (window.G_GRAPH_MODE === 'projected' && !dirData.loaded) {
                 if (this.statsEl) {
                     this.statsEl.textContent = "Loading module details...";
@@ -699,7 +699,7 @@
                     if (!res.ok) throw new Error('HTTP ' + res.status);
                     const subgraph = await res.json();
                     
-                    // 填充模块内部的 files 和 functions
+                    //  files  functions
                     dirData.files = {};
                     (subgraph.nodes || []).forEach(n => {
                         const file = n.file || '(unknown file)';
@@ -718,7 +718,7 @@
                         dirData.files[file].functions.push(n);
                     });
 
-                    // 同步到全局 window.G_DATA.symbols 以打通数据并动态更新左侧函数树
+                    //  window.G_DATA.symbols Function
                     if (window.G_DATA && window.G_DATA.symbols) {
                         (subgraph.nodes || []).forEach(n => {
                             if (!window.G_DATA.symbols[n.id]) {
@@ -739,7 +739,7 @@
                         }
                     }
 
-                    // 同步到 explore view 本地的 rawData 以便 _drawTrace 和子视图绘制
+                    //  explore view  rawData  _drawTrace 
                     if (this.rawData) {
                         const rawNodeIds = new Set(this.rawData.nodes.map(x => x.id));
                         (subgraph.nodes || []).forEach(n => {
@@ -779,7 +779,7 @@
                         });
                     }
                     
-                    // 计算出入度
+                    // 
                     this.fileEdges.forEach(e => {
                         const src = this.fileMap[e.source.replace('file:', '')];
                         const tgt = this.fileMap[e.target.replace('file:', '')];
@@ -878,7 +878,7 @@
             const fileData = this.fileMap ? this.fileMap[filePath] : null;
             if (!fileData) return;
 
-            // 大仓库投影模式下按需动态拉取模块子图数据
+            // 
             if (window.G_GRAPH_MODE === 'projected' && (!fileData.functions || fileData.functions.length === 0)) {
                 if (isRetry) {
                     if (this.statsEl) {
@@ -1048,7 +1048,7 @@
                 filePath = funcId.split('::')[0];
             }
 
-            // 大仓库投影模式下按需动态拉取模块子图数据
+            // 
             if (window.G_GRAPH_MODE === 'projected' && (!funcNode || !this.fileMap[filePath] || !this.fileMap[filePath].functions || this.fileMap[filePath].functions.length === 0)) {
                 if (isRetry) {
                     if (this.statsEl) {
@@ -1097,7 +1097,7 @@
             const nodeById = {};
             allNodes.forEach(n => { nodeById[n.id] = n; });
 
-            // 预构建邻接表，避免 BFS 中 O(depth*E) 的全量扫描
+            // ， BFS  O(depth*E) 
             const outgoing = {}; // id -> [calleeId, ...]
             const incoming = {}; // id -> [callerId, ...]
             allLinks.forEach(l => {
@@ -1204,20 +1204,20 @@
                 });
             }
 
-            // ===== 双向发散树形布局定位算法 =====
+            // ===== Bidirectional divergent tree layout algorithm =====
             const viewW = this.width || 1000;
             const viewH = this.height || 800;
-            const nodeSpacingX = CARD.width + 50; // 270px 横向基准间距
-            const nodeSpacingY = 160;            // 纵向层高
+            const nodeSpacingX = CARD.width + 50; // 270px 
+            const nodeSpacingY = 160;            // 
 
-            // 根节点定位在画布中心
+            // 
             const rootNode = nodeMap[funcId];
             if (rootNode) {
                 rootNode.x = (viewW - rootNode.cardWidth) / 2;
                 rootNode.y = (viewH - rootNode.cardHeight) / 2;
             }
 
-            // 向下分配（Callees）
+            // （Callees）
             const assignDown = (parentId) => {
                 const children = calleeMap[parentId] || [];
                 if (children.length === 0) return;
@@ -1235,7 +1235,7 @@
             };
             assignDown(funcId);
 
-            // 向上分配（Callers）
+            // （Callers）
             const assignUp = (childId) => {
                 const parents = callerMap[childId] || [];
                 if (parents.length === 0) return;
@@ -1253,7 +1253,7 @@
             };
             assignUp(funcId);
 
-            // 局部弹簧避让算法，防止节点横向重合
+            // ，
             const layersY = {};
             Object.values(nodeMap).forEach(node => {
                 const layerIdx = Math.round(node.y / nodeSpacingY);
@@ -1268,7 +1268,7 @@
                     for (let i = 0; i < layer.length - 1; i++) {
                         const curr = layer[i];
                         const next = layer[i+1];
-                        const minGap = CARD.width + 30; // 横向卡片之间的最小间隙安全线
+                        const minGap = CARD.width + 30; // 
                         const overlap = (curr.x + minGap) - next.x;
                         if (overlap > 0) {
                             curr.x -= overlap / 2;
@@ -1278,7 +1278,7 @@
                 }
             });
 
-            // 整体居中校准器（回正算法）
+            // （）
             const nodesArr = Object.values(nodeMap);
             if (nodesArr.length > 0) {
                 let minX = Infinity, maxX = -Infinity;
@@ -1319,7 +1319,7 @@
             const nodeMap = {};
             nodes.forEach(n => { nodeMap[n.id] = n; });
 
-            // ── 绘制连线（曲线，从父节点底部到子节点顶部）──
+            // ── （，）──
             this.linkElements = this.g.append('g')
                 .selectAll('g')
                 .data(links)
@@ -1337,17 +1337,17 @@
                     const src = nodeMap[typeof d.source === 'object' ? d.source.id : d.source];
                     const tgt = nodeMap[typeof d.target === 'object' ? d.target.id : d.target];
                     if (!src || !tgt) return '';
-                    // 从源节点底部中心 → 目标节点顶部中心
+                    //  → 
                     const x1 = src.x + src.cardWidth / 2;
                     const y1 = src.y + src.cardHeight;
                     const x2 = tgt.x + tgt.cardWidth / 2;
                     const y2 = tgt.y;
-                    // 贝塞尔曲线：垂直方向的控制点
+                    // ：
                     const midY = (y1 + y2) / 2;
                     return `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`;
                 });
 
-            // ── 绘制节点卡片 ──
+            // ──  ──
             this.nodeElements = this.g.append('g')
                 .selectAll('g')
                 .data(nodes)
@@ -1356,7 +1356,7 @@
                 .attr('transform', d => `translate(${d.x},${d.y})`)
                 .style('cursor', 'pointer');
 
-            // 卡片背景
+            // 
             this.nodeElements.append('rect')
                 .attr('class', 'card-bg')
                 .attr('width', d => d.cardWidth)
@@ -1367,7 +1367,7 @@
                 .attr('stroke', d => d.id === this.currentFuncId ? 'url(#card-border-grad-active)' : THEME.cardBorder)
                 .attr('stroke-width', d => d.id === this.currentFuncId ? 2 : 1);
 
-            // 标题
+            // 
             this.nodeElements.append('text')
                 .attr('class', 'card-title')
                 .attr('x', CARD.padding)
@@ -1378,7 +1378,7 @@
                 .attr('font-family', 'Roboto, sans-serif')
                 .text(d => this._truncate(d.name, 24));
 
-            // 分隔线1（标题下方）
+            // 1（）
             this.nodeElements.append('line')
                 .attr('x1', CARD.padding - 2)
                 .attr('y1', CARD.headerHeight + 6)
@@ -1387,7 +1387,7 @@
                 .attr('stroke', THEME.separatorColor)
                 .attr('stroke-width', 1);
 
-            // 文件路径
+            // 
             this.nodeElements.append('text')
                 .attr('class', 'card-desc')
                 .attr('x', CARD.padding)
@@ -1398,7 +1398,7 @@
                 .attr('opacity', 0.8)
                 .text(d => this._truncate(d.fileShort || d.file || '', 28));
 
-            // 分隔线2
+            // 2
             this.nodeElements.append('line')
                 .attr('x1', CARD.padding - 2)
                 .attr('y1', CARD.headerHeight + CARD.descLineHeight + 16)
@@ -1407,7 +1407,7 @@
                 .attr('stroke', THEME.separatorColor2)
                 .attr('stroke-width', 1);
 
-            // 连接数标签
+            // 
             const weightMap = {};
             links.forEach(l => {
                 const sid = typeof l.source === 'object' ? l.source.id : l.source;
@@ -1440,10 +1440,10 @@
                     return w + ' call' + (w !== 1 ? 's' : '');
                 });
 
-            // ── 交互 ──
+            // ──  ──
             this.nodeElements
                 .on('mouseenter', (event, d) => {
-                    // 高亮相关连线
+                    // 
                     this.linkElements.select('path')
                         .attr('stroke', l => {
                             const sid = typeof l.source === 'object' ? l.source.id : l.source;
@@ -1494,7 +1494,7 @@
                     }
                 });
 
-            // 缩放适应
+            // Fit
             requestAnimationFrame(() => this._fitToNodes(nodes));
         }
 
@@ -1506,9 +1506,9 @@
             return deg;
         }
 
-        // ── 通用卡片渲染 ──
+        // ──  ──
         _renderCards(nodes, links, isOverview) {
-            // 绘制连线（金色虚线 + 边标签）
+            // （ + ）
             this.linkElements = this.g.append('g')
                 .selectAll('g')
                 .data(links)
@@ -1522,7 +1522,7 @@
                 .attr('marker-end', 'url(#circle-end)')
                 .style('opacity', 0.7);
 
-            // 边标签（"N calls"）
+            // （"N calls"）
             this.labelElements = this.linkElements.append('text')
                 .attr('class', 'edge-label')
                 .attr('fill', THEME.tagColor)
@@ -1536,7 +1536,7 @@
                 })
                 .style('opacity', 0.8);
 
-            // 绘制节点卡片
+            // 
             this.nodeElements = this.g.append('g')
                 .selectAll('g')
                 .data(nodes)
@@ -1554,7 +1554,7 @@
                         d.fx = null; d.fy = null;
                     }));
 
-            // 卡片背景（圆角矩形）
+            // （）
             this.nodeElements.append('rect')
                 .attr('class', 'card-bg')
                 .attr('width', d => d.cardWidth)
@@ -1565,7 +1565,7 @@
                 .attr('stroke', d => d.id === this.currentFuncId ? 'url(#card-border-grad-active)' : THEME.cardBorder)
                 .attr('stroke-width', d => d.id === this.currentFuncId ? 2 : 1);
 
-            // 标题区域
+            // 
             this.nodeElements.append('text')
                 .attr('class', 'card-title')
                 .attr('x', CARD.padding)
@@ -1576,7 +1576,7 @@
                 .attr('font-family', 'Roboto, sans-serif')
                 .text(d => this._truncate(d.name, 24));
 
-            // 分隔线1（标题下方）
+            // 1（）
             this.nodeElements.append('line')
                 .attr('x1', CARD.padding - 2)
                 .attr('y1', CARD.headerHeight + 6)
@@ -1586,7 +1586,7 @@
                 .attr('stroke-width', 1);
 
             if (isOverview) {
-                // 概览层：描述 + 分隔线2 + 实体列表 + 标签
+                // ： + 2 +  + 
                 this.nodeElements.append('text')
                     .attr('class', 'card-desc')
                     .attr('x', CARD.padding)
@@ -1596,7 +1596,7 @@
                     .attr('font-family', 'Roboto, sans-serif')
                     .text(d => d.funcCount + ' functions');
 
-                // 分隔线2（描述下方）
+                // 2（）
                 this.nodeElements.append('line')
                     .attr('x1', CARD.padding - 2)
                     .attr('y1', CARD.headerHeight + CARD.descLineHeight + 16)
@@ -1605,7 +1605,7 @@
                     .attr('stroke', THEME.separatorColor2)
                     .attr('stroke-width', 1);
 
-                // 实体列表（前3个函数名）
+                // （3Function）
                 this.nodeElements.each((d, i, els) => {
                     const g = d3.select(els[i]);
                     d.topFuncs.forEach((fn, fi) => {
@@ -1620,7 +1620,7 @@
                     });
                 });
 
-                // "N calls" 标签
+                // "N calls" 
                 this.nodeElements.append('rect')
                     .attr('x', CARD.padding - 2)
                     .attr('y', d => d.cardHeight - CARD.tagHeight - CARD.padding + 2)
@@ -1642,7 +1642,7 @@
                     .text(d => d.totalDeg + ' call' + (d.totalDeg !== 1 ? 's' : ''));
 
             } else {
-                // 详情层：文件路径 + 分隔线2 + 标签
+                // ： + 2 + 
                 this.nodeElements.append('text')
                     .attr('class', 'card-desc')
                     .attr('x', CARD.padding)
@@ -1653,7 +1653,7 @@
                     .attr('opacity', 0.8)
                     .text(d => this._truncate(d.fileShort || d.file || '', 28));
 
-                // 分隔线2（描述下方）
+                // 2（）
                 this.nodeElements.append('line')
                     .attr('x1', CARD.padding - 2)
                     .attr('y1', CARD.headerHeight + CARD.descLineHeight + 16)
@@ -1662,7 +1662,7 @@
                     .attr('stroke', THEME.separatorColor2)
                     .attr('stroke-width', 1);
 
-                // "N calls" 标签
+                // "N calls" 
                 this.nodeElements.append('rect')
                     .attr('x', CARD.padding - 2)
                     .attr('y', d => d.cardHeight - CARD.tagHeight - CARD.padding + 2)
@@ -1684,7 +1684,7 @@
                     .text(d => d.weight + ' call' + (d.weight !== 1 ? 's' : ''));
             }
 
-            // ── 交互 ──
+            // ──  ──
             this.nodeElements
                 .on('mouseenter', (event, d) => {
                     this.linkElements.select('line')
@@ -1774,7 +1774,7 @@
             });
         }
 
-        // ── 面包屑 ──
+        // ──  ──
         _renderBreadcrumb() {
             if (window.G_CURRENT_VIEW !== 'explore' && window.G_CURRENT_VIEW !== 'trace') return;
             if (!this.dirMap) return;
@@ -1968,7 +1968,7 @@
                     }
                     const select = renderCustomDropdown(options, this.currentFuncId, (val) => {
                         this.currentFuncId = val;
-                        // 触发全局响应
+                        // 
                         const view = window.G_CURRENT_VIEW;
                         if (view === 'nebula' && window.focusNode) {
                             window.focusNode(val);
@@ -2020,7 +2020,7 @@
                 this.breadcrumbEl.appendChild(btn);
             });
 
-            // 追加下一级的占位下拉框（展开小箭头）
+            // （）
             if (this.currentLevel === 'top' && this.dirMap) {
                 const sep = document.createElement('span');
                 sep.textContent = '›';
@@ -2033,7 +2033,7 @@
                 const select = renderCustomDropdown(options, null, (val) => {
                     this._drawModule(val);
                     if (window.G_CURRENT_VIEW === 'nebula' && window.focusModule) window.focusModule(val);
-                }, '展开目录');
+                }, 'Expand Directory');
                 this.breadcrumbEl.appendChild(select);
             } else if (this.currentLevel === 'module') {
                 const sep = document.createElement('span');
@@ -2049,7 +2049,7 @@
                 const select = renderCustomDropdown(options, null, (val) => {
                     this._drawFile(val);
                     if (window.G_CURRENT_VIEW === 'nebula' && window.focusFile) window.focusFile(val);
-                }, '展开文件');
+                }, 'Expand File');
                 this.breadcrumbEl.appendChild(select);
             } else if (this.currentLevel === 'file') {
                 const sep = document.createElement('span');
@@ -2078,7 +2078,7 @@
                     } else {
                         this._drawTrace(val);
                     }
-                }, '选择函数');
+                }, 'Select Function');
                 this.breadcrumbEl.appendChild(select);
             }
 
@@ -2105,7 +2105,7 @@
                     transition: all 0.2s;
                     font-family: Roboto, sans-serif;
                 `;
-                docBtn.innerHTML = `<span>📖</span> <span id="explore-doc-btn-text">读取中...</span>`;
+                docBtn.innerHTML = `<span>📖</span> <span id="explore-doc-btn-text">...</span>`;
                 
                 docBtn.onclick = () => {
                     const isActive = this.docDrawer.classList.contains('active');
@@ -2121,7 +2121,7 @@
                 this.updateInlineDocButtonState(docBtn);
             }
 
-            // ===== 渲染左侧导航侧边栏 =====
+            // =====  =====
             if (window.G_CURRENT_VIEW !== 'explore' && window.G_CURRENT_VIEW !== 'nebula' && window.G_CURRENT_VIEW !== 'trace') {
                 return;
             }
@@ -2202,7 +2202,7 @@
                             } else {
                                 this._drawTrace(id);
                             }
-                            // 刷新侧边栏高亮态
+                            // 
                             const activeItems = sidebarListContainer.querySelectorAll('.sidebar-nav-item');
                             activeItems.forEach(ai => ai.classList.remove('active'));
                             item.classList.add('active');
@@ -2231,7 +2231,7 @@
             const w = maxX - minX || 1;
             const h = maxY - minY || 1;
             let scale = Math.min(this.width / w, this.height / h) * 0.85;
-            // 限制最大缩放比例为 1.0，防止单个或少数节点时被过度放大，导致显示失真
+            //  1.0，，
             if (scale > 1.0) scale = 1.0;
             const tx = this.width / 2 - (minX + maxX) / 2 * scale;
             const ty = this.height / 2 - (minY + maxY) / 2 * scale;
@@ -2318,13 +2318,13 @@
             
             if (this.docDrawer) {
                 this.docDrawer.classList.add('active');
-                this.renderDocActionPanel(type, key, options.autoGenerate ? '正在准备生成...' : '');
+                this.renderDocActionPanel(type, key, options.autoGenerate ? 'Preparing to generate...' : '');
                 if (options.autoGenerate) {
                     this.docTitle.textContent = type === 'file'
                         ? `文件: ${String(key).split('/').pop()}`
-                        : type === 'project' ? '项目理解文档' : `目录: ${this._dirDisplayName(key)}`;
+                        : type === 'project' ? 'Project Architecture Document' : `目录: ${this._dirDisplayName(key)}`;
                     await Promise.resolve();
-                    this.renderDocGeneratingState('正在准备代码上下文...');
+                    this.renderDocGeneratingState('Preparing code context...');
                     if (type === 'file') {
                         await Promise.resolve(this._drawFile(key));
                     } else if (type === 'module') {
@@ -2378,9 +2378,9 @@
                             </defs>
                         </svg>
                     </div>
-                    <div class="explore-doc-empty-title">暂无此${type === 'file' ? '文件' : (type === 'project' ? '项目' : '模块')}的理解文档</div>
+                    <div class="explore-doc-empty-title">${type === 'file' ? '' : (type === 'project' ? '' : '')}</div>
                     <div class="explore-doc-empty-desc">
-                        ${hint || '根据当前代码地图的目录、文件、符号与依赖关系生成本地理解文档。'}
+                        ${hint || '、、。'}
                     </div>
                     <button type="button" class="explore-doc-btn" id="explore-doc-generate-btn" style="width:100%;">
                         <span>⚡</span> 一键生成理解文档
@@ -2393,7 +2393,7 @@
             if (!this.docContent) return;
             this.docTitle.textContent = type === 'file'
                 ? `文件: ${String(key).split('/').pop()}`
-                : type === 'project' ? '项目理解文档' : `目录: ${this._dirDisplayName(key)}`;
+                : type === 'project' ? 'Project Architecture Document' : `目录: ${this._dirDisplayName(key)}`;
             
             this.docContent.innerHTML = this._getEmptyDocHtml(type, hint);
 
@@ -2402,7 +2402,7 @@
         renderDocGeneratingState(message = '正在提取代码上下文...') {
             if (!this.docContent) return;
             
-            // 依据步骤文案判定当前执行进度
+            // 
             let step1Class = 'active', step2Class = '', step3Class = '', step4Class = '';
             
             if (message.includes('呼叫') || message.includes('分析')) {
@@ -2472,7 +2472,7 @@
             const style = document.createElement('style');
             style.id = 'explore-doc-drawer-style';
             style.innerHTML = `
-                /* 本身的大量样式已统一在 modules/explore.css 中实现 */
+                /*  modules/explore.css  */
                 .explore-doc-drawer {
                     z-index: 200 !important;
                 }
@@ -2557,7 +2557,7 @@
                 if (res.ok) {
                     const list = await res.json();
                     if (list && list.length > 0) {
-                        textEl.textContent = `理解文档 [已生成]`;
+                        textEl.textContent = `Design Document [Generated]`;
                         docBtn.style.borderColor = THEME.breadcrumbActive;
                         docBtn.style.color = THEME.breadcrumbActive;
                         docBtn.style.borderStyle = 'solid';
@@ -2571,7 +2571,7 @@
                             docBtn.style.borderColor = THEME.breadcrumbActive; 
                         };
                     } else {
-                        textEl.textContent = '生成理解文档';
+                        textEl.textContent = 'Generate Design Document';
                         docBtn.style.borderColor = THEME.textDim + '80';
                         docBtn.style.color = THEME.textDim;
                         docBtn.style.borderStyle = 'dashed';
@@ -2590,7 +2590,7 @@
                 }
             } catch (e) {
                 console.error('[Explore] Failed to get doc list:', e);
-                textEl.textContent = '理解文档';
+                textEl.textContent = 'Design & Architecture Document';
             }
         }
 
@@ -2598,10 +2598,10 @@
             if (!this.docContent) return;
             const type = this.currentLevel === 'top' ? 'project' : (this.currentLevel === 'file' ? 'file' : 'module');
             const key = type === 'project' ? '__project__' : (type === 'file' ? this.currentFile : this.currentDir);
-            const title = this.currentLevel === 'file' ? `文件: ${key.split('/').pop()}` : (type === 'project' ? '项目理解文档' : `目录: ${this._dirDisplayName(key)}`);
+            const title = this.currentLevel === 'file' ? `文件: ${key.split('/').pop()}` : (type === 'project' ? 'Project Architecture Document' : `目录: ${this._dirDisplayName(key)}`);
 
             this.docTitle.textContent = title;
-            this.docContent.innerHTML = `<div style="text-align:center;padding:40px;color:${THEME.textDim};">加载中...</div>`;
+            this.docContent.innerHTML = `<div style="text-align:center;padding:40px;color:${THEME.textDim};">...</div>`;
 
             try {
                 const listRes = await fetch(`/api/documents/list?type=${type}&key=${encodeURIComponent(key)}`, {
@@ -2626,7 +2626,7 @@
 
                 this.renderDocArea(docData, historyList, targetTimestamp || docData.timestamp);
             } catch (e) {
-                this.docContent.innerHTML = `<div style="color:#ef4444;padding:20px;">加载出错: ${e.message}</div>`;
+                this.docContent.innerHTML = `<div style="color:#ef4444;padding:20px;">: ${e.message}</div>`;
             }
         }
 
@@ -2652,19 +2652,19 @@
                         </div>
                         <div style="display:flex; gap:8px; margin-top:4px; width:100%;">
                             <button type="button" class="explore-doc-btn" id="explore-doc-regenerate-btn" style="flex:1; min-height:30px; padding:4px 12px;">
-                                <span>⚡</span> 重新生成
+                                <span>⚡</span> Regenerate
                             </button>
                             <button type="button" class="explore-doc-btn" id="explore-doc-export-btn" style="flex:1; min-height:30px; padding:4px 12px; background:rgba(16,185,129,0.15); border-color:rgba(16,185,129,0.3); color:#10b981;">
-                                <span>📤</span> 导出
+                                <span>📤</span> Export
                             </button>
                         </div>
                     </div>
                     <div class="explore-doc-markdown" id="explore-doc-markdown-render">
-                        <div style="text-align:center;padding:20px;color:${THEME.textDim};">排版渲染中...</div>
+                        <div style="text-align:center;padding:20px;color:${THEME.textDim};">...</div>
                     </div>
                     <div class="explore-doc-footer-panel">
                         <button class="explore-doc-footer-btn" id="explore-doc-copy-all-btn" style="width: 100%;">
-                            <span>📋</span> 复制 Markdown 全文
+                            <span>📋</span> Copy Markdown Full Text
                         </button>
                     </div>
                 `;
@@ -2682,7 +2682,7 @@
                 };
             }
 
-            // 导出文档绑定
+            // Export document bindings
             const exportBtn = this.docContent.querySelector('#explore-doc-export-btn');
             if (exportBtn && hasDoc) {
                 exportBtn.onclick = () => {
@@ -2699,13 +2699,13 @@
                 };
             }
 
-            // 全文复制绑定
+            // Copy
             const copyAllBtn = this.docContent.querySelector('#explore-doc-copy-all-btn');
             if (copyAllBtn && hasDoc) {
                 copyAllBtn.onclick = () => {
                     navigator.clipboard.writeText(docData.content).then(() => {
                         const originalText = copyAllBtn.innerHTML;
-                        copyAllBtn.innerHTML = '<span>✅</span> 全文复制成功';
+                        copyAllBtn.innerHTML = '<span>✅</span> Full Copy Successful';
                         setTimeout(() => {
                             copyAllBtn.innerHTML = originalText;
                         }, 2000);
@@ -2721,7 +2721,7 @@
                     console.error('[Explore] Markdown render failed:', err);
                     mdRenderEl.innerHTML = `
                         <div style="color:#ef4444;padding:16px;border:1px solid rgba(239,68,68,0.25);border-radius:8px;margin-bottom:12px;">
-                            文档排版失败，已切换为原文显示: ${this.escapeHtml(err.message || String(err))}
+                            Document formatting failed, switched to raw text: ${this.escapeHtml(err.message || String(err))}
                         </div>
                         <pre style="white-space:pre-wrap;word-break:break-word;color:${THEME.text};background:rgba(15,23,42,0.55);padding:16px;border-radius:8px;">${this.escapeHtml(docData.content)}</pre>
                     `;
@@ -2761,12 +2761,12 @@
             await window.loadLib('marked');
             const markedApi = window.marked && (window.marked.parse ? window.marked : window.marked.marked);
             if (!markedApi || typeof markedApi.parse !== 'function') {
-                throw new Error('marked 解析器未正确加载');
+                throw new Error('marked parser not loaded correctly');
             }
 
             const RendererCtor = markedApi.Renderer || (window.marked && window.marked.Renderer);
             if (!RendererCtor) {
-                throw new Error('marked Renderer 不可用');
+                throw new Error('marked Renderer unavailable');
             }
 
             const renderer = new RendererCtor();
@@ -2780,8 +2780,8 @@
                     const escapedCode = encodeURIComponent(code.trim());
                     return `<div class="cogni-mermaid-wrapper" style="border:1px solid rgba(99,102,241,0.3); border-radius:8px; margin:16px 0; overflow:hidden;">
                         <div class="cogni-mermaid-header" style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(99,102,241,0.1); border-bottom:1px solid rgba(99,102,241,0.2);">
-                            <span style="font-size:11px; color:#818cf8; font-weight:600;">📊 架构关系图谱 (Mermaid)</span>
-                            <button class="cogni-mermaid-btn" onclick="SourceAstra.copyMermaidCode(this)" data-code="${escapedCode}" style="background:rgba(99,102,241,0.2); border:none; color:#a5b4fc; padding:4px 10px; border-radius:4px; font-size:10px; cursor:pointer;">📋 复制</button>
+                            <span style="font-size:11px; color:#818cf8; font-weight:600;">📊 Architectural Relationship Map (Mermaid)</span>
+                            <button class="cogni-mermaid-btn" onclick="SourceAstra.copyMermaidCode(this)" data-code="${escapedCode}" style="background:rgba(99,102,241,0.2); border:none; color:#a5b4fc; padding:4px 10px; border-radius:4px; font-size:10px; cursor:pointer;">📋 Copy</button>
                         </div>
                         <div class="mermaid-container" style="padding:16px; background:rgba(0,0,0,0.2);">
                             <div class="mermaid">${_self.escapeHtml(code.trim())}</div>
@@ -2795,7 +2795,7 @@
             const html = rendered && typeof rendered.then === 'function' ? await rendered : rendered;
             targetElement.innerHTML = this.sanitizeRenderedHtml(html);
 
-            // 动态注入代码块一键复制动作与语言标徽
+            // Copy
             targetElement.querySelectorAll('pre').forEach(pre => {
                 if (pre.querySelector('.explore-doc-code-actions')) return;
                 const codeEl = pre.querySelector('code');
@@ -2814,9 +2814,9 @@
                 actionsDiv.innerHTML = `
                     <span style="font-size:10px; color:#64748b; font-family:sans-serif; text-transform:uppercase;">${lang}</span>
                     <button class="explore-doc-code-btn" type="button">
-                        <span>📋</span> 复制
+                        <span>📋</span> Copy
                     </button>
-                    <span class="copy-tooltip">已复制</span>
+                    <span class="copy-tooltip">Copied</span>
                 `;
                 pre.appendChild(actionsDiv);
 
@@ -2828,10 +2828,10 @@
                         e.stopPropagation();
                         navigator.clipboard.writeText(codeEl.textContent).then(() => {
                             tooltip.classList.add('active');
-                            copyBtn.innerHTML = '<span>✅</span> 已复制';
+                            copyBtn.innerHTML = '<span>✅</span> Copied';
                             setTimeout(() => {
                                 tooltip.classList.remove('active');
-                                copyBtn.innerHTML = '<span>📋</span> 复制';
+                                copyBtn.innerHTML = '<span>📋</span> Copy';
                             }, 2000);
                         }).catch(err => {
                             console.error('Failed to copy code block:', err);
@@ -2875,10 +2875,10 @@
 
                 if (!response.ok) {
                     const errText = await response.text().catch(() => '');
-                    throw new Error(`文档生成失败 HTTP ${response.status}: ${errText.slice(0, 200)}`);
+                    throw new Error(`Document generation failed HTTP ${response.status}: ${errText.slice(0, 200)}`);
                 }
 
-                this.renderDocGeneratingState('正在刷新本地文档视图...');
+                this.renderDocGeneratingState('Refreshing local document view...');
 
                 await this.loadDocHistoryAndContent();
                 this.updateDocButtonState();
@@ -2887,12 +2887,12 @@
                 this.docContent.innerHTML = `
                     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70%; text-align:center; padding:20px; gap:12px;">
                         <span style="font-size:32px;">❌</span>
-                        <div style="font-size:14px; font-weight:600; color:#ef4444;">生成失败</div>
+                        <div style="font-size:14px; font-weight:600; color:#ef4444;">Generation failed</div>
                         <div style="font-size:12px; color:${THEME.textDim}; max-width:260px; line-height:1.5;">
                             ${this.escapeHtml(err.message || String(err))}
                         </div>
                         <button type="button" class="explore-doc-btn" id="explore-doc-retry-btn" style="margin-top:12px;">
-                            重试
+                            Retry
                         </button>
                     </div>
                 `;
@@ -2902,7 +2902,7 @@
         }
     }
 
-    // 挂载到全局
+    // Mount to global
     window.SourceAstra = window.SourceAstra || {};
 
     window.SourceAstra.initExplore = function () {
@@ -2983,7 +2983,7 @@
         }
     });
 
-    // 自动初始化
+    // Auto initialize
     if (document.getElementById('view-explore')) {
         window.SourceAstra.initExplore();
     }

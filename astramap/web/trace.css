@@ -1,7 +1,4 @@
-/**
- * SourceAstra - Understand Module CSS v2.0 (完全重写)
- * Design: Dual-panel layout with DAG trace + code preview
- */
+/* Comment translation */
 
 #view-trace {
     background: radial-gradient(circle at 50% 50%, #1a1e36 0%, #0d111a 60%, #07090f 100%);
@@ -155,7 +152,7 @@
 
 .und-graph-panel {
     flex: 1;
-    min-width: 0; /* 极其重要：打破 flex 容器默认 min-width: auto (min-content) 的约束限制，允许左侧面板自适应收缩，使得代码面板能顺畅地向左拉伸 */
+    min-width: 0; /* Comment translation */
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -317,7 +314,7 @@
 .und-code-panel {
     width: 480px;
     min-width: 200px;
-    flex-shrink: 0; /* 强制关闭弹性压缩，使 JS 计算的 width 物理生效 */
+    flex-shrink: 0; /* Comment translation */
     display: flex;
     flex-direction: column;
     background: #0d1117;
@@ -346,7 +343,7 @@ body:not(.resizing) .und-code-panel {
     align-items: center;
     justify-content: center;
     position: absolute;
-    right: -14px; /* 默认悬浮在最右边框外（覆盖在 resizer 线上） */
+    right: -14px; /* Comment translation */
     top: 50%;
     transform: translateY(-50%);
     width: 14px;
@@ -386,7 +383,7 @@ body:not(.resizing) .und-code-panel {
 
 /* ===== Resizer ===== */
 .und-resizer {
-    position: relative; /* 必须显式相对定位，否则 z-index 无效且易被相邻元素（如 canvas）的交互层级覆盖 */
+    position: relative; /* Comment translation */
     width: 8px;
     margin-left: -4px;
     margin-right: -4px;
@@ -753,7 +750,7 @@ body.theme-light .und-empty-state h3 {
     -webkit-text-fill-color: transparent;
 }
 
-/* ===== SCIP Fallback: 符号元信息降级卡片 ===== */
+/* Comment translation */
 .und-code-fallback {
     padding: 12px 16px;
     display: flex;
@@ -837,7 +834,7 @@ body.theme-light .und-empty-state h3 {
 }
 body.theme-light .und-empty-state p { color: #9e9584; }
  
-/* ===== 质量指标面板 ===== */
+/* Comment translation */
 .und-quality-panel {
     background: rgba(15, 15, 30, 0.95);
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -932,7 +929,7 @@ body.theme-light .und-qp-value {
     }
 }
 
-/* ===== 优雅美观的动态加载提示 ===== */
+/* Comment translation */
 .und-loading-overlay {
     position: absolute;
     top: 0;
@@ -1014,7 +1011,7 @@ body.theme-light .und-qp-value {
     50% { opacity: 1; }
 }
 
-/* Light Theme 适配 */
+/* Comment translation */
 body.theme-light .und-loading-overlay {
     background: rgba(240, 242, 247, 0.7);
 }

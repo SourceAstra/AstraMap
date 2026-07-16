@@ -1,6 +1,6 @@
 :root {
     --sidebar-width: 260px;
-    /* 基础背景：深靛蓝到深紫色的渐变 */
+    /* Comment translation */
     --bg-color-1: #0f172a;
     --bg-color-2: #1e1b4b;
     --bg-main: var(--bg-color-1);
@@ -11,35 +11,35 @@
     --nebula-glow-primary: rgba(125, 211, 252, 0.10);
     --nebula-glow-secondary: rgba(165, 180, 252, 0.12);
     
-    /* 玻璃拟态面板 */
+    /* Comment translation */
     --panel-bg: rgba(30, 41, 59, 0.75);
     --panel-border: rgba(255, 255, 255, 0.1);
     --panel-blur: blur(4px);
     
-    /* 文本色 */
+    /* Comment translation */
     --text-main: #f8fafc;
     --text-muted: #94a3b8;
     --text-dim: #64748b;
     
-    /* 品牌与符号色（更鲜艳的色调） */
+    /* Comment translation */
     --accent-primary: #6366f1; /* Indigo */
     --accent-secondary: #ec4899; /* Pink */
     
-    /* 节点类型色 */
+    /* Comment translation */
     --color-function: #38bdf8; /* Sky Blue */
     --color-macro: #4ade80;    /* Green */
     --color-struct: #fbbf24;   /* Amber */
     --color-typedef: #c084fc;  /* Purple */
     --color-variable: #94a3b8; /* Slate */
     --color-error: #f43f5e;    /* Rose */
-    --amber: #fbbf24;            /* Amber, 暗色模式 */
+    --amber: #fbbf24;            /* Comment translation */
     --amber-border: rgba(251,191,36,0.2);
     
-    /* 交互色 */
+    /* Comment translation */
     --hover-bg: rgba(255, 255, 255, 0.05);
     --select-bg: rgba(99, 102, 241, 0.2);
     
-    /* 阴影 */
+    /* Comment translation */
     --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
     --font-main: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -57,7 +57,7 @@ body {
     height: 100vh;
 }
 
-/* ===== 顶部导航栏 ===== */
+/* Comment translation */
 #toolbar {
     position: fixed; top: 0; left: 0; right: 0; height: 56px;
     background: var(--panel-bg);
@@ -76,7 +76,7 @@ body {
     margin-right: 20px;
 }
 
-/* 视图切换按钮 */
+/* Comment translation */
 .view-btn {
     background: transparent;
     border: none;
@@ -115,13 +115,13 @@ body {
     outline: none;
 }
 
-/* 搜索框仅源码星空/探索/追踪页面可见，其余视图隐藏 */
+/* Comment translation */
 body:not(.view-nebula):not(.view-explore):not(.view-trace) #search-box,
 body:not(.view-nebula):not(.view-explore):not(.view-trace) #sr {
     display: none !important;
 }
 
-/* 搜索结果 */
+/* Comment translation */
 #sr {
     position: fixed; top: 62px; left: 160px; width: 340px; 
     max-height: 500px; background: #1e293b; 
@@ -139,7 +139,7 @@ body:not(.view-nebula):not(.view-explore):not(.view-trace) #sr {
 .sri .tp { color: var(--text-dim); margin-left: 8px; font-size: 11px; text-transform: uppercase; }
 .sri .lc { color: var(--text-muted); margin-top: 4px; font-size: 12px; font-family: monospace; }
 
-/* ===== 按钮样式优化 ===== */
+/* Comment translation */
 .btn-primary {
     background: var(--accent-primary);
     border: none; color: white; padding: 6px 14px; border-radius: 8px;
@@ -156,7 +156,7 @@ body:not(.view-nebula):not(.view-explore):not(.view-trace) #sr {
 }
 .btn-secondary:hover { background: rgba(255,255,255,0.1); color: var(--text-main); border-color: var(--text-muted); }
 
-/* ===== 布局联动 ===== */
+/* Comment translation */
 body.has-sidebar #tp {
     display: flex !important;
     position: fixed; top: 84px; left: 0; width: var(--sidebar-width); bottom: 32px !important;
@@ -232,9 +232,9 @@ body:not(.has-sidebar) #view-trace {
     right: 0 !important;
 }
 
-/* ===== 侧边栏折叠按钮 ===== */
+/* Comment translation */
 #sidebar-toggle {
-    display: none;          /* 默认隐藏，has-sidebar 时才显示 */
+    display: none;          /* Comment translation */
     align-items: center;
     justify-content: center;
     position: fixed;
@@ -267,7 +267,7 @@ body.has-sidebar #sidebar-toggle {
     width: 18px;
 }
 
-/* 折叠状态：按钮移到左边缘 */
+/* Comment translation */
 body.has-sidebar.sidebar-collapsed #sidebar-toggle {
     left: 0;
     border-radius: 0 8px 8px 0;
@@ -294,7 +294,7 @@ body:not(.has-sidebar) #resizer {
     display: none !important;
 }
 
-/* 拖拽时禁用过渡动画，保证极致流畅 */
+/* Comment translation */
 body.resizing #tp,
 body.resizing #global-breadcrumb-bar,
 body.resizing #graph-canvas,
@@ -304,7 +304,7 @@ body.resizing #sidebar-toggle {
     transition: none !important;
 }
 
-/* ===== 导航侧边栏样式 ===== */
+/* Comment translation */
 .sidebar-nav-list {
     display: flex;
     flex-direction: column;
@@ -382,7 +382,7 @@ select option {
 
 #tc { flex: 1; overflow: auto; padding: 10px 0; }
 
-/* 树节点样式 */
+/* Comment translation */
 .tn {
     display: flex; align-items: center; padding: 6px 12px;
     cursor: pointer; font-size: 12px; transition: background 0.2s;
@@ -401,7 +401,7 @@ select option {
 
 .tch { margin-left: 12px; border-left: 1px solid rgba(255,255,255,0.05); }
 
-/* ===== 星云拓扑专属导出工具栏 ===== */
+/* Comment translation */
 #nebula-export-panel {
     display: none;
     align-items: center;
@@ -418,7 +418,7 @@ select option {
     line-height: 1;
 }
 
-/* ===== 右侧面板 ===== */
+/* Comment translation */
 #panel {
     position: fixed; top: 70px; right: 20px; width: 340px; max-height: calc(100vh - 120px);
     background: var(--panel-bg);
@@ -483,7 +483,7 @@ body.panel-active.panel-collapsed #right-panel-toggle {
 #panel .iv { color: var(--text-main); font-weight: 500; }
 #panel .st { font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-top: 24px; padding-bottom: 8px; border-bottom: 1px solid var(--panel-border); }
 
-/* ===== 状态栏与图例 ===== */
+/* Comment translation */
 #sb {
     position: fixed; bottom: 0; left: 0; right: 0; height: 32px;
     background: rgba(15, 23, 42, 0.95); border-top: 1px solid var(--panel-border);
@@ -496,14 +496,14 @@ body.panel-active.panel-collapsed #right-panel-toggle {
 #lg .it { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
 #lg .dt { width: 8px; height: 8px; border-radius: 50%; }
 
-/* 小地图 */
+/* Comment translation */
 #mm {
     position: fixed; bottom: 44px; right: 20px; width: 200px; height: 120px;
     background: var(--panel-bg); border: 1px solid var(--panel-border);
     border-radius: 12px; z-index: 500;
 }
 
-/* ===== 导入向导优化 ===== */
+/* Comment translation */
 #import-overlay {
     position: fixed; inset: 0; background: rgba(15, 23, 42, 0.8);
     backdrop-filter: var(--panel-blur); display: flex; align-items: center; justify-content: center;
@@ -538,13 +538,13 @@ body.panel-active.panel-collapsed #right-panel-toggle {
     background: rgba(99, 102, 241, 0.1);
 }
 
-/* 滚动条美化 */
+/* Comment translation */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
-/* ===== 导入向导缺失的布局美化 ===== */
+/* Comment translation */
 #import-card h1 {
     font-size: 32px; font-weight: 800; text-align: center; margin-bottom: 8px;
     background: linear-gradient(to right, var(--accent-primary), var(--accent-secondary));
@@ -641,7 +641,7 @@ body.panel-active.panel-collapsed #right-panel-toggle {
     overflow-y: auto; line-height: 1.6; border: 1px solid rgba(255,255,255,0.05);
 }
 
-/* ===== 文件树样式 ===== */
+/* Comment translation */
 .tree-file {
     display: flex; align-items: center; gap: 6px;
     padding: 6px 10px; cursor: pointer; border-radius: 6px;
@@ -665,7 +665,7 @@ body.panel-active.panel-collapsed #right-panel-toggle {
     width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
 }
 
-/* ===== 选中状态 & 右侧面板 ===== */
+/* Comment translation */
 .tree-item.active { background: rgba(99,102,241,0.2); color: #fff; font-weight: 600; }
 .info-row { display:flex; justify-content:space-between; align-items:flex-start; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px; gap:8px; }
 .info-row b { color:var(--text-dim); flex-shrink:0; }
@@ -834,29 +834,29 @@ body.theme-carbon {
 }
 
 
-/* 4. Morning Pearl Theme (晨雾珍珠) — 冷珠白·靛紫轴线 */
+/* Comment translation */
 body.theme-light {
-    --bg-color-1: #e2e8f0;                     /* 冷珠白基础色，稍稍暗一点提升对比度 */
-    --bg-color-2: #d8dee9;                     /* 稍深的蓝灰白 */
+    --bg-color-1: #e2e8f0;                     /* Comment translation */
+    --bg-color-2: #d8dee9;                     /* Comment translation */
     --bg-main: #e2e8f0;
     --bg-gradient: linear-gradient(135deg, #e2e8f0 0%, #d8dee9 100%);
-    --panel-bg: rgba(255, 255, 255, 0.95);     /* 纯净磨砂玻璃白 */
-    --panel-border: rgba(100, 116, 139, 0.14); /* 蓝灰边框，冷静而精确 */
+    --panel-bg: rgba(255, 255, 255, 0.95);     /* Comment translation */
+    --panel-border: rgba(100, 116, 139, 0.14); /* Comment translation */
     --panel-blur: blur(4px);
-    --accent-primary: #6366f1;                 /* 靛紫，与冷白背景完美协调 */
-    --accent-secondary: #818cf8;               /* 亮靛蓝辅助，渐变自然 */
-    --text-main: #1e293b;                      /* 深蓝灰，比纯黑更精致护眼 */
-    --text-muted: #475569;                     /* 中蓝灰字，清晰不刺眼 */
-    --text-dim: #818cf8;                       /* 靛蓝色，活力而统一 */
-    --color-function: #4f46e5;                 /* 深靛蓝 */
-    --color-macro: #0d9488;                    /* 松石绿 */
-    --color-struct: #d97706;                   /* 琥珀橙，在冷色中点睛 */
-    --color-typedef: #7c3aed;                  /* 紫罗兰 */
-    --color-variable: #64748b;                 /* 蓝灰 */
-    --color-error: #e11d48;                    /* 玫瑰红，醒目不刺激 */
-    --amber: #d97706;                          /* 琥珀橙，浅色模式下的 amber 替代 */
+    --accent-primary: #6366f1;                 /* Comment translation */
+    --accent-secondary: #818cf8;               /* Comment translation */
+    --text-main: #1e293b;                      /* Comment translation */
+    --text-muted: #475569;                     /* Comment translation */
+    --text-dim: #818cf8;                       /* Comment translation */
+    --color-function: #4f46e5;                 /* Comment translation */
+    --color-macro: #0d9488;                    /* Comment translation */
+    --color-struct: #d97706;                   /* Comment translation */
+    --color-typedef: #7c3aed;                  /* Comment translation */
+    --color-variable: #64748b;                 /* Comment translation */
+    --color-error: #e11d48;                    /* Comment translation */
+    --amber: #d97706;                          /* Comment translation */
     --amber-border: rgba(217,119,6,0.2);
-    --nebula-bg-top: #050914;                  /* 源码星图保持深空，避免被页面浅色变量漂白 */
+    --nebula-bg-top: #050914;                  /* Comment translation */
     --nebula-bg-mid: #0b1423;
     --nebula-bg-bottom: #070b16;
     --nebula-glow-primary: rgba(125, 211, 252, 0.12);
@@ -1302,14 +1302,14 @@ body.theme-light #mcc-ai-confirm-dialog-overlay textarea::selection {
     color: #1e293b !important;
 }
 
-/* ===== 修复面包屑导航条遮挡页面内容的问题 ===== */
+/* Comment translation */
 #view-explore,
 #view-trace {
     top: 84px !important;
     height: calc(100% - 84px) !important;
 }
 
-/* ===== 源码追踪页面（trace）去掉了面包屑导航后的适配 ===== */
+/* Comment translation */
 body.view-trace #tp {
     top: 56px !important;
 }
@@ -1323,7 +1323,7 @@ body.view-trace #view-trace {
     }
 }
 
-/* ===== 全站响应式工作台底座 ===== */
+/* Comment translation */
 html,
 body {
     width: 100%;
