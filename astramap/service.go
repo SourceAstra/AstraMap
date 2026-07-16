@@ -546,7 +546,7 @@ func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*As
 			q += "AND (kind = 'enum' OR (kind IN ('class', 'struct') AND language IN ('c', 'cpp') AND (signature LIKE 'enum %' OR signature LIKE 'typedef enum%' OR name LIKE '%_e' OR name LIKE '%enum%')) OR (kind IN ('typedef', 'type') AND language IN ('c', 'cpp') AND signature LIKE 'typedef enum%')) "
 		} else {
 			if kind == "typedef" || kind == "type" {
-				q += "AND (kind IN ('typedef', 'type') OR (language IN ('c', 'cpp') AND signature LIKE 'typedef %')) "
+				q += "AND (kind IN ('typedef', 'type') OR (language IN ('c', 'cpp') AND signature LIKE 'typedef %') OR (language = 'go' AND kind = 'struct')) "
 			} else {
 				q += "AND kind = ? "
 				params = append(params, kind)
@@ -915,6 +915,24 @@ func QueryExplore(db *sqlx.DB, query, projectRoot string, maxFiles int) (*Explor
 		for _, c := range callers {
 			result.Relationships = append(result.Relationships,
 				CanonicalSymbolIDForNodeID(db, c.Source)+" → "+CanonicalSymbolID(n))
+		}
+		if n.Kind == "struct" || n.Kind == "class" || n.Kind == "interface" {
+			var structEdges []struct {
+				Source string `db:"source"`
+				Target string `db:"target"`
+				Kind   string `db:"kind"`
+			}
+			err := db.Select(&structEdges, "SELECT source, target, kind FROM astramap_edges WHERE (source = ? OR target = ?) AND kind IN ('contains', 'implements')", n.ID, n.ID)
+			if err == nil {
+				for _, e := range structEdges {
+					src := CanonicalSymbolIDForNodeID(db, e.Source)
+					tgt := CanonicalSymbolIDForNodeID(db, e.Target)
+					if src != "" && tgt != "" {
+						result.Relationships = append(result.Relationships,
+							src+" "+e.Kind+" → "+tgt)
+					}
+				}
+			}
 		}
 	}
 	for _, n := range matchedNodes {
