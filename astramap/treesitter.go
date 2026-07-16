@@ -58,7 +58,6 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
 	sourceLines := strings.Split(string(codeBytes), "\n")
 
-
 	// 2. Identify Language and load corresponding Tree-sitter grammar
 	ext := strings.ToLower(filepath.Ext(filePath))
 	lang := "unknown"
@@ -372,7 +371,6 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 
 	collect(rootNode, initialContainer)
 
-
 	if lang == "c" || lang == "cpp" {
 		// 仅捕获具有显式声明、定义、初始化或注册意图的大写宏
 		heuristicMacroRegex := regexp.MustCompile(`\b((?:(?:DECLARE|DEF|CREATE|IMPLEMENT)_[A-Z0-9_]+)|(?:[A-Z0-9_]+_(?:INIT|FUNC|REGISTER|ENTRY|HANDLER|CALLBACK)))\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)`)
@@ -436,9 +434,6 @@ func ParseFileIncremental(projectRoot, filePath string) ([]*AstraMapNode, []*Ast
 			}
 		}
 	}
-
-
-
 
 	// 5. Traverse AST to collect 'calls' inside the same file
 	getEnclosingFunc := func(line int) *AstraMapNode {
@@ -705,7 +700,7 @@ func hasProjectExtension(projectRoot string, extensions ...string) bool {
 			return nil
 		}
 		if info.IsDir() {
-			if shouldSkipIndexDir(info.Name()) {
+			if hasHiddenSegment(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1053,7 +1048,7 @@ func buildFunctionPointerFieldMap(projectRoot string, shortMap map[string][]stri
 			return nil
 		}
 		if info.IsDir() {
-			if shouldSkipIndexDir(info.Name()) {
+			if hasHiddenSegment(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1104,7 +1099,7 @@ func buildFunctionPointerFieldMap(projectRoot string, shortMap map[string][]stri
 			return nil
 		}
 		if info.IsDir() {
-			if shouldSkipIndexDir(info.Name()) {
+			if hasHiddenSegment(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
