@@ -2,6 +2,7 @@ package astramap
 
 import (
 	"fmt"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS astramap_nodes (
     visibility     TEXT,                -- public/private/protected
     return_type    TEXT,                -- 返回类型
     is_exported    INTEGER DEFAULT 0,
+    provenance     TEXT DEFAULT 'tree-sitter',
     updated_at     INTEGER NOT NULL
 );
 
@@ -68,7 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_am_nodes_lower_name ON astramap_nodes(lower(name)
 CREATE INDEX IF NOT EXISTS idx_am_edges_source_kind ON astramap_edges(source, kind);
 CREATE INDEX IF NOT EXISTS idx_am_edges_target_kind ON astramap_edges(target, kind);
 CREATE INDEX IF NOT EXISTS idx_am_edges_kind ON astramap_edges(kind);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_am_edges_unique ON astramap_edges(source, target, kind, line);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_am_edges_unique ON astramap_edges(source, target, kind, provenance, line);
 CREATE INDEX IF NOT EXISTS idx_am_files_language ON astramap_files(language);
 
 -- FTS 同步触发器
@@ -90,7 +92,7 @@ CREATE TRIGGER IF NOT EXISTS am_fts_au AFTER UPDATE ON astramap_nodes BEGIN
 END;
 `
 
-// InitAstraMapSchema 初始化数据库 Schema
+// InitAstraMapSchema initializes the SQLite code map topological relationship tables
 func InitAstraMapSchema(db *sqlx.DB) error {
 	if db == nil {
 		return fmt.Errorf("database connection is nil")
@@ -109,7 +111,7 @@ func InitAstraMapSchema(db *sqlx.DB) error {
 			WHERE rowid NOT IN (
 				SELECT MIN(rowid) 
 				FROM astramap_edges 
-				GROUP BY source, target, kind, COALESCE(line, 0)
+				GROUP BY source, target, kind, provenance, COALESCE(line, 0)
 			)
 		`)
 	}
@@ -122,6 +124,13 @@ func InitAstraMapSchema(db *sqlx.DB) error {
 	// 迁移：将已有 edges 中的 NULL metadata 规约为空字符串
 	_, _ = db.Exec("UPDATE astramap_edges SET metadata = '' WHERE metadata IS NULL")
 	_, _ = db.Exec("ALTER TABLE astramap_files ADD COLUMN modified_at_ns INTEGER DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE astramap_nodes ADD COLUMN provenance TEXT DEFAULT 'tree-sitter'")
+	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'scip' WHERE id LIKE 'scip%'")
+	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'scip' WHERE id IN (SELECT source FROM astramap_edges WHERE provenance = 'scip') OR id IN (SELECT target FROM astramap_edges WHERE provenance = 'scip')")
+	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'heuristic' WHERE id LIKE 'route:%'")
+	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'tree-sitter' WHERE provenance IS NULL OR provenance = ''")
+	_, _ = db.Exec("DROP INDEX IF EXISTS idx_am_edges_unique")
+	_, _ = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_am_edges_unique ON astramap_edges(source, target, kind, provenance, line)")
 
 	return nil
 }
