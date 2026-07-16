@@ -398,7 +398,8 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		var allEdges []*AstraMapEdge
 		seenEdges := make(map[string]bool)
 		for _, id := range ids {
-			callers, err2 := GetCallersLimited(db, id, limit+1)
+			canonicalID := resolveCanonicalTraceStart(db, id)
+			callers, err2 := GetCallersLimited(db, canonicalID, limit+1)
 			if err2 == nil {
 				for _, c := range callers {
 					edgeKey := fmt.Sprintf("%s->%s:%d", c.Source, c.Target, c.Line)
@@ -439,7 +440,8 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		var allEdges []*AstraMapEdge
 		seenEdges := make(map[string]bool)
 		for _, id := range ids {
-			callees, err2 := GetCallees(db, id)
+			canonicalID := resolveCanonicalTraceStart(db, id)
+			callees, err2 := GetCallees(db, canonicalID)
 			if err2 == nil {
 				for _, c := range callees {
 					edgeKey := fmt.Sprintf("%s->%s:%d", c.Source, c.Target, c.Line)
@@ -479,7 +481,8 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 		seenNodes := make(map[string]bool)
 		var lastErr error
 		for _, id := range ids {
-			res, err2 := AnalyzeImpact(db, id, depth)
+			canonicalID := resolveCanonicalTraceStart(db, id)
+			res, err2 := AnalyzeImpact(db, canonicalID, depth)
 			if err2 != nil {
 				lastErr = err2
 				continue
