@@ -44,6 +44,9 @@ func getAstraMapDB(projectRoot string) (*sqlx.DB, error) {
 	}
 	db.SetMaxOpenConns(1)
 
+	// 回收上次异常退出残留的 WAL 锁
+	db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+
 	if err := astramap.InitAstraMapSchema(db); err != nil {
 		db.Close()
 		return nil, err
@@ -322,10 +325,6 @@ type LangCount struct {
 	Count int
 }
 
-// skipDirs are directory names to skip during file walks.
-var skipDirs = []string{".git", ".astramap", ".understand-anything", ".cache", ".idea", ".vscode",
-	"node_modules", "build", "dist", "vendor", "target", "out", "tmp", "temp"}
-
 func countFilesByExt(projectRoot string, filter *astramap.IndexFilter, exts ...string) int {
 	wanted := make(map[string]bool, len(exts))
 	for _, ext := range exts {
@@ -338,15 +337,7 @@ func countFilesByExt(projectRoot string, filter *astramap.IndexFilter, exts ...s
 		}
 		relPath, _ := filepath.Rel(projectRoot, path)
 		if info.IsDir() {
-			for _, skip := range skipDirs {
-				if info.Name() == skip {
-					return filepath.SkipDir
-				}
-			}
 			if filter != nil && !filter.AllowsDir(relPath, astramap.StageDetect) {
-				return filepath.SkipDir
-			}
-			if strings.HasPrefix(info.Name(), ".trash") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -444,15 +435,7 @@ func projectHasExtensions(projectRoot string, filter *astramap.IndexFilter, exts
 		}
 		relPath, _ := filepath.Rel(projectRoot, path)
 		if info.IsDir() {
-			for _, skip := range skipDirs {
-				if info.Name() == skip {
-					return filepath.SkipDir
-				}
-			}
 			if filter != nil && !filter.AllowsDir(relPath, astramap.StageDetect) {
-				return filepath.SkipDir
-			}
-			if strings.HasPrefix(info.Name(), ".trash") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -720,7 +703,6 @@ func ensureTsConfig(projectRoot string, filter *astramap.IndexFilter) error {
 	exclude := []string{"node_modules", "dist", ".astramap", "build"}
 	if filter != nil {
 		exclude = append(exclude, filter.Exclude...)
-		exclude = append(exclude, filter.ScipExclude...)
 	}
 	tsconfig := map[string]interface{}{
 		"compilerOptions": map[string]interface{}{
@@ -1133,7 +1115,8 @@ func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, lang
 	}
 	defer watcher.Close()
 
-	if err := addIndexWatchDirs(watcher, projectRoot); err != nil {
+	watchFilter, _ := astramap.LoadIndexFilter(projectRoot)
+	if err := addIndexWatchDirs(watcher, projectRoot, watchFilter); err != nil {
 		return err
 	}
 
@@ -1150,8 +1133,8 @@ func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, lang
 				return nil
 			}
 			if event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) {
-				if info, statErr := os.Stat(event.Name); statErr == nil && info.IsDir() && !shouldSkipWatchDir(filepath.Base(event.Name)) {
-					_ = addIndexWatchDirs(watcher, event.Name)
+				if info, statErr := os.Stat(event.Name); statErr == nil && info.IsDir() {
+					_ = addIndexWatchDirs(watcher, event.Name, watchFilter)
 				}
 			}
 			if isIndexWatchEvent(event) {
@@ -1455,24 +1438,19 @@ func ensureIndexFilterTemplate(lines []string) []string {
 			continue
 		}
 		switch normalizeIndexTemplateKey(key) {
-		case "include", "exclude", "scipexclude", "treesitterexclude":
+		case "include", "exclude", "forceinclude":
 			return lines
 		}
 	}
 
 	tail := []string{
 		"  # include:",
-		"  #   - \"**/*.go\"",
-		"  #   - \"**/*.ts\"",
+		"  #   - \"src/**\"",
 		"  # exclude:",
-		"  #   - \"docs/**\"",
-		"  #   - \"vendor/**\"",
-		"  #   - \"**/*.pb.go\"",
-		"  #   - \"**/*.min.js\"",
-		"  # scipExclude:",
-		"  #   - \"examples/**\"",
-		"  # treeSitterExclude:",
-		"  #   - \"testdata/**\"",
+		"  #   - \"examples/legacy/**\"",
+		"  # advanced:",
+		"  #   forceInclude:",
+		"  #     - \"src/.domain/**\"",
 	}
 	next := append([]string{}, lines[:indexEnd]...)
 	next = append(next, tail...)
@@ -1592,7 +1570,7 @@ func langIDs(selected []LangCount) []string {
 	return langs
 }
 
-func addIndexWatchDirs(watcher *fsnotify.Watcher, root string) error {
+func addIndexWatchDirs(watcher *fsnotify.Watcher, root string, filter *astramap.IndexFilter) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -1600,22 +1578,13 @@ func addIndexWatchDirs(watcher *fsnotify.Watcher, root string) error {
 		if !info.IsDir() {
 			return nil
 		}
-		if shouldSkipWatchDir(info.Name()) {
+		relPath, _ := filepath.Rel(root, path)
+		if filter != nil && !filter.AllowsDir(relPath, astramap.StageDetect) {
 			return filepath.SkipDir
 		}
 		_ = watcher.Add(path)
 		return nil
 	})
-}
-
-func shouldSkipWatchDir(name string) bool {
-	switch name {
-	case ".git", ".astramap", ".understand-anything", ".cache", ".idea", ".vscode",
-		"node_modules", "build", "dist", "vendor", "target", "out", "tmp", "temp":
-		return true
-	default:
-		return strings.HasPrefix(name, ".trash")
-	}
 }
 
 func isIndexWatchEvent(event fsnotify.Event) bool {
@@ -2580,25 +2549,27 @@ func printIndexFilterMatchReport(projectRoot string, filter *astramap.IndexFilte
 		logWarn("索引过滤命中列表生成失败: %v", err)
 		return
 	}
-	if len(report.Exclude) == 0 && len(report.ScipExclude) == 0 && len(report.TreeSitterExclude) == 0 {
+	if len(report.Excluded) == 0 {
 		return
 	}
 
 	fmt.Println("── 索引过滤命中 ──")
-	printFilterMatchList("exclude", report.Exclude)
-	printFilterMatchList("scipExclude", report.ScipExclude)
-	printFilterMatchList("treeSitterExclude", report.TreeSitterExclude)
+	byKind := make(map[astramap.ExcludeKind][]string)
+	for _, entry := range report.Excluded {
+		byKind[entry.Kind] = append(byKind[entry.Kind], entry.Path)
+	}
+	for kind, paths := range byKind {
+		fmt.Printf("  %s: %d\n", kind, len(paths))
+		const limit = 20
+		for i, p := range paths {
+			if i >= limit {
+				fmt.Printf("    ... +%d more\n", len(paths)-limit)
+				break
+			}
+			fmt.Printf("    - %s\n", p)
+		}
+	}
 	fmt.Println()
-}
-
-func printFilterMatchList(name string, paths []string) {
-	fmt.Printf("  %s: %d\n", name, len(paths))
-	if len(paths) == 0 {
-		return
-	}
-	for _, path := range paths {
-		fmt.Printf("    - %s\n", path)
-	}
 }
 
 func locateCmd() {
