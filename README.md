@@ -107,6 +107,8 @@ Dashboard 不是静态截图式代码地图，而是直接运行在同一份 SQL
 
 ## 支持语言
 
+当前 **7 种语言**已投入生产使用，基于 `language_registry.go` 的统一注册架构实现。另有 **12 种语言**（Rust、C#、Kotlin、Scala、Ruby、PHP、Dart、VB、Swift、Lua、Bash、Zig）的扩展设计已完成，见 `docs/language-extension-guide.md`。
+
 | 语言 | 扩展名 | Tree-sitter | 语义 Provider | 能力等级 |
 |------|--------|-------------|---------------|----------|
 | Go | `.go` | `tree-sitter-go` | `scip-go` 自动生成 | `semantic` |
