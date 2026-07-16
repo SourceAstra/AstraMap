@@ -58,7 +58,7 @@ func GetCallersLimited(db *sqlx.DB, symbolID string, limit int) ([]*AstraMapEdge
 	return edges, err
 }
 
-// GetCallees 查找指定符号的直接下游被调用者
+// GetCallees finds the direct downstream callees of a specified symbol
 func GetCallees(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 	var edges []*AstraMapEdge
 	err := db.Select(&edges, "SELECT "+edgeCols+" FROM astramap_edges WHERE source = ? AND kind = 'calls'", symbolID)
@@ -68,7 +68,7 @@ func GetCallees(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 	return edges, err
 }
 
-// AnalyzeImpact 变更影响分析：递归追溯所有上游调用者并计算受损系数
+// AnalyzeImpact performs change impact analysis: recursively traces all upstream callers and calculates the impact factor
 func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, error) {
 	maxDepth = normalizeImpactDepth(maxDepth)
 	rootCanonical := CanonicalSymbolIDForNodeID(db, symbolID)
@@ -78,7 +78,7 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 			AffectedNodes: []AffectedNodeSummary{{
 				SymbolID:    rootCanonical,
 				ImpactLevel: "ROOT",
-				Reason:      "根符号自身",
+				Reason:      "Root symbol itself",
 			}},
 		}, nil
 	}
@@ -152,14 +152,14 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 		result.AffectedNodes = append(result.AffectedNodes, AffectedNodeSummary{
 			SymbolID:    canonicalSym,
 			ImpactLevel: level,
-			Reason:      fmt.Sprintf("在图层 %d 中通过调用链路受到影响", depth),
+			Reason:      fmt.Sprintf("Affected via call chain at depth %d", depth),
 		})
 	}
 
 	return result, nil
 }
 
-// TracePath 查找从起始符号 A 到目标符号 B 的最短调用路径 (单向 BFS, 正向 callees 搜索)
+// TracePath finds the shortest call path from starting symbol A to target symbol B (unidirectional BFS, forward callees search)
 func TracePath(db *sqlx.DB, fromIDs, toIDs []string) ([][]string, error) {
 	type PathNode struct {
 		curr  string
@@ -214,7 +214,7 @@ func TracePath(db *sqlx.DB, fromIDs, toIDs []string) ([][]string, error) {
 	return results, nil
 }
 
-// FindDeadCode 死代码分析：基于已知入口点对整个符号图进行可达性扫描
+// FindDeadCode performs dead code analysis: scans reachability of the entire symbol graph based on known entry points
 func FindDeadCode(db *sqlx.DB, entryPoints []string) ([]*AstraMapNode, error) {
 	if len(entryPoints) == 0 {
 		var mains []string
@@ -261,10 +261,10 @@ func FindDeadCode(db *sqlx.DB, entryPoints []string) ([]*AstraMapNode, error) {
 	return dead, nil
 }
 
-// FindCycles 循环依赖检测：查找导入（imports）引用之间的环路。
-// level 控制检测粒度：
-//   - "package": 按 filepath.Dir 分组，检测目录（包）级循环依赖
-//   - "file" (默认): 按文件路径检测文件级循环依赖
+// FindCycles detects circular dependencies: finds cycles between import references.
+// level controls detection granularity:
+//   - "package": grouped by filepath.Dir to detect directory (package) level circular dependencies
+//   - "file" (default): detect file level circular dependencies
 func FindCycles(db *sqlx.DB, level string) ([][]string, error) {
 	if level == "" {
 		level = "file"
@@ -352,7 +352,7 @@ func FindCycles(db *sqlx.DB, level string) ([][]string, error) {
 	return cycles, nil
 }
 
-// GetCouplingMetrics 架构内聚耦合度分析
+// GetCouplingMetrics analyzes architectural cohesion and coupling (Ca/Ce)
 func GetCouplingMetrics(db *sqlx.DB, pathPrefix string) (*CouplingMetrics, error) {
 	var caCount, ceCount int
 
@@ -373,12 +373,12 @@ func GetCouplingMetrics(db *sqlx.DB, pathPrefix string) (*CouplingMetrics, error
 	return &CouplingMetrics{Ca: caCount, Ce: ceCount}, nil
 }
 
-// GetCodeOwners 代码所有权分析：结合 git log 反查历史作者
+// GetCodeOwners performs code ownership analysis: queries historical authors from git log
 func GetCodeOwners(db *sqlx.DB, symbolID string, projectRoot string) ([]CodeOwner, error) {
 	var filePath string
 	err := db.Get(&filePath, "SELECT file_path FROM astramap_nodes WHERE id = ?", symbolID)
 	if err != nil || filePath == "" {
-		return nil, fmt.Errorf("找不到符号对应文件: %v", err)
+		return nil, fmt.Errorf("cannot find file corresponding to symbol: %v", err)
 	}
 
 	absPath := filepath.Join(projectRoot, filePath)
