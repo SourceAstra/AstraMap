@@ -129,7 +129,6 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 		AffectedNodes: []AffectedNodeSummary{},
 	}
 
-
 	for sym, depth := range visited {
 		if sym == symbolID {
 			continue
@@ -214,7 +213,6 @@ func TracePath(db *sqlx.DB, fromIDs, toIDs []string) ([][]string, error) {
 
 	return results, nil
 }
-
 
 // FindDeadCode 死代码分析：基于已知入口点对整个符号图进行可达性扫描
 func FindDeadCode(db *sqlx.DB, entryPoints []string) ([]*AstraMapNode, error) {
