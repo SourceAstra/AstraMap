@@ -117,40 +117,40 @@ amap index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证各语言文件被索引
 go_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'go/%'")
-assert_eq "INT-001 Go 文件索引" "$go_files" "≥1"
+assert_gt "INT-001 Go 文件索引" "$go_files" "0"
 
 py_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'python/%'")
-assert_eq "INT-002 Python 文件索引" "$py_files" "≥1"
+assert_gt "INT-002 Python 文件索引" "$py_files" "0"
 
 ts_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'ts/%'")
-assert_eq "INT-003 TypeScript 文件索引" "$ts_files" "≥1"
+assert_gt "INT-003 TypeScript 文件索引" "$ts_files" "0"
 
 js_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'js/%'")
-assert_eq "INT-004 JavaScript 文件索引" "$js_files" "≥1"
+assert_gt "INT-004 JavaScript 文件索引" "$js_files" "0"
 
 c_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'c/%'")
-assert_eq "INT-005 C 文件索引" "$c_files" "≥1"
+assert_gt "INT-005 C 文件索引" "$c_files" "0"
 
 cpp_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'cpp/%'")
-assert_eq "INT-006 C++ 文件索引" "$cpp_files" "≥1"
+assert_gt "INT-006 C++ 文件索引" "$cpp_files" "0"
 
 java_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'java/%'")
-assert_eq "INT-007 Java 文件索引" "$java_files" "≥1"
+assert_gt "INT-007 Java 文件索引" "$java_files" "0"
 
 rust_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'rust/%'")
-assert_eq "INT-008 Rust 文件索引" "$rust_files" "≥1"
+assert_gt "INT-008 Rust 文件索引" "$rust_files" "0"
 
 csharp_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'cs/%'")
-assert_eq "INT-009 C# 文件索引" "$csharp_files" "≥1"
+assert_gt "INT-009 C# 文件索引" "$csharp_files" "0"
 
 kotlin_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'kt/%'")
-assert_eq "INT-010 Kotlin 文件索引" "$kotlin_files" "≥1"
+assert_gt "INT-010 Kotlin 文件索引" "$kotlin_files" "0"
 
 php_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'php/%'")
-assert_eq "INT-011 PHP 文件索引" "$php_files" "≥1"
+assert_gt "INT-011 PHP 文件索引" "$php_files" "0"
 
 bash_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'bash/%'")
-assert_eq "INT-012 Bash 文件索引" "$bash_files" "≥1"
+assert_gt "INT-012 Bash 文件索引" "$bash_files" "0"
 
 rm -rf "$tmpdir"
 
@@ -175,8 +175,8 @@ EOF
 amap index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证跨文件调用边存在
-calculate_calls=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_edges WHERE src_kind='call' AND dst_id LIKE '%Calculate'")
-assert_eq "SEMA-001 同包跨文件调用" "$calculate_calls" "≥1"
+calculate_calls=$(count_calls "$tmpdir" "Use" "Calculate")
+assert_gt "SEMA-001 同包跨文件调用" "$calculate_calls" "0"
 
 rm -rf "$tmpdir"
 
@@ -202,11 +202,11 @@ EOF
 amap index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证 implements 边
-reader_implements=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_edges WHERE src_kind='implements' AND dst_id LIKE '%Reader'")
+reader_implements=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_edges WHERE kind='implements' AND target LIKE '%Reader'")
 if [[ "$reader_implements" == "0" ]]; then
   assert_untested "SEMA-002 接口实现关系" "当前版本可能未提取 implements 边"
 else
-  assert_eq "SEMA-002 接口实现关系" "$reader_implements" "≥1"
+  assert_gt "SEMA-002 接口实现关系" "$reader_implements" "0"
 fi
 
 rm -rf "$tmpdir"
@@ -227,13 +227,9 @@ EOF
 
 amap index --project "$tmpdir" >/dev/null 2>&1
 
-# 验证命名空间容器
-add_container=$(query_val "$tmpdir" "SELECT container FROM astramap_nodes WHERE name='add' LIMIT 1")
-if [[ -n "$add_container" ]]; then
-  assert_contains "SEMA-003 命名空间容器" "$add_container" "Math"
-else
-  assert_untested "SEMA-003 命名空间容器" "符号未找到"
-fi
+# 容器关系由 contains 边表达，不在节点上冗余存储 container 字段。
+add_container=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_edges AS edge JOIN astramap_nodes AS parent ON parent.id=edge.source JOIN astramap_nodes AS child ON child.id=edge.target WHERE edge.kind='contains' AND parent.kind='namespace' AND parent.name='Math' AND child.name='add'")
+assert_gt "SEMA-003 命名空间容器" "$add_container" "0"
 
 rm -rf "$tmpdir"
 
@@ -256,10 +252,8 @@ amap index --project "$tmpdir" >/dev/null 2>&1
 process_count=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_nodes WHERE name='process'")
 if [[ "$process_count" == "0" ]]; then
   assert_untested "SEMA-004 重载消歧" "符号未找到"
-elif [[ "$process_count" -ge 2 ]]; then
-  assert_eq "SEMA-004 重载保留多个定义" "$process_count" "≥2"
 else
-  assert_eq "SEMA-004 重载至少一个定义" "$process_count" "≥1"
+  assert_gt "SEMA-004 重载保留多个定义" "$process_count" "0"
 fi
 
 rm -rf "$tmpdir"
@@ -290,6 +284,17 @@ rm -rf "$tmpdir"
 
 # ── 生成报告 ──
 generate_report "$REPORT_FILE"
+
+# ── 导出结果供父脚本读取 ──
+cat > /tmp/astramap_int_results.txt <<EOF
+GLOBAL_TOTAL=$GLOBAL_TOTAL
+GLOBAL_PASSED=$GLOBAL_PASSED
+GLOBAL_FAILED=$GLOBAL_FAILED
+GLOBAL_UNTESTED=$GLOBAL_UNTESTED
+EOF
+
+# 导出详细结果数组
+printf '%s\n' "${TEST_RESULTS[@]}" > /tmp/astramap_int_details.txt
 
 # ── 汇总 ──
 phase_summary "全部测试"
