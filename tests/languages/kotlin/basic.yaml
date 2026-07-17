@@ -1,0 +1,121 @@
+# Kotlin 基础定义与调用提取
+metadata:
+  language: kotlin
+  description: "Kotlin 函数、类、接口、数据类、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: function_definition
+    files:
+      Main.kt: |
+        fun add(a: Int, b: Int): Int {
+          return a + b
+        }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: class_definition
+    files:
+      Main.kt: |
+        class Point(val x: Double, val y: Double) {
+          fun distance(): Double {
+            return x * x + y * y
+          }
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "distance"
+          kind: method
+
+  - id: interface_definition
+    files:
+      Main.kt: |
+        interface Drawable {
+          fun draw()
+        }
+    expected:
+      symbols:
+        - name: "Drawable"
+          kind: interface
+        - name: "draw"
+          kind: method
+
+  - id: data_class
+    files:
+      Main.kt: |
+        data class User(val id: Int, val name: String)
+    expected:
+      symbols:
+        - name: "User"
+          kind: class
+
+  - id: simple_call
+    files:
+      Main.kt: |
+        fun greet(name: String): String {
+          return "Hello, $name"
+        }
+        fun main() {
+          greet("world")
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+        - name: "main"
+          kind: function
+
+  - id: extension_function
+    files:
+      Main.kt: |
+        fun String.addExclamation(): String {
+          return this + "!"
+        }
+    expected:
+      symbols:
+        - name: "addExclamation"
+          kind: function
+
+  - id: sealed_class
+    files:
+      Main.kt: |
+        sealed class Result
+        class Success(val data: String) : Result()
+        class Error(val message: String) : Result()
+    expected:
+      symbols:
+        - name: "Result"
+          kind: class
+        - name: "Success"
+          kind: class
+        - name: "Error"
+          kind: class
+
+  - id: object_declaration
+    files:
+      Main.kt: |
+        object Singleton {
+          fun doSomething() {}
+        }
+    expected:
+      symbols:
+        - name: "Singleton"
+          kind: class
+        - name: "doSomething"
+          kind: method
+
+  - id: enum_class
+    files:
+      Main.kt: |
+        enum class Color {
+          RED, GREEN, BLUE
+        }
+    expected:
+      symbols:
+        - name: "Color"
+          kind: enum

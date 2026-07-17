@@ -1,0 +1,150 @@
+# Go 边界与边缘场景
+metadata:
+  language: go
+  description: "Go 泛型、类型约束、闭包、unsafe、反射、defer、panic/recover、goroutine/channel、embed、build tags"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: generic_function_with_constraint
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        import "cmp"
+        func Min[T cmp.Ordered](a, b T) T {
+          if a < b { return a }
+          return b
+        }
+    expected:
+      symbols:
+        - name: "Min"
+          kind: function
+
+  - id: generic_struct_with_constraint
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type Number interface { ~int | ~float64 }
+        type Container[T Number] struct { value T }
+    expected:
+      symbols:
+        - name: "Number"
+          kind: interface
+        - name: "Container"
+          kind: struct
+
+  - id: closure_capture
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func makeMultiplier(factor int) func(int) int {
+          return func(x int) int { return x * factor }
+        }
+    expected:
+      symbols:
+        - name: "makeMultiplier"
+          kind: function
+
+  - id: defer_statement
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func withCleanup() {
+          defer cleanup()
+        }
+        func cleanup() {}
+    expected:
+      symbols:
+        - name: "withCleanup"
+          kind: function
+        - name: "cleanup"
+          kind: function
+
+  - id: panic_recover
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func safeCall() {
+          defer func() {
+            if r := recover(); r != nil {}
+          }()
+          panic("test")
+        }
+    expected:
+      symbols:
+        - name: "safeCall"
+          kind: function
+
+  - id: goroutine_and_channel
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func producer(ch chan<- int) {
+          ch <- 42
+        }
+        func consumer(ch <-chan int) int {
+          return <-ch
+        }
+    expected:
+      symbols:
+        - name: "producer"
+          kind: function
+        - name: "consumer"
+          kind: function
+
+  - id: unsafe_pointer
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        import "unsafe"
+        func bytesToString(b []byte) string {
+          return unsafe.String(&b[0], len(b))
+        }
+    expected:
+      symbols:
+        - name: "bytesToString"
+          kind: function
+
+  - id: reflect_type
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        import "reflect"
+        func typeName(v any) string {
+          return reflect.TypeOf(v).String()
+        }
+    expected:
+      symbols:
+        - name: "typeName"
+          kind: function
+
+  - id: embed_file
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        import _ "embed"
+        //go:embed data.txt
+        var data string
+    expected:
+      symbols: []
+
+  - id: build_tag
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        //go:build linux
+        package main
+        func platformSpecific() {}
+    expected:
+      symbols:
+        - name: "platformSpecific"
+          kind: function

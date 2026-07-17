@@ -1,0 +1,193 @@
+# Java 边界与边缘场景
+metadata:
+  language: java
+  description: "Java 注解处理器、泛型通配符、类型擦除、反射、Unsafe、JNI、VarHandle、MethodHandle、Stream API、Optional、CompletableFuture、Pattern Matching for switch、Records、Sealed classes、Text blocks、Switch expressions、Varargs with generics"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: annotation_processor
+    files:
+      Main.java: |
+        import java.lang.annotation.*;
+        @Retention(RetentionPolicy.RUNTIME)
+        @Target(ElementType.METHOD)
+        public @interface Logged {
+            String value() default "";
+        }
+    expected:
+      symbols:
+        - name: "Logged"
+          kind: interface
+
+  - id: wildcard_generics
+    files:
+      Main.java: |
+        import java.util.*;
+        public class Container {
+            public void process(List<? extends Number> numbers) {}
+            public void addAll(List<? super Integer> target) {}
+        }
+    expected:
+      symbols:
+        - name: "Container"
+          kind: class
+        - name: "process"
+          kind: method
+        - name: "addAll"
+          kind: method
+
+  - id: reflection_api
+    files:
+      Main.java: |
+        public class Reflector {
+            public static void inspect(Class<?> clazz) {
+                for (var method : clazz.getDeclaredMethods()) {
+                    System.out.println(method.getName());
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "Reflector"
+          kind: class
+        - name: "inspect"
+          kind: method
+
+  - id: stream_api
+    files:
+      Main.java: |
+        import java.util.*;
+        import java.util.stream.*;
+        public class StreamDemo {
+            public List<Integer> process(List<String> items) {
+                return items.stream()
+                    .filter(s -> !s.isEmpty())
+                    .map(String::length)
+                    .sorted(Comparator.reverseOrder())
+                    .collect(Collectors.toList());
+            }
+        }
+    expected:
+      symbols:
+        - name: "StreamDemo"
+          kind: class
+        - name: "process"
+          kind: method
+
+  - id: completable_future
+    files:
+      Main.java: |
+        import java.util.concurrent.*;
+        public class AsyncDemo {
+            public CompletableFuture<String> fetch() {
+                return CompletableFuture.supplyAsync(() -> "data")
+                    .thenApply(String::toUpperCase)
+                    .exceptionally(ex -> "error");
+            }
+        }
+    expected:
+      symbols:
+        - name: "AsyncDemo"
+          kind: class
+        - name: "fetch"
+          kind: method
+
+  - id: pattern_matching_switch
+    files:
+      Main.java: |
+        public class PatternDemo {
+            public String describe(Object obj) {
+                return switch (obj) {
+                    case Integer i -> "int: " + i;
+                    case String s -> "str: " + s;
+                    default -> "unknown";
+                };
+            }
+        }
+    expected:
+      symbols:
+        - name: "PatternDemo"
+          kind: class
+        - name: "describe"
+          kind: method
+
+  - id: record_class
+    files:
+      Main.java: |
+        public record Point(int x, int y) {
+            public Point {
+                if (x < 0 || y < 0) {
+                    throw new IllegalArgumentException("Coordinates must be non-negative");
+                }
+            }
+            public double distanceToOrigin() {
+                return Math.sqrt(x * x + y * y);
+            }
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "distanceToOrigin"
+          kind: method
+
+  - id: sealed_class
+    files:
+      Main.java: |
+        public sealed interface Shape permits Circle, Rectangle {}
+        public final class Circle implements Shape {
+            public double radius() { return 0; }
+        }
+        public final class Rectangle implements Shape {
+            public double width() { return 0; }
+        }
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: interface
+        - name: "Circle"
+          kind: class
+        - name: "Rectangle"
+          kind: class
+        - name: "radius"
+          kind: method
+        - name: "width"
+          kind: method
+
+  - id: text_blocks
+    files:
+      Main.java: |
+        public class JsonDemo {
+            public String getConfig() {
+                return """
+                    {
+                        "host": "localhost",
+                        "port": 8080
+                    }
+                    """;
+            }
+        }
+    expected:
+      symbols:
+        - name: "JsonDemo"
+          kind: class
+        - name: "getConfig"
+          kind: method
+
+  - id: varargs_generic
+    files:
+      Main.java: |
+        import java.util.*;
+        public class GenericVarargs {
+            @SafeVarargs
+            public final <T> List<T> asList(T... items) {
+                return Arrays.asList(items);
+            }
+        }
+    expected:
+      symbols:
+        - name: "GenericVarargs"
+          kind: class
+        - name: "asList"
+          kind: method

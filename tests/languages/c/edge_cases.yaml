@@ -1,0 +1,130 @@
+# C 边界与边缘场景
+metadata:
+  language: c
+  description: "C 可变参数宏、宏拼接、宏 stringify、匿名结构体、柔性数组、_Alignas、_Atomic、_Thread_local、_Generic、静态断言、函数指针数组、嵌套函数(GNU)、__attribute__、内联汇编"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: variadic_macro
+    files:
+      main.c: |
+        #include <stdio.h>
+        #define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)
+        #define ERROR(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+
+        int main() {
+            LOG("hello %s", "world");
+            return 0;
+        }
+    expected:
+      symbols:
+        - name: "main"
+          kind: function
+
+  - id: macro_concatenation
+    files:
+      main.c: |
+        #define CONCAT(a, b) a##b
+        #define MAKE_VAR(name) CONCAT(var_, name)
+        int MAKE_VAR(test) = 42;
+    expected:
+      symbols: []
+
+  - id: macro_stringify
+    files:
+      main.c: |
+        #define STR(x) #x
+        #define SHOW(x) STR(x)
+        const char* s = SHOW(hello);
+    expected:
+      symbols: []
+
+  - id: anonymous_struct
+    files:
+      main.c: |
+        struct Outer {
+            struct { int x; int y; } point;
+            struct { int w; int h; } size;
+        };
+    expected:
+      symbols:
+        - name: "Outer"
+          kind: struct
+
+  - id: flexible_array_member
+    files:
+      main.c: |
+        struct Buffer {
+            size_t len;
+            char data[];
+        };
+    expected:
+      symbols:
+        - name: "Buffer"
+          kind: struct
+
+  - id: function_pointer_array
+    files:
+      main.c: |
+        typedef int (*op_t)(int, int);
+        int add(int a, int b) { return a + b; }
+        int sub(int a, int b) { return a - b; }
+        op_t ops[] = { add, sub };
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+        - name: "sub"
+          kind: function
+
+  - id: _generic_selection
+    files:
+      main.c: |
+        #include <stdio.h>
+        #define print(x) _Generic((x), \
+            int: printf("%d\n", x), \
+            double: printf("%f\n", x), \
+            default: printf("unknown\n") \
+        )
+    expected:
+      symbols: []
+
+  - id: static_assert
+    files:
+      main.c: |
+        #include <assert.h>
+        static_assert(sizeof(int) == 4, "int must be 4 bytes");
+        _Static_assert(sizeof(long) >= 4, "long too small");
+    expected:
+      symbols: []
+
+  - id: thread_local_storage
+    files:
+      main.c: |
+        _Thread_local int counter = 0;
+
+        void increment() {
+            counter++;
+        }
+    expected:
+      symbols:
+        - name: "increment"
+          kind: function
+
+  - id: inline_function
+    files:
+      main.c: |
+        static inline int max(int a, int b) {
+            return a > b ? a : b;
+        }
+
+        int main() {
+            return max(1, 2);
+        }
+    expected:
+      symbols:
+        - name: "max"
+          kind: function
+        - name: "main"
+          kind: function

@@ -10,8 +10,9 @@ REPORT_FILE="${ASTRAMAP_REPORT_FILE:-$SCRIPT_DIR/reports/benchmark-report-latest
 mkdir -p "$SCRIPT_DIR/reports"
 
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
-printf "${BOLD}  AstraMap 性能基准测试 v1.0${RESET}\n"
+printf "${BOLD}  AstraMap 性能基准测试 v2.0${RESET}\n"
 printf "${BOLD}  日期: $(date '+%Y-%m-%d %H:%M:%S')${RESET}\n"
+printf "${BOLD}  覆盖: 12 种内置语言${RESET}\n"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 
 # ── 辅助函数 ──

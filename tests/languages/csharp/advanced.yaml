@@ -1,0 +1,108 @@
+# C# 高级语义场景
+metadata:
+  language: csharp
+  description: "C# 跨文件调用、继承、泛型约束、异步方法"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      Utils.cs: |
+        namespace App {
+          public class Calculator {
+            public static int Calculate(int x) { return x * 2; }
+          }
+        }
+      Program.cs: |
+        using System;
+        namespace App {
+          class Program {
+            static void Main() {
+              Console.WriteLine(Calculator.Calculate(10));
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "Calculate"
+          kind: method
+        - name: "Main"
+          kind: method
+
+  - id: class_inheritance
+    files:
+      Program.cs: |
+        namespace App {
+          abstract class Animal {
+            public abstract string Speak();
+          }
+          class Dog : Animal {
+            public override string Speak() { return "Woof"; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "Speak"
+          kind: method
+
+  - id: generic_constraints
+    files:
+      Program.cs: |
+        using System;
+        namespace App {
+          interface IComparable<T> {
+            int CompareTo(T other);
+          }
+          class Container<T> where T : IComparable<T> {
+            public T Value { get; set; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "IComparable"
+          kind: interface
+        - name: "Container"
+          kind: class
+
+  - id: async_method
+    files:
+      Program.cs: |
+        using System.Threading.Tasks;
+        namespace App {
+          class Fetcher {
+            public async Task<string> FetchAsync(string url) {
+              return await Task.FromResult(url);
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Fetcher"
+          kind: class
+        - name: "FetchAsync"
+          kind: method
+
+  - id: delegate_definition
+    files:
+      Program.cs: |
+        namespace App {
+          delegate int Operation(int a, int b);
+          class Calculator {
+            public static int Add(int a, int b) { return a + b; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Operation"
+          kind: type
+        - name: "Calculator"
+          kind: class
+        - name: "Add"
+          kind: method

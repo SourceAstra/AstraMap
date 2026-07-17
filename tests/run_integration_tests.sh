@@ -10,15 +10,16 @@ REPORT_FILE="${ASTRAMAP_REPORT_FILE:-$SCRIPT_DIR/reports/integration-report-late
 mkdir -p "$SCRIPT_DIR/reports"
 
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
-printf "${BOLD}  AstraMap 跨语言集成测试 v1.0${RESET}\n"
+printf "${BOLD}  AstraMap 跨语言集成测试 v2.0${RESET}\n"
 printf "${BOLD}  日期: $(date '+%Y-%m-%d %H:%M:%S')${RESET}\n"
+printf "${BOLD}  覆盖: 12 种内置语言${RESET}\n"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 
 # ── Phase 1: 多语言混合项目索引 ──
 phase_header "Phase 1: 多语言混合项目索引"
 
 tmpdir=$(mktemp -d)
-mkdir -p "$tmpdir/go" "$tmpdir/python" "$tmpdir/ts" "$tmpdir/c" "$tmpdir/cpp" "$tmpdir/java"
+mkdir -p "$tmpdir/go" "$tmpdir/python" "$tmpdir/ts" "$tmpdir/js" "$tmpdir/c" "$tmpdir/cpp" "$tmpdir/java" "$tmpdir/rust" "$tmpdir/cs" "$tmpdir/kt" "$tmpdir/php" "$tmpdir/bash"
 
 # Go 文件
 cat > "$tmpdir/go/main.go" << 'EOF'
@@ -40,6 +41,14 @@ function wrap<T>(value: T): T {
     return value;
 }
 const result = wrap(42);
+EOF
+
+# JavaScript 文件
+cat > "$tmpdir/js/app.js" << 'EOF'
+function greet(name) {
+    return "Hello, " + name;
+}
+console.log(greet("World"));
 EOF
 
 # C 文件
@@ -69,6 +78,41 @@ public class Main {
 }
 EOF
 
+# Rust 文件
+cat > "$tmpdir/rust/main.rs" << 'EOF'
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn main() { let _ = add(1, 2); }
+EOF
+
+# C# 文件
+cat > "$tmpdir/cs/Program.cs" << 'EOF'
+using System;
+class Program {
+    static int Add(int a, int b) { return a + b; }
+    static void Main() { Console.WriteLine(Add(1, 2)); }
+}
+EOF
+
+# Kotlin 文件
+cat > "$tmpdir/kt/Main.kt" << 'EOF'
+fun add(a: Int, b: Int): Int = a + b
+fun main() { println(add(1, 2)) }
+EOF
+
+# PHP 文件
+cat > "$tmpdir/php/index.php" << 'EOF'
+<?php
+function greet($name) { return "Hello, " . $name; }
+echo greet("World");
+EOF
+
+# Bash 文件
+cat > "$tmpdir/bash/script.sh" << 'EOF'
+#!/bin/bash
+function greet() { echo "Hello, $1"; }
+greet "World"
+EOF
+
 amap index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证各语言文件被索引
@@ -81,14 +125,32 @@ assert_eq "INT-002 Python 文件索引" "$py_files" "≥1"
 ts_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'ts/%'")
 assert_eq "INT-003 TypeScript 文件索引" "$ts_files" "≥1"
 
+js_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'js/%'")
+assert_eq "INT-004 JavaScript 文件索引" "$js_files" "≥1"
+
 c_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'c/%'")
-assert_eq "INT-004 C 文件索引" "$c_files" "≥1"
+assert_eq "INT-005 C 文件索引" "$c_files" "≥1"
 
 cpp_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'cpp/%'")
-assert_eq "INT-005 C++ 文件索引" "$cpp_files" "≥1"
+assert_eq "INT-006 C++ 文件索引" "$cpp_files" "≥1"
 
 java_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'java/%'")
-assert_eq "INT-006 Java 文件索引" "$java_files" "≥1"
+assert_eq "INT-007 Java 文件索引" "$java_files" "≥1"
+
+rust_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'rust/%'")
+assert_eq "INT-008 Rust 文件索引" "$rust_files" "≥1"
+
+csharp_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'cs/%'")
+assert_eq "INT-009 C# 文件索引" "$csharp_files" "≥1"
+
+kotlin_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'kt/%'")
+assert_eq "INT-010 Kotlin 文件索引" "$kotlin_files" "≥1"
+
+php_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'php/%'")
+assert_eq "INT-011 PHP 文件索引" "$php_files" "≥1"
+
+bash_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'bash/%'")
+assert_eq "INT-012 Bash 文件索引" "$bash_files" "≥1"
 
 rm -rf "$tmpdir"
 

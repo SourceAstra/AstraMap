@@ -1,7 +1,7 @@
-# 跨文件调用场景 — 验证同包/同模块跨文件引用解析
+# 跨语言调用场景 — 验证12种内置语言的跨文件引用解析
 metadata:
   language: multi
-  description: "跨文件调用解析（6 种语言）"
+  description: "跨文件调用解析（12 种内置语言）"
   complexity: scenario
   scip_required: false
 
@@ -29,17 +29,17 @@ fixtures:
     files:
       math_utils.py: |
         def calculate(x):
-            return x * 2
+          return x * 2
       app.py: |
         from math_utils import calculate
         def process():
-            return calculate(10)
+          return calculate(10)
     expected:
       symbols:
         - name: "calculate"
-          kind: method
+          kind: function
         - name: "process"
-          kind: method
+          kind: function
 
   - id: typescript_cross_file
     files:
@@ -50,6 +50,20 @@ fixtures:
       main.ts: |
         import { calculate } from './utils'
         function process(): number { return calculate(10) }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: javascript_cross_file
+    files:
+      utils.js: |
+        export function calculate(x) { return x * 2; }
+      main.js: |
+        import { calculate } from './utils';
+        function process() { return calculate(10); }
     expected:
       symbols:
         - name: "calculate"
@@ -76,7 +90,6 @@ fixtures:
           callee: "calculate"
 
   - id: cpp_cross_file
-    # 注意：.hpp 不被 C++ tree-sitter 索引，声明和定义都放在 .cpp 中
     files:
       math.cpp: |
         namespace Math {
@@ -114,3 +127,96 @@ fixtures:
           kind: class
         - name: "run"
           kind: method
+
+  - id: rust_cross_file
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/utils.rs: |
+        pub fn calculate(x: i32) -> i32 { x * 2 }
+      src/main.rs: |
+        mod utils;
+        fn process() -> i32 { utils::calculate(10) }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: csharp_cross_file
+    files:
+      Utils.cs: |
+        namespace App {
+          public class Calculator {
+            public static int Calculate(int x) { return x * 2; }
+          }
+        }
+      Program.cs: |
+        using System;
+        namespace App {
+          class Program {
+            static void Main() {
+              Console.WriteLine(Calculator.Calculate(10));
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "Calculate"
+          kind: method
+        - name: "Main"
+          kind: method
+
+  - id: kotlin_cross_file
+    files:
+      Utils.kt: |
+        package app
+        fun calculate(x: Int): Int = x * 2
+      Main.kt: |
+        package app
+        import app.calculate
+        fun process(): Int = calculate(10)
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: php_cross_file
+    files:
+      utils.php: |
+        <?php
+        function calculate($x) { return $x * 2; }
+      main.php: |
+        <?php
+        require_once 'utils.php';
+        function process() { return calculate(10); }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: bash_cross_file
+    files:
+      utils.sh: |
+        #!/bin/bash
+        calculate() { echo $(( $1 * 2 )); }
+      script.sh: |
+        #!/bin/bash
+        source utils.sh
+        process() { calculate 10; }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function

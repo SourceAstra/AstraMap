@@ -1,0 +1,184 @@
+# Python 边界与边缘场景
+metadata:
+  language: python
+  description: "Python 装饰器链、元类、描述符、上下文管理器、生成器表达式、lambda、类型注解、dataclass、property、staticmethod、classmethod、__slots__、抽象基类、多重继承、MRO、弱引用、GIL相关"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: decorator_chain
+    files:
+      main.py: |
+        def retry(times):
+            def decorator(func):
+                def wrapper(*args, **kwargs):
+                    for _ in range(times):
+                        return func(*args, **kwargs)
+                return wrapper
+            return decorator
+
+        @retry(3)
+        @cache
+        def fetch(url):
+            return url
+    expected:
+      symbols:
+        - name: "retry"
+          kind: function
+        - name: "fetch"
+          kind: function
+
+  - id: metaclass
+    files:
+      main.py: |
+        class Meta(type):
+            def __new__(mcs, name, bases, namespace):
+                return super().__new__(mcs, name, bases, namespace)
+
+        class Model(metaclass=Meta):
+            pass
+    expected:
+      symbols:
+        - name: "Meta"
+          kind: class
+        - name: "Model"
+          kind: class
+
+  - id: descriptor
+    files:
+      main.py: |
+        class Validator:
+            def __set_name__(self, owner, name):
+                self.name = name
+            def __get__(self, obj, objtype=None):
+                return obj.__dict__[self.name]
+            def __set__(self, obj, value):
+                obj.__dict__[self.name] = value
+
+        class Point:
+            x = Validator()
+            y = Validator()
+    expected:
+      symbols:
+        - name: "Validator"
+          kind: class
+        - name: "Point"
+          kind: class
+
+  - id: lambda_and_map
+    files:
+      main.py: |
+        square = lambda x: x ** 2
+        result = list(map(lambda x: x * 2, [1, 2, 3]))
+    expected:
+      symbols:
+        - name: "square"
+          kind: function
+
+  - id: type_annotations
+    files:
+      main.py: |
+        from typing import List, Dict, Optional
+
+        def process(items: List[int], config: Dict[str, str]) -> Optional[str]:
+            return None
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: dataclass
+    files:
+      main.py: |
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class Point:
+            x: float
+            y: float
+
+            def distance(self) -> float:
+                return (self.x ** 2 + self.y ** 2) ** 0.5
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "distance"
+          kind: method
+
+  - id: abstract_base_class
+    files:
+      main.py: |
+        from abc import ABC, abstractmethod
+
+        class Shape(ABC):
+            @abstractmethod
+            def area(self) -> float:
+                pass
+
+        class Circle(Shape):
+            def __init__(self, radius: float):
+                self.radius = radius
+            def area(self) -> float:
+                return 3.14 * self.radius ** 2
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: class
+        - name: "Circle"
+          kind: class
+        - name: "area"
+          kind: method
+
+  - id: multiple_inheritance
+    files:
+      main.py: |
+        class Flyable:
+            def fly(self): pass
+
+        class Swimmable:
+            def swim(self): pass
+
+        class Duck(Flyable, Swimmable):
+            def quack(self): pass
+    expected:
+      symbols:
+        - name: "Flyable"
+          kind: class
+        - name: "Swimmable"
+          kind: class
+        - name: "Duck"
+          kind: class
+        - name: "quack"
+          kind: method
+
+  - id: generator_expression
+    files:
+      main.py: |
+        def process():
+            return (x * 2 for x in range(10) if x % 2 == 0)
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: weakref_callback
+    files:
+      main.py: |
+        import weakref
+
+        class Data:
+            def __init__(self, value):
+                self.value = value
+
+        def on_finalize(ref):
+            pass
+
+        d = Data(42)
+        ref = weakref.ref(d, on_finalize)
+    expected:
+      symbols:
+        - name: "Data"
+          kind: class
+        - name: "on_finalize"
+          kind: function

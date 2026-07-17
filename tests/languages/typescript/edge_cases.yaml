@@ -1,0 +1,127 @@
+# TypeScript 边界与边缘场景
+metadata:
+  language: typescript
+  description: "TypeScript 条件类型、映射类型、模板字面量类型、装饰器、命名空间合并、模块增强、类型守卫、infer、递归类型、 branded types、const断言、 satisfies、keyof、typeof、索引签名"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: conditional_type
+    files:
+      main.ts: |
+        type IsString<T> = T extends string ? true : false;
+        type Result = IsString<"hello">;
+    expected:
+      symbols: []
+
+  - id: mapped_type
+    files:
+      main.ts: |
+        type Optional<T> = { [K in keyof T]?: T[K] };
+        interface User { name: string; age: number; }
+        type PartialUser = Optional<User>;
+    expected:
+      symbols:
+        - name: "User"
+          kind: interface
+
+  - id: template_literal_type
+    files:
+      main.ts: |
+        type EventName<T extends string> = `on${Capitalize<T>}`;
+        type ClickEvent = EventName<"click">;
+    expected:
+      symbols: []
+
+  - id: decorator
+    files:
+      main.ts: |
+        function logged(target: any, key: string) {
+          console.log(`Accessed ${key}`);
+        }
+
+        class User {
+          @logged
+          name: string = "";
+        }
+    expected:
+      symbols:
+        - name: "logged"
+          kind: function
+        - name: "User"
+          kind: class
+
+  - id: namespace_merge
+    files:
+      main.ts: |
+        namespace Utils {
+          export function log(msg: string): void {}
+        }
+        namespace Utils {
+          export function error(msg: string): void {}
+        }
+    expected:
+      symbols:
+        - name: "log"
+          kind: function
+        - name: "error"
+          kind: function
+
+  - id: type_guard
+    files:
+      main.ts: |
+        interface Cat { meow(): void; }
+        interface Dog { bark(): void; }
+        type Animal = Cat | Dog;
+
+        function isCat(animal: Animal): animal is Cat {
+          return (animal as Cat).meow !== undefined;
+        }
+    expected:
+      symbols:
+        - name: "isCat"
+          kind: function
+
+  - id: infer_keyword
+    files:
+      main.ts: |
+        type ReturnType<T> = T extends (...args: any[]) => infer R ? R : never;
+        type R = ReturnType<() => string>;
+    expected:
+      symbols: []
+
+  - id: const_assertion
+    files:
+      main.ts: |
+        const config = {
+          host: "localhost",
+          port: 3000
+        } as const;
+    expected:
+      symbols: []
+
+  - id: satisfies_operator
+    files:
+      main.ts: |
+        interface Config {
+          host: string;
+          port: number;
+        }
+        const config = {
+          host: "localhost",
+          port: 3000
+        } satisfies Config;
+    expected:
+      symbols: []
+
+  - id: index_signature
+    files:
+      main.ts: |
+        interface Dictionary {
+          [key: string]: number;
+        }
+        const dict: Dictionary = { a: 1, b: 2 };
+    expected:
+      symbols:
+        - name: "Dictionary"
+          kind: interface

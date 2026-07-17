@@ -1,0 +1,149 @@
+# Kotlin 边界与边缘场景
+metadata:
+  language: kotlin
+  description: "Kotlin 内联函数、交叉inline、泛型约束、类型投影、委托属性、by lazy、observable、属性委托、密封类、when表达式、类型别名、typealias、函数类型、高阶函数、SAM转换、尾递归优化、挂起函数、Flow、Channel、协程上下文、Context receivers、Value classes、Data objects、expect/actual、KMP多平台"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: inline_function
+    files:
+      Main.kt: |
+        inline fun <T> measureTime(block: () -> T): T {
+            val start = System.currentTimeMillis()
+            val result = block()
+            val end = System.currentTimeMillis()
+            println("Took ${end - start}ms")
+            return result
+        }
+    expected:
+      symbols:
+        - name: "measureTime"
+          kind: function
+
+  - id: crossinline
+    files:
+      Main.kt: |
+        inline fun runAsync(crossinline block: () -> Unit) {
+            Thread { block() }.start()
+        }
+    expected:
+      symbols:
+        - name: "runAsync"
+          kind: function
+
+  - id: delegated_property
+    files:
+      Main.kt: |
+        import kotlin.properties.Delegates
+        class User {
+            var name: String by Delegates.observable("") { _, old, new ->
+                println("$old -> $new")
+            }
+            val lazyValue: String by lazy { "computed" }
+        }
+    expected:
+      symbols:
+        - name: "User"
+          kind: class
+
+  - id: typealias
+    files:
+      Main.kt: |
+        typealias StringPredicate = (String) -> Boolean
+        typealias IntMap = Map<String, Int>
+        fun filterStrings(list: List<String>, predicate: StringPredicate): List<String> {
+            return list.filter(predicate)
+        }
+    expected:
+      symbols:
+        - name: "filterStrings"
+          kind: function
+
+  - id: higher_order_function
+    files:
+      Main.kt: |
+        fun <T, R> List<T>.map(transform: (T) -> R): List<R> {
+            val result = mutableListOf<R>()
+            for (item in this) {
+                result.add(transform(item))
+            }
+            return result
+        }
+    expected:
+      symbols:
+        - name: "map"
+          kind: function
+
+  - id: tailrec
+    files:
+      Main.kt: |
+        tailrec fun factorial(n: Long, acc: Long = 1): Long {
+            return if (n <= 1) acc else factorial(n - 1, n * acc)
+        }
+    expected:
+      symbols:
+        - name: "factorial"
+          kind: function
+
+  - id: suspend_function
+    files:
+      Main.kt: |
+        import kotlinx.coroutines.*
+        suspend fun fetchData(url: String): String {
+            delay(100)
+            return "data from $url"
+        }
+        suspend fun processUrls(urls: List<String>): List<String> {
+            return urls.map { fetchData(it) }
+        }
+    expected:
+      symbols:
+        - name: "fetchData"
+          kind: function
+        - name: "processUrls"
+          kind: function
+
+  - id: flow_builder
+    files:
+      Main.kt: |
+        import kotlinx.coroutines.flow.*
+        fun numbers(): Flow<Int> = flow {
+            for (i in 1..10) {
+                emit(i)
+            }
+        }
+        fun squaredNumbers(): Flow<Int> = numbers().map { it * it }
+    expected:
+      symbols:
+        - name: "numbers"
+          kind: function
+        - name: "squaredNumbers"
+          kind: function
+
+  - id: value_class
+    files:
+      Main.kt: |
+        @JvmInline
+        value class Password(val value: String) {
+            fun mask(): String = "*".repeat(value.length)
+        }
+    expected:
+      symbols:
+        - name: "Password"
+          kind: class
+        - name: "mask"
+          kind: method
+
+  - id: expect_actual
+    files:
+      Main.kt: |
+        expect class Platform {
+            fun name(): String
+        }
+    expected:
+      symbols:
+        - name: "Platform"
+          kind: class
+        - name: "name"
+          kind: method

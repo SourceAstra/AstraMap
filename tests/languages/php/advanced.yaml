@@ -1,0 +1,102 @@
+# PHP 高级语义场景
+metadata:
+  language: php
+  description: "PHP 跨文件调用、继承、命名空间导入、匿名类"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      utils.php: |
+        <?php
+        function calculate($x) {
+          return $x * 2;
+        }
+      main.php: |
+        <?php
+        require_once 'utils.php';
+        function process() {
+          return calculate(10);
+        }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: class_inheritance
+    files:
+      main.php: |
+        <?php
+        abstract class Animal {
+          abstract public function speak();
+        }
+        class Dog extends Animal {
+          public function speak() {
+            return "Woof";
+          }
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
+  - id: interface_implementation
+    files:
+      main.php: |
+        <?php
+        interface Printable {
+          public function print();
+        }
+        class Report implements Printable {
+          public function print() {
+            echo "report";
+          }
+        }
+    expected:
+      symbols:
+        - name: "Printable"
+          kind: interface
+        - name: "Report"
+          kind: class
+        - name: "print"
+          kind: method
+
+  - id: trait_usage
+    files:
+      main.php: |
+        <?php
+        trait Loggable {
+          public function log($msg) {
+            echo $msg;
+          }
+        }
+        class Service {
+          use Loggable;
+        }
+    expected:
+      symbols:
+        - name: "Loggable"
+          kind: trait
+        - name: "Service"
+          kind: class
+
+  - id: anonymous_class
+    files:
+      main.php: |
+        <?php
+        $obj = new class {
+          public function greet() {
+            return "hello";
+          }
+        };
+    expected:
+      symbols:
+        - name: "greet"
+          kind: method

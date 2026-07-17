@@ -10,7 +10,7 @@
 
 | 能力 | 一句话说明 |
 |------|--------|
-| **🛡️ 生态感知智能过滤** | 自动识别 Go/Node/Rust/Maven/Gradle/CMake/Python/Swift/Bazel 工程根，按生态生成构建产物排除规则；内置 40+ 条通用排除规则（VCS/依赖/缓存/二进制/压缩/生成源码），零配置开箱即用 |
+| **🛡️ 生态感知智能过滤** | 自动识别内置与语言包声明的工程根，按生态生成构建产物排除规则；通用规则与语言包规则统一执行 |
 | **📋 结构化过滤报告** | `amap index` 输出按规则类型分组的排除报告，含规则 ID、排除原因、覆盖数量，告别黑盒过滤 |
 | **🔁 `amap watch` 持续文件监听** | 独立守护进程增量轮询刷新，源码变更秒级体现，无需手动重新索引 |
 | **⚡ 按哈希增量索引更新** | 跳过未变动文件，仅对变更部分进行 AST 与 SCIP 增量导入 |
@@ -107,7 +107,7 @@ Dashboard 不是静态截图式代码地图，而是直接运行在同一份 SQL
 
 ## 支持语言
 
-当前 **7 种语言**已投入生产使用，基于 `language_registry.go` 的统一注册架构实现。另有 **12 种语言**（Rust、C#、Kotlin、Scala、Ruby、PHP、Dart、VB、Swift、Lua、Bash、Zig）的扩展设计已完成，见 `docs/language-extension-guide.md`。
+Core 内置 **12 种语言**：原有 7 种加 Rust、C#、Kotlin、PHP、Bash。Ruby、Dart、Swift、Lua、Scala、Zig、Visual Basic 通过签名语言包按需安装；安装后进入同一识别、索引、能力和 ProjectUnit 体系。
 
 | 语言 | 扩展名 | Tree-sitter | 语义 Provider | 能力等级 |
 |------|--------|-------------|---------------|----------|
@@ -117,11 +117,36 @@ Dashboard 不是静态截图式代码地图，而是直接运行在同一份 SQL
 | JavaScript / JSX | `.js` `.jsx` `.mjs` `.cjs` | TypeScript/TSX grammar | 与 TypeScript 共享 `scip-typescript` | `semantic` |
 | C | `.c` `.h` | `tree-sitter-c` | 与 C++ 共享 `scip-clang` | `semantic` |
 | C++ | `.cc` `.cpp` `.cxx` `.hpp` `.hxx`，以及 C++ 项目中的 `.h` | `tree-sitter-cpp` | 与 C 共享 `scip-clang` | `semantic` |
-| Java | `.java` | `tree-sitter-java` | 可导入已有 SCIP，暂不自动生成 | `local-graph` |
+| Java | `.java` | `tree-sitter-java` | `scip-java` 自动生成 | `semantic` |
+| Rust | `.rs` | `tree-sitter-rust` | `rust-analyzer` | `semantic` |
+| C# | `.cs` | `tree-sitter-c-sharp` | `scip-dotnet` | `semantic` |
+| Kotlin | `.kt` `.kts` | `tree-sitter-kotlin` | `scip-java` | `semantic` |
+| Scala（语言包） | `.scala` `.sc` | `tree-sitter-scala` | `scip-java` | `full` |
+| Ruby（语言包） | `.rb` `.rake`、Gemfile/Rakefile/shebang | `tree-sitter-ruby` | `scip-ruby` | `full` |
+| PHP | `.php` `.phtml` | `tree-sitter-php` | `scip-php`（实验） | `semantic` |
+| Dart（语言包） | `.dart` | `tree-sitter-dart` | `scip-dart`（实验） | `semantic` |
+| Visual Basic（语言包） | `.vb` | `tree-sitter-vb-dotnet` | `scip-dotnet`（实验） | `semantic` |
+| Swift（语言包） | `.swift` | `tree-sitter-swift` | — | `local-graph` |
+| Lua（语言包） | `.lua`、shebang | `tree-sitter-lua` | — | `local-graph` |
+| Bash | `.sh` `.bash`、启动文件/shebang | `tree-sitter-bash` | — | `local-graph` |
+| Zig（语言包） | `.zig` | `tree-sitter-zig` | — | `local-graph` |
 
-HTTP/MCP 状态接口同时返回 `supportedLanguages` 和 `languageCapabilities`。共享 Provider
-只执行一次：C/C++ 共用一次 `scip-clang`，TypeScript/JavaScript 共用一次
-`scip-typescript`。
+HTTP/MCP 状态接口同时返回声明能力、实际能力、Provider 和 ProjectUnit。共享 Provider 按项目
+单元执行一次：C/C++ 共享 `scip-clang`，TypeScript/JavaScript 共享 `scip-typescript`，
+Java/Kotlin与已安装的Scala包共享 `scip-java`，C#与已安装的Visual Basic包共享 `scip-dotnet`。
+
+语言包管理：
+
+```bash
+amap language install --trust-key ./trusted-keys.json ./ruby-1.0.0.amaplang
+amap language list
+amap language doctor ruby
+amap language disable ruby
+amap language remove ruby 1.0.0
+```
+
+安装后再次执行`amap index`，已有项目会自动合并实际检测到源码的新语言包。项目级同ID包覆盖
+用户级版本，其他身份、前缀、扩展名或固定文件名冲突会被拒绝并进入状态诊断。
 
 ## 快速开始
 
@@ -305,7 +330,7 @@ AstraMap 自动识别项目生态并应用对应过滤规则，无需手动配�
 | Gradle | `build.gradle` | `build/` |
 | CMake | `CMakeLists.txt` | `cmake-build-*/` |
 | Python | `pyproject.toml`, `setup.py` | — |
-| Swift | `Package.swift` | `.build/` |
+| Swift（语言包） | `Package.swift` | `.build/` |
 | Bazel | `WORKSPACE`, `MODULE.bazel` | `bazel-*/` |
 
 内置通用规则覆盖：VCS 元数据 (`.git/`, `.svn/`, `.hg/`, `.astramap/`)、第三方依赖 (`node_modules/`, `vendor/`, `Pods/`, `third_party/`)、缓存 (`__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.cache/`)、OS/编辑器垃圾 (`.DS_Store`, `*.swp`, `*~`)、压缩/Source Map (`*.min.js`, `*.js.map`)、生成源码 (`*.pb.go`, `*_pb2.py`, `*.pb.cc`, `*.g.dart`)、二进制文件 (`*.o`, `*.class`, `*.jar`, `*.wasm`, `*.zip`, `*.png`, `*.woff`)，以及文件头含 `Code generated` / `DO NOT EDIT` 的生成文件。
@@ -350,7 +375,7 @@ index:
 
 | 特性 | 说明 |
 |------|------|
-| **🛡️ 生态感知智能过滤** | 自动识别 9 种工程生态（Go/Node/Rust/Maven/Gradle/CMake/Python/Swift/Bazel），按生态生成构建产物排除规则；内置 40+ 条通用排除规则覆盖 VCS/依赖/缓存/二进制/压缩/生成源码，零配置开箱即用 |
+| **🛡️ 生态感知智能过滤** | 自动识别内置工程生态和语言包声明的 ProjectUnit，按项目根动态合并通用与语言专属排除规则 |
 | **📋 结构化过滤报告** | `amap index` 输出按规则类型分组的排除报告（规则 ID + 原因 + 数量），过滤行为完全透明 |
 | **🔗 外部调用占位符绑定** | 文件重索引时，被删除节点的入边自动迁移到 `external:` 占位符；新索引的同名函数自动绑定原有外部调用边，跨文件调用链在增量更新后保持连续 |
 
@@ -359,7 +384,7 @@ index:
 | 变更 | 说明 |
 |------|------|
 | **生态感知工程根识别** | `DetectProjectRoots` 扫描 `go.mod`/`package.json`/`Cargo.toml`/`pom.xml`/`build.gradle`/`CMakeLists.txt`/`pyproject.toml`/`Package.swift`/`WORKSPACE`/`MODULE.bazel` 等标记文件，建立工程根映射 |
-| **动态生态排除规则** | `BuildEcosystemRules` 按识别到的生态自动生成排除规则：Node.js → `dist/`/`coverage/`、Rust → `target/`、Maven → `target/`、Gradle → `build/`、CMake → `cmake-build-*/`、Swift → `.build/`、Bazel → `bazel-*/` |
+| **动态生态排除规则** | `BuildEcosystemRules` 处理内置生态；语言包通过 manifest 声明 ProjectUnit、构建目录和生成文件规则 |
 | **40+ 内置通用排除规则** | 统一规则引擎覆盖 VCS 元数据、第三方依赖（node_modules/vendor/Pods/third_party）、缓存（__pycache__/.pytest_cache/.mypy_cache/.cache/.sass-cache）、OS/编辑器垃圾（.DS_Store/Thumbs.db/*.swp/*~/*.tmp）、压缩/Source Map（*.min.js/*.js.map/*.d.ts.map）、生成源码（*.pb.go/*_pb2.py/*.pb.cc/*.g.dart）、二进制（*.o/*.class/*.jar/*.wasm/*.zip/*.png/*.woff）、模型/字体文件 |
 | **生成文件头检测** | `IsGeneratedByHeader` 扫描文件前 8KB / 100 行，正则匹配 `Code generated.*DO NOT EDIT` / `Generated by.*DO NOT EDIT` / `This file (was )?automatically generated` / `DO NOT EDIT THIS FILE` / `<auto-generated>` 等标记，自动排除生成文件 |
 | **统一过滤评估引擎** | `Evaluate`/`EvaluateDir` 替代旧 `Allows`/`AllowsDir`，内置规则 → 隐藏路径 → 用户 Include → 用户 Exclude 四级优先级；`forceInclude` 可覆盖任何 `Overridable` 规则 |
@@ -450,7 +475,7 @@ index:
 | **MCP stdio 服务** | 9 个工具（search/explore/node/callers/callees/impact/trace/status/files），JSON-RPC stdio 协议 |
 | **REST API** | 11 个端点，覆盖搜索、节点详情、调用链追踪、影响分析、区域探索 |
 | **D3.js 交互式 Dashboard** | 探索视界（全局→局部图谱浏览）、依赖关系视图（调用邻域展开） |
-| **7 种语言支持** | Go / Python / TypeScript / JavaScript / C / C++ / Java；能力等级由注册表统一派生 |
+| **12+7 种语言支持** | Core 内置12种，Ruby/Dart/Swift/Lua/Scala/Zig/VB通过版本化签名语言包安装；能力等级由项目Registry统一派生 |
 | **增量索引** | Tree-sitter 按文件哈希跳过未变更文件；`amap index` 快速增量；`amap watch` 持续监听 |
 | **CLI 诊断工具集** | locate / diff / hotspots / deadcode / cycles / coupling / owners / tree / query |
 | **一键 MCP 注册** | `amap install` 注册到 Claude Code / VS Code / Cursor / Codex |

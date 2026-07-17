@@ -1,0 +1,120 @@
+# Rust 高级语义场景
+metadata:
+  language: rust
+  description: "Rust 跨文件调用、trait实现、生命周期、泛型约束"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/utils.rs: |
+        pub fn calculate(x: i32) -> i32 {
+          x * 2
+        }
+      src/main.rs: |
+        mod utils;
+        fn process() -> i32 {
+          utils::calculate(10)
+        }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: trait_implementation
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Area {
+          fn area(&self) -> f64;
+        }
+        struct Circle {
+          radius: f64,
+        }
+        impl Area for Circle {
+          fn area(&self) -> f64 {
+            3.14 * self.radius * self.radius
+          }
+        }
+    expected:
+      symbols:
+        - name: "Area"
+          kind: trait
+        - name: "Circle"
+          kind: struct
+        - name: "area"
+          kind: method
+
+  - id: generic_struct
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct Container<T> {
+          value: T,
+        }
+        impl<T> Container<T> {
+          fn new(value: T) -> Self {
+            Container { value }
+          }
+          fn get(&self) -> &T {
+            &self.value
+          }
+        }
+    expected:
+      symbols:
+        - name: "Container"
+          kind: struct
+        - name: "new"
+          kind: method
+        - name: "get"
+          kind: method
+
+  - id: async_function
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        async fn fetch_data(url: &str) -> String {
+          url.to_string()
+        }
+    expected:
+      symbols:
+        - name: "fetch_data"
+          kind: function
+
+  - id: macro_definition
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        macro_rules! say_hello {
+          () => {
+            println!("Hello!");
+          };
+        }
+    expected:
+      symbols:
+        - name: "say_hello"
+          kind: macro

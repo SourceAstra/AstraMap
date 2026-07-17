@@ -1,0 +1,85 @@
+# JavaScript 高级语义场景
+metadata:
+  language: javascript
+  description: "JavaScript 跨文件调用、继承、闭包、模块导入导出"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      utils.js: |
+        export function calculate(x) {
+          return x * 2;
+        }
+      main.js: |
+        import { calculate } from './utils';
+        function process() {
+          return calculate(10);
+        }
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: class_inheritance
+    files:
+      main.js: |
+        class Animal {
+          speak() { return "sound"; }
+        }
+        class Dog extends Animal {
+          speak() { return "Woof"; }
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
+  - id: closure
+    files:
+      main.js: |
+        function makeCounter() {
+          let count = 0;
+          return function() {
+            return ++count;
+          };
+        }
+    expected:
+      symbols:
+        - name: "makeCounter"
+          kind: function
+
+  - id: destructured_import
+    files:
+      utils.js: |
+        export const PI = 3.14;
+        export function area(r) { return PI * r * r; }
+      main.js: |
+        import { area } from './utils';
+        function compute() { return area(5); }
+    expected:
+      symbols:
+        - name: "area"
+          kind: function
+        - name: "compute"
+          kind: function
+
+  - id: default_export_class
+    files:
+      app.js: |
+        export default class App {
+          run() { return "running"; }
+        }
+    expected:
+      symbols:
+        - name: "App"
+          kind: class
+        - name: "run"
+          kind: method

@@ -1,0 +1,177 @@
+# Rust 基础定义与调用提取
+metadata:
+  language: rust
+  description: "Rust 函数、结构体、枚举、impl、trait、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: function_definition
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn add(a: i32, b: i32) -> i32 {
+          a + b
+        }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: struct_definition
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct Point {
+          x: f64,
+          y: f64,
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+
+  - id: enum_definition
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        enum Color {
+          Red,
+          Green,
+          Blue,
+        }
+    expected:
+      symbols:
+        - name: "Color"
+          kind: enum
+
+  - id: impl_block
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct Counter {
+          value: i32,
+        }
+        impl Counter {
+          fn new() -> Self {
+            Counter { value: 0 }
+          }
+          fn increment(&mut self) {
+            self.value += 1;
+          }
+        }
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: struct
+        - name: "new"
+          kind: method
+        - name: "increment"
+          kind: method
+
+  - id: trait_definition
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Drawable {
+          fn draw(&self);
+        }
+    expected:
+      symbols:
+        - name: "Drawable"
+          kind: trait
+        - name: "draw"
+          kind: method
+
+  - id: simple_call
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn greet(name: &str) -> String {
+          format!("Hello, {}", name)
+        }
+        fn main() {
+          greet("world");
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+        - name: "main"
+          kind: function
+
+  - id: module_definition
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        mod math;
+        fn main() {}
+      src/math.rs: |
+        pub fn add(a: i32, b: i32) -> i32 {
+          a + b
+        }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: generic_function
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn identity<T>(value: T) -> T {
+          value
+        }
+    expected:
+      symbols:
+        - name: "identity"
+          kind: function
+
+  - id: const_and_static
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        const MAX_SIZE: usize = 100;
+        static VERSION: &str = "1.0";
+    expected:
+      symbols:
+        - name: "MAX_SIZE"
+          kind: constant
+        - name: "VERSION"
+          kind: constant

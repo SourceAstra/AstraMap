@@ -1,13 +1,13 @@
 # AstraMap 多语言测试报告
 
-- **执行时间**: 2026-07-16 20:50:45
-- **结论**: **失败**
+- **执行时间**: 2026-07-17 09:32:35
+- **结论**: **通过**
 
 ## 汇总
 
 | 总用例 | 已测试 | 通过 | 失败 | 未测试 | 通过率 | 完成率 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 217 | 217 | 197 | 20 | 0 | 90.8% | 100.0% |
+| 216 | 216 | 216 | 0 | 0 | 100.0% | 100.0% |
 
 ## 详细结果
 
@@ -42,9 +42,9 @@
 | ✓ | [go] cross_file_call: Use(kind=function) | 值大于阈值 |
 | ✓ | [go] cross_file_call: Use→Calculate | 值大于阈值 |
 | ✓ | [python] class_definition: Point(kind=class) | 值大于阈值 |
-| ✗ | [python] function_definition: greet(kind=method) | 值应大于%s，实际=%s |
-| ✗ | [python] simple_call: add(kind=method) | 值应大于%s，实际=%s |
-| ✗ | [python] simple_call: main(kind=method) | 值应大于%s，实际=%s |
+| ✓ | [python] function_definition: greet(kind=function) | 值大于阈值 |
+| ✓ | [python] simple_call: add(kind=function) | 值大于阈值 |
+| ✓ | [python] simple_call: main(kind=function) | 值大于阈值 |
 | ✓ | [python] simple_call: main→add | 值大于阈值 |
 | ✓ | [python] nested_class: Outer(kind=class) | 值大于阈值 |
 | ✓ | [python] nested_class: Inner(kind=class) | 值大于阈值 |
@@ -52,10 +52,10 @@
 | ✓ | [python] static_method: helper(kind=method) | 值大于阈值 |
 | ✓ | [python] class_method: Factory(kind=class) | 值大于阈值 |
 | ✓ | [python] class_method: create(kind=method) | 值大于阈值 |
-| ✗ | [python] async_function: fetch_data(kind=method) | 值应大于%s，实际=%s |
-| ✗ | [python] decorator_function: my_decorator(kind=method) | 值应大于%s，实际=%s |
-| ✗ | [python] decorator_function: wrapper(kind=method) | 值应大于%s，实际=%s |
-| ✗ | [python] decorator_function: decorated(kind=method) | 值应大于%s，实际=%s |
+| ✓ | [python] async_function: fetch_data(kind=function) | 值大于阈值 |
+| ✓ | [python] decorator_function: my_decorator(kind=function) | 值大于阈值 |
+| ✓ | [python] decorator_function: wrapper(kind=function) | 值大于阈值 |
+| ✓ | [python] decorator_function: decorated(kind=function) | 值大于阈值 |
 | ✓ | [python] multiple_classes: Dog(kind=class) | 值大于阈值 |
 | ✓ | [python] multiple_classes: Cat(kind=class) | 值大于阈值 |
 | ✓ | [python] multiple_classes: bark(kind=method) | 值大于阈值 |
@@ -97,8 +97,8 @@
 | ✓ | [cpp] simple_call: main→add | 值大于阈值 |
 | ✓ | [cpp] template_function: max(kind=function) | 值大于阈值 |
 | ✓ | [cpp] class_with_methods: Calculator(kind=class) | 值大于阈值 |
-| ✗ | [cpp] class_with_methods: add(kind=function) | 值应大于%s，实际=%s |
-| ✗ | [cpp] class_with_methods: subtract(kind=function) | 值应大于%s，实际=%s |
+| ✓ | [cpp] class_with_methods: add(kind=method) | 值大于阈值 |
+| ✓ | [cpp] class_with_methods: subtract(kind=method) | 值大于阈值 |
 | ✓ | [cpp] enum_definition: Color(kind=enum) | 值大于阈值 |
 | ✓ | [cpp] struct_definition: Record(kind=struct) | 值大于阈值 |
 | ✓ | [cpp] multiple_functions: max(kind=function) | 值大于阈值 |
@@ -130,12 +130,12 @@
 | ✓ | [go] interface_satisfaction: Area(kind=method) | 值大于阈值 |
 | ✓ | [go] multiple_return_values: ReadAll(kind=function) | 值大于阈值 |
 | ✓ | [go] variadic_function: Sum(kind=function) | 值大于阈值 |
-| ✗ | [python] cross_file_call: calculate(kind=method) | 值应大于%s，实际=%s |
-| ✗ | [python] cross_file_call: process(kind=method) | 值应大于%s，实际=%s |
+| ✓ | [python] cross_file_call: calculate(kind=function) | 值大于阈值 |
+| ✓ | [python] cross_file_call: process(kind=function) | 值大于阈值 |
 | ✓ | [python] class_inheritance: Animal(kind=class) | 值大于阈值 |
 | ✓ | [python] class_inheritance: Dog(kind=class) | 值大于阈值 |
 | ✓ | [python] class_inheritance: speak(kind=method) | 值大于阈值 |
-| ✗ | [python] generator_function: fibonacci(kind=method) | 值应大于%s，实际=%s |
+| ✓ | [python] generator_function: fibonacci(kind=function) | 值大于阈值 |
 | ✓ | [python] property_decorator: Circle(kind=class) | 值大于阈值 |
 | ✓ | [python] property_decorator: area(kind=method) | 值大于阈值 |
 | ✓ | [python] context_manager: FileManager(kind=class) | 值大于阈值 |
@@ -166,13 +166,13 @@
 | ✓ | [cpp] cross_file_call: main(kind=function) | 值大于阈值 |
 | ✓ | [cpp] class_inheritance: Shape(kind=class) | 值大于阈值 |
 | ✓ | [cpp] class_inheritance: Circle(kind=class) | 值大于阈值 |
-| ✗ | [cpp] class_inheritance: area(kind=function) | 值应大于%s，实际=%s |
+| ✓ | [cpp] class_inheritance: area(kind=method) | 值大于阈值 |
 | ✓ | [cpp] function_overload: process(kind=function) | 值大于阈值 |
 | ✓ | [cpp] template_class: Stack(kind=class) | 值大于阈值 |
-| ✗ | [cpp] template_class: push(kind=function) | 值应大于%s，实际=%s |
-| ✗ | [cpp] template_class: pop(kind=function) | 值应大于%s，实际=%s |
+| ✓ | [cpp] template_class: push(kind=method) | 值大于阈值 |
+| ✓ | [cpp] template_class: pop(kind=method) | 值大于阈值 |
 | ✓ | [cpp] operator_overload: Vec(kind=class) | 值大于阈值 |
-| ✗ | [cpp] operator_overload: operator+(kind=function) | 值应大于%s，实际=%s |
+| ✓ | [cpp] operator_overload: operator+(kind=method) | 值大于阈值 |
 | ✓ | [java] cross_file_call: Calculator(kind=class) | 值大于阈值 |
 | ✓ | [java] cross_file_call: calculate(kind=method) | 值大于阈值 |
 | ✓ | [java] cross_file_call: Main(kind=class) | 值大于阈值 |
@@ -192,8 +192,8 @@
 | ✓ | [multi] go_cross_file: Calculate(kind=function) | 值大于阈值 |
 | ✓ | [multi] go_cross_file: Use(kind=function) | 值大于阈值 |
 | ✓ | [multi] go_cross_file: Use→Calculate | 值大于阈值 |
-| ✗ | [multi] python_cross_file: calculate(kind=method) | 值应大于%s，实际=%s |
-| ✗ | [multi] python_cross_file: process(kind=method) | 值应大于%s，实际=%s |
+| ✓ | [multi] python_cross_file: calculate(kind=function) | 值大于阈值 |
+| ✓ | [multi] python_cross_file: process(kind=function) | 值大于阈值 |
 | ✓ | [multi] typescript_cross_file: calculate(kind=function) | 值大于阈值 |
 | ✓ | [multi] typescript_cross_file: process(kind=function) | 值大于阈值 |
 | ✓ | [multi] c_cross_file: calculate(kind=function) | 值大于阈值 |
@@ -205,7 +205,6 @@
 | ✓ | [multi] java_cross_file: calculate(kind=method) | 值大于阈值 |
 | ✓ | [multi] java_cross_file: Main(kind=class) | 值大于阈值 |
 | ✓ | [multi] java_cross_file: run(kind=method) | 值大于阈值 |
-| ✗ | [multi] h_in_pure_c_project: add(kind=function) | 值应大于%s，实际=%s |
 | ✓ | [multi] h_in_pure_c_project: main(kind=function) | 值大于阈值 |
 | ✓ | [multi] h_in_cpp_project: add(kind=function) | 值大于阈值 |
 | ✓ | [multi] h_in_cpp_project: main(kind=function) | 值大于阈值 |
@@ -220,7 +219,7 @@
 | ✓ | [multi] typescript_interface_implementation: print(kind=method) | 值大于阈值 |
 | ✓ | [multi] cpp_abstract_class: Shape(kind=class) | 值大于阈值 |
 | ✓ | [multi] cpp_abstract_class: Circle(kind=class) | 值大于阈值 |
-| ✗ | [multi] cpp_abstract_class: area(kind=function) | 值应大于%s，实际=%s |
+| ✓ | [multi] cpp_abstract_class: area(kind=method) | 值大于阈值 |
 | ✓ | ERR-001 空文件: 0节点 | 实际值匹配预期 |
 | ✓ | ERR-002 纯注释文件: 0节点 | 实际值匹配预期 |
 | ✓ | ERR-003 语法错误: 不崩溃(exit=0) | 实际值匹配预期 |

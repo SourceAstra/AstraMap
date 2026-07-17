@@ -1,0 +1,81 @@
+# Kotlin 高级语义场景
+metadata:
+  language: kotlin
+  description: "Kotlin 跨文件调用、继承、泛型、协程、属性委托"
+  complexity: advanced
+  scip_required: false
+
+fixtures:
+  - id: cross_file_call
+    files:
+      Utils.kt: |
+        package app
+        fun calculate(x: Int): Int = x * 2
+      Main.kt: |
+        package app
+        import app.calculate
+        fun process(): Int = calculate(10)
+    expected:
+      symbols:
+        - name: "calculate"
+          kind: function
+        - name: "process"
+          kind: function
+
+  - id: class_inheritance
+    files:
+      Main.kt: |
+        abstract class Animal {
+          abstract fun speak(): String
+        }
+        class Dog : Animal() {
+          override fun speak(): String = "Woof"
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
+  - id: generic_class
+    files:
+      Main.kt: |
+        class Container<T>(val value: T) {
+          fun get(): T = value
+        }
+    expected:
+      symbols:
+        - name: "Container"
+          kind: class
+        - name: "get"
+          kind: method
+
+  - id: coroutine_function
+    files:
+      Main.kt: |
+        import kotlinx.coroutines.*
+        suspend fun fetchData(url: String): String {
+          return url
+        }
+    expected:
+      symbols:
+        - name: "fetchData"
+          kind: function
+
+  - id: companion_object
+    files:
+      Main.kt: |
+        class Factory {
+          companion object {
+            fun create(): Factory = Factory()
+          }
+        }
+    expected:
+      symbols:
+        - name: "Factory"
+          kind: class
+        - name: "create"
+          kind: method

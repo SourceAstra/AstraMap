@@ -1,7 +1,7 @@
-# 接口实现关系场景
+# 接口实现关系场景 — 验证12种内置语言的接口/抽象类定义与实现提取
 metadata:
   language: multi
-  description: "验证接口定义与实现类的提取"
+  description: "验证接口定义与实现类的提取（12 种内置语言）"
   complexity: scenario
   scip_required: false
 
@@ -47,7 +47,7 @@ fixtures:
       shapes.ts: |
         interface Printable { print(): void }
         class Report implements Printable {
-            print(): void {}
+            print(): void { console.log("report") }
         }
     expected:
       symbols:
@@ -58,8 +58,25 @@ fixtures:
         - name: "print"
           kind: method
 
+  - id: javascript_class_inheritance
+    files:
+      main.js: |
+        class Animal {
+          speak() { return "sound"; }
+        }
+        class Dog extends Animal {
+          speak() { return "Woof"; }
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
   - id: cpp_abstract_class
-    # 注意：.hpp 不被 C++ tree-sitter 索引，改用 .cpp
     files:
       shape.cpp: |
         class Shape {
@@ -78,4 +95,121 @@ fixtures:
         - name: "Circle"
           kind: class
         - name: "area"
+          kind: method
+
+  - id: python_class_inheritance
+    files:
+      main.py: |
+        class Animal:
+            def speak(self):
+                pass
+        class Dog(Animal):
+            def speak(self):
+                return "Woof"
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Dog"
+          kind: class
+        - name: "speak"
+          kind: method
+
+  - id: rust_trait_implementation
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Drawable {
+          fn draw(&self);
+        }
+        struct Circle { r: f64 }
+        impl Drawable for Circle {
+          fn draw(&self) { println!("circle"); }
+        }
+    expected:
+      symbols:
+        - name: "Drawable"
+          kind: trait
+        - name: "Circle"
+          kind: struct
+        - name: "draw"
+          kind: method
+
+  - id: csharp_interface_implementation
+    files:
+      Program.cs: |
+        namespace App {
+          interface IPrintable {
+            void Print();
+          }
+          class Report : IPrintable {
+            public void Print() {}
+          }
+        }
+    expected:
+      symbols:
+        - name: "IPrintable"
+          kind: interface
+        - name: "Report"
+          kind: class
+        - name: "Print"
+          kind: method
+
+  - id: kotlin_interface_implementation
+    files:
+      Main.kt: |
+        interface Drawable {
+          fun draw()
+        }
+        class Circle : Drawable {
+          override fun draw() {}
+        }
+    expected:
+      symbols:
+        - name: "Drawable"
+          kind: interface
+        - name: "Circle"
+          kind: class
+        - name: "draw"
+          kind: method
+
+  - id: php_interface_implementation
+    files:
+      main.php: |
+        <?php
+        interface Printable {
+          public function print();
+        }
+        class Report implements Printable {
+          public function print() {
+            echo "report";
+          }
+        }
+    expected:
+      symbols:
+        - name: "Printable"
+          kind: interface
+        - name: "Report"
+          kind: class
+        - name: "print"
+          kind: method
+
+  - id: bash_function_sourcing
+    files:
+      lib.sh: |
+        #!/bin/bash
+        util_log() { echo "[LOG] $1"; }
+      script.sh: |
+        #!/bin/bash
+        source lib.sh
+        run() { util_log "starting"; }
+    expected:
+      symbols:
+        - name: "util_log"
+          kind: function
+        - name: "run"
           kind: function

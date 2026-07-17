@@ -1,0 +1,196 @@
+# C# 边界与边缘场景
+metadata:
+  language: csharp
+  description: "C# 事件/委托、LINQ、表达式树、动态类型、异步流、Span/Memory、Unsafe、指针、固定语句、ref return、ref struct、readonly struct、记录类型、模式匹配、属性模式、列表模式、required members、文件范围命名空间、global using、静态抽象接口成员、泛型数学接口、source generators"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: event_and_delegate
+    files:
+      Program.cs: |
+        namespace App {
+            public delegate void LogHandler(string message);
+            public class Logger {
+                public event LogHandler OnLog;
+                public void Log(string msg) {
+                    OnLog?.Invoke(msg);
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "LogHandler"
+          kind: type
+        - name: "Logger"
+          kind: class
+        - name: "Log"
+          kind: method
+
+  - id: linq_query
+    files:
+      Program.cs: |
+        using System.Linq;
+        namespace App {
+            public class QueryDemo {
+                public void Process() {
+                    var nums = new[] { 1, 2, 3, 4, 5 };
+                    var even = from n in nums
+                               where n % 2 == 0
+                               select n * 2;
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "QueryDemo"
+          kind: class
+        - name: "Process"
+          kind: method
+
+  - id: dynamic_type
+    files:
+      Program.cs: |
+        namespace App {
+            public class DynamicDemo {
+                public void Run() {
+                    dynamic obj = new { Name = "test", Value = 42 };
+                    var name = obj.Name;
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "DynamicDemo"
+          kind: class
+        - name: "Run"
+          kind: method
+
+  - id: span_memory
+    files:
+      Program.cs: |
+        using System;
+        namespace App {
+            public class SpanDemo {
+                public int Sum(ReadOnlySpan<int> values) {
+                    int sum = 0;
+                    foreach (var v in values) sum += v;
+                    return sum;
+                }
+                public int SumMemory(ReadOnlyMemory<int> values) {
+                    return Sum(values.Span);
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "SpanDemo"
+          kind: class
+        - name: "Sum"
+          kind: method
+        - name: "SumMemory"
+          kind: method
+
+  - id: ref_return
+    files:
+      Program.cs: |
+        namespace App {
+            public class RefDemo {
+                private int[] data = new int[10];
+                public ref int GetAt(int index) => ref data[index];
+            }
+        }
+    expected:
+      symbols:
+        - name: "RefDemo"
+          kind: class
+        - name: "GetAt"
+          kind: method
+
+  - id: readonly_struct
+    files:
+      Program.cs: |
+        namespace App {
+            public readonly struct Point {
+                public double X { get; }
+                public double Y { get; }
+                public Point(double x, double y) { X = x; Y = y; }
+                public double DistanceTo(Point other) =>
+                    Math.Sqrt(Math.Pow(X - other.X, 2) + Math.Pow(Y - other.Y, 2));
+            }
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+        - name: "DistanceTo"
+          kind: method
+
+  - id: record_type
+    files:
+      Program.cs: |
+        namespace App {
+            public record Person(string Name, int Age);
+            public sealed record Employee(string Name, int Age, string Department) : Person(Name, Age);
+        }
+    expected:
+      symbols:
+        - name: "Person"
+          kind: class
+        - name: "Employee"
+          kind: class
+
+  - id: pattern_matching
+    files:
+      Program.cs: |
+        namespace App {
+            public class PatternDemo {
+                public string Describe(object obj) {
+                    return obj switch {
+                        int i => $"int: {i}",
+                        string s => $"string: {s}",
+                        null => "null",
+                        _ => "unknown"
+                    };
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "PatternDemo"
+          kind: class
+        - name: "Describe"
+          kind: method
+
+  - id: required_members
+    files:
+      Program.cs: |
+        namespace App {
+            public class Config {
+                public required string Host { get; set; }
+                public required int Port { get; set; }
+                public bool Debug { get; set; } = false;
+            }
+        }
+    expected:
+      symbols:
+        - name: "Config"
+          kind: class
+
+  - id: file_scoped_namespace
+    files:
+      Utils.cs: |
+        namespace App.Utils;
+        public static class StringHelper {
+            public static string Reverse(string s) {
+                char[] chars = s.ToCharArray();
+                Array.Reverse(chars);
+                return new string(chars);
+            }
+        }
+    expected:
+      symbols:
+        - name: "StringHelper"
+          kind: class
+        - name: "Reverse"
+          kind: method

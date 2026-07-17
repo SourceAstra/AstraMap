@@ -1,0 +1,136 @@
+# JavaScript 基础定义与调用提取
+metadata:
+  language: javascript
+  description: "JavaScript 函数、类、方法、箭头函数、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: function_declaration
+    files:
+      main.js: |
+        function add(a, b) {
+          return a + b;
+        }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: arrow_function
+    files:
+      main.js: |
+        const multiply = (a, b) => a * b;
+    expected:
+      symbols:
+        - name: "multiply"
+          kind: function
+
+  - id: class_definition
+    files:
+      main.js: |
+        class Point {
+          constructor(x, y) {
+            this.x = x;
+            this.y = y;
+          }
+          distance() {
+            return this.x * this.x + this.y * this.y;
+          }
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "distance"
+          kind: method
+
+  - id: simple_call
+    files:
+      main.js: |
+        function greet(name) {
+          return "Hello, " + name;
+        }
+        function main() {
+          greet("world");
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "greet"
+
+  - id: method_call
+    files:
+      main.js: |
+        class Calculator {
+          add(a, b) { return a + b; }
+          compute() { return this.add(1, 2); }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "add"
+          kind: method
+        - name: "compute"
+          kind: method
+
+  - id: export_function
+    files:
+      utils.js: |
+        export function parse(input) {
+          return parseInt(input, 10);
+        }
+    expected:
+      symbols:
+        - name: "parse"
+          kind: function
+
+  - id: async_function
+    files:
+      main.js: |
+        async function fetchData(url) {
+          return await fetch(url);
+        }
+    expected:
+      symbols:
+        - name: "fetchData"
+          kind: function
+
+  - id: generator_function
+    files:
+      main.js: |
+        function* range(n) {
+          for (let i = 0; i < n; i++) yield i;
+        }
+    expected:
+      symbols:
+        - name: "range"
+          kind: function
+
+  - id: object_method
+    files:
+      main.js: |
+        const utils = {
+          log(msg) { console.log(msg); }
+        };
+    expected:
+      symbols:
+        - name: "log"
+          kind: method
+
+  - id: callback_function
+    files:
+      main.js: |
+        function process(callback) {
+          return callback(42);
+        }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function

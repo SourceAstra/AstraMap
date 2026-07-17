@@ -26,6 +26,26 @@ SCIP_AVAILABLE_PY=false
 SCIP_AVAILABLE_JAVA=false
 SCIP_AVAILABLE_CLANG=false
 
+# 语言识别扩展名映射
+language_ext() {
+  local lang="$1"
+  case "$lang" in
+    go) echo "go" ;;
+    python) echo "py" ;;
+    typescript) echo "ts" ;;
+    javascript) echo "js" ;;
+    c) echo "c" ;;
+    cpp) echo "cpp" ;;
+    java) echo "java" ;;
+    rust) echo "rs" ;;
+    csharp) echo "cs" ;;
+    kotlin) echo "kt" ;;
+    php) echo "php" ;;
+    bash) echo "sh" ;;
+    *) echo "" ;;
+  esac
+}
+
 # ── 辅助函数 ──
 
 phase_header() {
@@ -425,16 +445,10 @@ for path, content in data.items():
 " "$files_json" "$tmpdir" 2>/dev/null
   elif [[ -n "$source" && "$source" != "None" ]]; then
     # 单文件模式：source 字段（向后兼容旧格式）
-    local ext=""
-    case "$language" in
-      go) ext="go" ;;
-      python) ext="py" ;;
-      typescript) ext="ts" ;;
-      c) ext="c" ;;
-      cpp) ext="cpp" ;;
-      java) ext="java" ;;
-    esac
-    echo "$source" > "$tmpdir/test.$ext"
+    local ext=$(language_ext "$language")
+    if [[ -n "$ext" ]]; then
+      echo "$source" > "$tmpdir/test.$ext"
+    fi
   fi
 
   # 索引（仅 tree-sitter，确保基础层可测）

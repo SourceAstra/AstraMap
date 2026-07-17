@@ -1,0 +1,161 @@
+# C++ 边界与边缘场景
+metadata:
+  language: cpp
+  description: "C++ SFINAE、SFINAE/enable_if、CRTP、Policy-based design、RAII、Rule of 5、Move semantics、Perfect forwarding、Variadic templates、Fold expressions、Concepts、Modules、Co-routines、Three-way comparison、Constexpr if、If consteval、Designated initializers"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: sfinae_enable_if
+    files:
+      main.cpp: |
+        #include <type_traits>
+        template<typename T>
+        typename std::enable_if<std::is_integral<T>::value, T>::type
+        process(T value) { return value; }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: crtp
+    files:
+      main.cpp: |
+        template<typename Derived>
+        class Comparable {
+        public:
+            bool operator!=(const Derived& other) const {
+                return !static_cast<const Derived*>(this)->operator==(other);
+            }
+        };
+
+        class Value : public Comparable<Value> {
+        public:
+            bool operator==(const Value& other) const { return true; }
+        };
+    expected:
+      symbols:
+        - name: "Comparable"
+          kind: class
+        - name: "Value"
+          kind: class
+
+  - id: move_semantics
+    files:
+      main.cpp: |
+        class Buffer {
+            char* data;
+        public:
+            Buffer(Buffer&& other) noexcept : data(other.data) { other.data = nullptr; }
+            Buffer& operator=(Buffer&& other) noexcept {
+                if (this != &other) { delete[] data; data = other.data; other.data = nullptr; }
+                return *this;
+            }
+            ~Buffer() { delete[] data; }
+        };
+    expected:
+      symbols:
+        - name: "Buffer"
+          kind: class
+
+  - id: perfect_forwarding
+    files:
+      main.cpp: |
+        #include <utility>
+        template<typename T, typename... Args>
+        T* make(Args&&... args) {
+            return new T(std::forward<Args>(args)...);
+        }
+    expected:
+      symbols:
+        - name: "make"
+          kind: function
+
+  - id: variadic_template_fold
+    files:
+      main.cpp: |
+        template<typename... Args>
+        auto sum(Args... args) {
+            return (args + ...);
+        }
+    expected:
+      symbols:
+        - name: "sum"
+          kind: function
+
+  - id: concept_constraint
+    files:
+      main.cpp: |
+        template<typename T>
+        concept Numeric = std::is_arithmetic_v<T>;
+
+        template<Numeric T>
+        T add(T a, T b) { return a + b; }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: three_way_comparison
+    files:
+      main.cpp: |
+        struct Point {
+            int x, y;
+            auto operator<=>(const Point&) const = default;
+        };
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+
+  - id: constexpr_if
+    files:
+      main.cpp: |
+        template<typename T>
+        auto get_value(T t) {
+            if constexpr (std::is_pointer_v<T>) {
+                return *t;
+            } else {
+                return t;
+            }
+        }
+    expected:
+      symbols:
+        - name: "get_value"
+          kind: function
+
+  - id: designated_initializer
+    files:
+      main.cpp: |
+        struct Config {
+            int port;
+            const char* host;
+            bool debug;
+        };
+
+        Config cfg = {
+            .port = 8080,
+            .host = "localhost",
+            .debug = false
+        };
+    expected:
+      symbols:
+        - name: "Config"
+          kind: struct
+
+  - id: raii_guard
+    files:
+      main.cpp: |
+        class FileGuard {
+            int fd;
+        public:
+            explicit FileGuard(int f) : fd(f) {}
+            ~FileGuard() { if (fd >= 0) close(fd); }
+            FileGuard(const FileGuard&) = delete;
+            FileGuard& operator=(const FileGuard&) = delete;
+            FileGuard(FileGuard&& other) noexcept : fd(other.fd) { other.fd = -1; }
+        };
+    expected:
+      symbols:
+        - name: "FileGuard"
+          kind: class

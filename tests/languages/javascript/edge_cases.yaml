@@ -1,0 +1,156 @@
+# JavaScript 边界与边缘场景
+metadata:
+  language: javascript
+  description: "JavaScript Proxy、Symbol、WeakMap/WeakSet、Reflect、Iterator、Generator、AsyncIterator、BigInt、Tagged Template、Object.defineProperty、Object.freeze、Object.create、Function.prototype.bind、eval、with、try/catch/finally、Symbol.iterator"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: proxy_handler
+    files:
+      main.js: |
+        const handler = {
+          get(target, prop) {
+            return prop in target ? target[prop] : 42;
+          }
+        };
+        const proxy = new Proxy({}, handler);
+    expected:
+      symbols: []
+
+  - id: symbol_well_known
+    files:
+      main.js: |
+        class Collection {
+          [Symbol.iterator]() {
+            let index = 0;
+            const items = this.items;
+            return {
+              next() {
+                return { value: items[index++], done: index > items.length };
+              }
+            };
+          }
+        }
+    expected:
+      symbols:
+        - name: "Collection"
+          kind: class
+
+  - id: weakmap_weakset
+    files:
+      main.js: |
+        const cache = new WeakMap();
+        const visited = new WeakSet();
+
+        function track(obj) {
+          if (!visited.has(obj)) {
+            visited.add(obj);
+            cache.set(obj, Date.now());
+          }
+        }
+    expected:
+      symbols:
+        - name: "track"
+          kind: function
+
+  - id: reflect_api
+    files:
+      main.js: |
+        class Point {
+          constructor(x, y) {
+            this.x = x;
+            this.y = y;
+          }
+        }
+        const p = Reflect.construct(Point, [1, 2]);
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+
+  - id: bigint_usage
+    files:
+      main.js: |
+        function factorial(n) {
+          let result = 1n;
+          for (let i = 2n; i <= n; i++) {
+            result *= i;
+          }
+          return result;
+        }
+    expected:
+      symbols:
+        - name: "factorial"
+          kind: function
+
+  - id: tagged_template
+    files:
+      main.js: |
+        function sql(strings, ...values) {
+          return strings.reduce((acc, str, i) => acc + str + (values[i] || ''), '');
+        }
+        const query = sql`SELECT * FROM users WHERE id = ${1}`;
+    expected:
+      symbols:
+        - name: "sql"
+          kind: function
+
+  - id: object_define_property
+    files:
+      main.js: |
+        function createReadOnly(obj, key, value) {
+          Object.defineProperty(obj, key, {
+            value,
+            writable: false,
+            enumerable: true,
+            configurable: false
+          });
+        }
+    expected:
+      symbols:
+        - name: "createReadOnly"
+          kind: function
+
+  - id: async_iterator
+    files:
+      main.js: |
+        async function* asyncRange(start, end) {
+          for (let i = start; i <= end; i++) {
+            yield await Promise.resolve(i);
+          }
+        }
+    expected:
+      symbols:
+        - name: "asyncRange"
+          kind: function
+
+  - id: try_catch_finally
+    files:
+      main.js: |
+        function safeParse(json) {
+          try {
+            return JSON.parse(json);
+          } catch (e) {
+            return null;
+          } finally {
+            console.log("parse attempt done");
+          }
+        }
+    expected:
+      symbols:
+        - name: "safeParse"
+          kind: function
+
+  - id: function_bind
+    files:
+      main.js: |
+        function greet(greeting) {
+          return `${greeting}, ${this.name}`;
+        }
+        const person = { name: "Alice" };
+        const sayHello = greet.bind(person, "Hello");
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function

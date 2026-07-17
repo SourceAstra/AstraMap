@@ -1,0 +1,174 @@
+# Bash 边界与边缘场景
+metadata:
+  language: bash
+  description: "Bash 间接扩展、参数替换、数组操作、关联数组、here document、here string、进程替换、coproc、trap、信号处理、select语句、getopts、shopt、set命令、eval、source/点命令、子shell、命令替换、算术扩展、条件表达式、正则匹配、extglob、nocasematch、nameref、local变量、declare/typeset、readonly、export、alias、函数递归、递归函数、调试模式、xtrace"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: indirect_expansion
+    files:
+      script.sh: |
+        #!/bin/bash
+        varname="target"
+        target="hello"
+        echo "${!varname}"
+    expected:
+      symbols: []
+
+  - id: parameter_substitution
+    files:
+      script.sh: |
+        #!/bin/bash
+        set_default() {
+            local value="${1:-default}"
+            local length="${#1}"
+            local prefix="${1:0:3}"
+            echo "$value $length $prefix"
+        }
+    expected:
+      symbols:
+        - name: "set_default"
+          kind: function
+
+  - id: array_operations
+    files:
+      script.sh: |
+        #!/bin/bash
+        process_array() {
+            local arr=("$@")
+            local len=${#arr[@]}
+            local first="${arr[0]}"
+            local last="${arr[-1]}"
+            for item in "${arr[@]}"; do
+                echo "$item"
+            done
+        }
+    expected:
+      symbols:
+        - name: "process_array"
+          kind: function
+
+  - id: associative_array
+    files:
+      script.sh: |
+        #!/bin/bash
+        declare -A config
+        load_config() {
+            config[host]="localhost"
+            config[port]=8080
+            for key in "${!config[@]}"; do
+                echo "$key=${config[$key]}"
+            done
+        }
+    expected:
+      symbols:
+        - name: "load_config"
+          kind: function
+
+  - id: here_document
+    files:
+      script.sh: |
+        #!/bin/bash
+        generate_sql() {
+            cat <<EOF
+        SELECT * FROM users WHERE id = $1;
+        EOF
+        }
+    expected:
+      symbols:
+        - name: "generate_sql"
+          kind: function
+
+  - id: process_substitution
+    files:
+      script.sh: |
+        #!/bin/bash
+        diff_sorted() {
+            diff <(sort "$1") <(sort "$2")
+        }
+    expected:
+      symbols:
+        - name: "diff_sorted"
+          kind: function
+
+  - id: coproc
+    files:
+      script.sh: |
+        #!/bin/bash
+        run_worker() {
+            coproc WORKER {
+                while read -r line; do
+                    echo "processed: $line"
+                done
+            }
+            echo "data" >&"${WORKER[1]}"
+        }
+    expected:
+      symbols:
+        - name: "run_worker"
+          kind: function
+
+  - id: select_statement
+    files:
+      script.sh: |
+        #!/bin/bash
+        show_menu() {
+            select choice in "Start" "Stop" "Restart" "Quit"; do
+                case $choice in
+                    Start) start_service; break ;;
+                    Stop) stop_service; break ;;
+                    Restart) restart_service; break ;;
+                    Quit) break ;;
+                esac
+            done
+        }
+        start_service() { echo "starting"; }
+        stop_service() { echo "stopping"; }
+        restart_service() { echo "restarting"; }
+    expected:
+      symbols:
+        - name: "show_menu"
+          kind: function
+        - name: "start_service"
+          kind: function
+        - name: "stop_service"
+          kind: function
+        - name: "restart_service"
+          kind: function
+
+  - id: getopts
+    files:
+      script.sh: |
+        #!/bin/bash
+        parse_args() {
+            while getopts "h:p:d" opt; do
+                case $opt in
+                    h) host="$OPTARG" ;;
+                    p) port="$OPTARG" ;;
+                    d) debug=1 ;;
+                esac
+            done
+        }
+    expected:
+      symbols:
+        - name: "parse_args"
+          kind: function
+
+  - id: recursive_function
+    files:
+      script.sh: |
+        #!/bin/bash
+        factorial() {
+            local n=$1
+            if [[ $n -le 1 ]]; then
+                echo 1
+            else
+                local prev=$(factorial $((n - 1)))
+                echo $((n * prev))
+            fi
+        }
+    expected:
+      symbols:
+        - name: "factorial"
+          kind: function

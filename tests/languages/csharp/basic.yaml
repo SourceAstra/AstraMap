@@ -1,0 +1,151 @@
+# C# 基础定义与调用提取
+metadata:
+  language: csharp
+  description: "C# 类、接口、方法、属性、命名空间、调用"
+  complexity: basic
+  scip_required: false
+
+fixtures:
+  - id: class_definition
+    files:
+      Program.cs: |
+        using System;
+        namespace App {
+          class Point {
+            public int X { get; set; }
+            public int Y { get; set; }
+            public double Distance() {
+              return Math.Sqrt(X * X + Y * Y);
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "Distance"
+          kind: method
+
+  - id: interface_definition
+    files:
+      Program.cs: |
+        namespace App {
+          interface IReader {
+            byte[] Read();
+          }
+        }
+    expected:
+      symbols:
+        - name: "IReader"
+          kind: interface
+        - name: "Read"
+          kind: method
+
+  - id: method_definition
+    files:
+      Program.cs: |
+        namespace App {
+          class Calculator {
+            public int Add(int a, int b) {
+              return a + b;
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "Add"
+          kind: method
+
+  - id: simple_call
+    files:
+      Program.cs: |
+        using System;
+        namespace App {
+          class Program {
+            static int Calculate(int x) { return x * 2; }
+            static void Main() {
+              Console.WriteLine(Calculate(10));
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Calculate"
+          kind: method
+        - name: "Main"
+          kind: method
+
+  - id: enum_definition
+    files:
+      Program.cs: |
+        namespace App {
+          enum Status {
+            Pending,
+            Active,
+            Completed
+          }
+        }
+    expected:
+      symbols:
+        - name: "Status"
+          kind: enum
+
+  - id: struct_definition
+    files:
+      Program.cs: |
+        namespace App {
+          struct Vector {
+            public float X;
+            public float Y;
+          }
+        }
+    expected:
+      symbols:
+        - name: "Vector"
+          kind: struct
+
+  - id: property_definition
+    files:
+      Program.cs: |
+        namespace App {
+          class Person {
+            public string Name { get; set; }
+            public int Age { get; set; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Person"
+          kind: class
+
+  - id: static_method
+    files:
+      Program.cs: |
+        namespace App {
+          class Utils {
+            public static int Max(int a, int b) {
+              return a > b ? a : b;
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Utils"
+          kind: class
+        - name: "Max"
+          kind: method
+
+  - id: generic_class
+    files:
+      Program.cs: |
+        namespace App {
+          class Box<T> {
+            public T Value { get; set; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Box"
+          kind: class

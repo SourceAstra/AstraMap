@@ -1,0 +1,229 @@
+# Rust 边界与边缘场景
+metadata:
+  language: rust
+  description: "Rust unsafe、FFI、生命周期标注、关联类型、默认类型参数、常量泛型、过程宏、属性宏、derive宏、内联汇编、no_std、panic hook、Drop trait、Pin/Unpin、Send/Sync、PhantomData、MaybeUninit、ManuallyDrop、Cell/RefCell、Mutex/RwLock、Arc/Rc、Box/Leak、Cow、Deref/DerefMut、Index/IndexMut、Iterator trait、IntoIterator、From/Into、TryFrom/TryInto、Error trait、Display/Debug trait、Clone/Copy trait、PartialEq/Eq、PartialOrd/Ord、Hash trait、Default trait、AsRef/AsMut、Borrow/BorrowMut、ToOwned、Fn/FnMut/FnOnce trait"
+  complexity: edge_cases
+  scip_required: false
+
+fixtures:
+  - id: unsafe_block
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        unsafe fn raw_pointer_deref(ptr: *const i32) -> i32 {
+            *ptr
+        }
+        fn safe_wrapper(ptr: *const i32) -> i32 {
+            unsafe { raw_pointer_deref(ptr) }
+        }
+    expected:
+      symbols:
+        - name: "raw_pointer_deref"
+          kind: function
+        - name: "safe_wrapper"
+          kind: function
+
+  - id: ffi_extern
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        extern "C" {
+            fn printf(fmt: *const u8, ...) -> i32;
+        }
+        #[no_mangle]
+        pub extern "C" fn rust_entry() {}
+    expected:
+      symbols:
+        - name: "rust_entry"
+          kind: function
+
+  - id: lifetime_annotation
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+            if x.len() > y.len() { x } else { y }
+        }
+    expected:
+      symbols:
+        - name: "longest"
+          kind: function
+
+  - id: associated_type
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Iterator {
+            type Item;
+            fn next(&mut self) -> Option<Self::Item>;
+        }
+        struct Counter { count: u32 }
+        impl Iterator for Counter {
+            type Item = u32;
+            fn next(&mut self) -> Option<u32> {
+                self.count += 1;
+                Some(self.count)
+            }
+        }
+    expected:
+      symbols:
+        - name: "Iterator"
+          kind: trait
+        - name: "Counter"
+          kind: struct
+        - name: "next"
+          kind: method
+
+  - id: const_generic
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct Array<T, const N: usize> {
+            data: [T; N],
+        }
+        impl<T, const N: usize> Array<T, N> {
+            fn len() -> usize { N }
+        }
+    expected:
+      symbols:
+        - name: "Array"
+          kind: struct
+        - name: "len"
+          kind: method
+
+  - id: drop_trait
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct FileGuard { fd: i32 }
+        impl Drop for FileGuard {
+            fn drop(&mut self) {
+                unsafe { libc::close(self.fd); }
+            }
+        }
+    expected:
+      symbols:
+        - name: "FileGuard"
+          kind: struct
+        - name: "drop"
+          kind: method
+
+  - id: phantom_data
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::marker::PhantomData;
+        struct Wrapper<T> {
+            data: usize,
+            _marker: PhantomData<T>,
+        }
+        impl<T> Wrapper<T> {
+            fn new() -> Self {
+                Self { data: 0, _marker: PhantomData }
+            }
+        }
+    expected:
+      symbols:
+        - name: "Wrapper"
+          kind: struct
+        - name: "new"
+          kind: method
+
+  - id: deref_trait
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::ops::Deref;
+        struct SmartPtr<T> {
+            data: T,
+        }
+        impl<T> Deref for SmartPtr<T> {
+            type Target = T;
+            fn deref(&self) -> &T { &self.data }
+        }
+    expected:
+      symbols:
+        - name: "SmartPtr"
+          kind: struct
+        - name: "deref"
+          kind: method
+
+  - id: from_into_trait
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct Wrapper(String);
+        impl From<String> for Wrapper {
+            fn from(s: String) -> Self { Wrapper(s) }
+        }
+        impl Into<String> for Wrapper {
+            fn into(self) -> String { self.0 }
+        }
+    expected:
+      symbols:
+        - name: "Wrapper"
+          kind: struct
+        - name: "from"
+          kind: method
+        - name: "into"
+          kind: method
+
+  - id: error_trait
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::fmt;
+        #[derive(Debug)]
+        struct ParseError { msg: String }
+        impl fmt::Display for ParseError {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}", self.msg)
+            }
+        }
+        impl std::error::Error for ParseError {}
+    expected:
+      symbols:
+        - name: "ParseError"
+          kind: struct
+        - name: "fmt"
+          kind: method
