@@ -19,9 +19,13 @@ printf "${BOLD}═════════════════════�
 phase_header "Phase 1: 单元测试（语言识别 + 定义提取）"
 
 bash "$SCRIPT_DIR/run_unit_tests.sh"
-UNIT_PASSED=$GLOBAL_PASSED
-UNIT_FAILED=$GLOBAL_FAILED
-UNIT_UNTESTED=$GLOBAL_UNTESTED
+if [[ -f /tmp/astramap_unit_results.txt ]]; then
+  source /tmp/astramap_unit_results.txt
+fi
+UNIT_PASSED=${GLOBAL_PASSED:-0}
+UNIT_FAILED=${GLOBAL_FAILED:-0}
+UNIT_UNTESTED=${GLOBAL_UNTESTED:-0}
+UNIT_TOTAL=${GLOBAL_TOTAL:-0}
 
 # 重置计数器
 GLOBAL_TOTAL=0
@@ -34,9 +38,13 @@ TEST_RESULTS=()
 phase_header "Phase 2: 集成测试（跨文件调用 + 接口实现）"
 
 bash "$SCRIPT_DIR/run_integration_tests.sh"
-INT_PASSED=$GLOBAL_PASSED
-INT_FAILED=$GLOBAL_FAILED
-INT_UNTESTED=$GLOBAL_UNTESTED
+if [[ -f /tmp/astramap_int_results.txt ]]; then
+  source /tmp/astramap_int_results.txt
+fi
+INT_PASSED=${GLOBAL_PASSED:-0}
+INT_FAILED=${GLOBAL_FAILED:-0}
+INT_UNTESTED=${GLOBAL_UNTESTED:-0}
+INT_TOTAL=${GLOBAL_TOTAL:-0}
 
 # 重置计数器
 GLOBAL_TOTAL=0
@@ -64,6 +72,7 @@ phase_summary "全部测试"
 TOTAL_PASSED=$((UNIT_PASSED + INT_PASSED))
 TOTAL_FAILED=$((UNIT_FAILED + INT_FAILED))
 TOTAL_UNTESTED=$((UNIT_UNTESTED + INT_UNTESTED))
+TOTAL_TOTAL=$((UNIT_TOTAL + INT_TOTAL))
 TOTAL_TESTED=$((TOTAL_PASSED + TOTAL_FAILED))
 
 if [[ $TOTAL_TESTED -gt 0 ]]; then
@@ -80,7 +89,7 @@ printf "  单元测试: ${GREEN}${UNIT_PASSED} passed${RESET}, ${RED}${UNIT_FAIL
 printf "  集成测试: ${GREEN}${INT_PASSED} passed${RESET}, ${RED}${INT_FAILED} failed${RESET}, ${YELLOW}${INT_UNTESTED} untested${RESET}\n"
 printf "  ─────────────────────────────────────────\n"
 printf "  总计: ${GREEN}${TOTAL_PASSED} passed${RESET}, ${RED}${TOTAL_FAILED} failed${RESET}, ${YELLOW}${TOTAL_UNTESTED} untested${RESET}\n"
-printf "  通过率: ${BOLD}${PASS_RATE}%${RESET}\n"
+printf "  通过率: %s%%\n" "$PASS_RATE"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 
 # 生成最终报告
@@ -99,10 +108,12 @@ printf "${BOLD}═════════════════════�
   printf '| **总计** | **%d** | **%d** | **%d** |\n\n' "$TOTAL_PASSED" "$TOTAL_FAILED" "$TOTAL_UNTESTED"
   printf '## 详细结果\n\n'
   printf '| 状态 | 测试项 | 详情 |\n|---|---|---|\n'
-  for result in "${TEST_RESULTS[@]}"; do
-    IFS='|' read -r status name detail <<< "$result"
+  # 合并单元测试和集成测试的详细结果
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS='|' read -r status name detail <<< "$line"
     printf '| %s | %s | %s |\n' "$status" "$name" "$detail"
-  done
+  done < <(cat /tmp/astramap_unit_details.txt /tmp/astramap_int_details.txt 2>/dev/null)
 } > "$REPORT_FILE"
 
 printf "\n详细报告: $REPORT_FILE\n"
