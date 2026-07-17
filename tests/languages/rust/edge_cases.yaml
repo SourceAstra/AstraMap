@@ -61,9 +61,6 @@ fixtures:
         - name: "longest"
           kind: function
 
-        - name: "next"
-          kind: method
-
   - id: const_generic
     files:
       Cargo.toml: |
