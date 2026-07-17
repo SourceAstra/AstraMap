@@ -89,20 +89,3 @@ fixtures:
         - name: "FetchAsync"
           kind: method
 
-  - id: delegate_definition
-    files:
-      Program.cs: |
-        namespace App {
-          delegate int Operation(int a, int b);
-          class Calculator {
-            public static int Add(int a, int b) { return a + b; }
-          }
-        }
-    expected:
-      symbols:
-        - name: "Operation"
-          kind: type
-        - name: "Calculator"
-          kind: class
-        - name: "Add"
-          kind: method

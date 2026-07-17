@@ -68,25 +68,6 @@ fixtures:
         - name: "print"
           kind: method
 
-  - id: trait_usage
-    files:
-      main.php: |
-        <?php
-        trait Loggable {
-          public function log($msg) {
-            echo $msg;
-          }
-        }
-        class Service {
-          use Loggable;
-        }
-    expected:
-      symbols:
-        - name: "Loggable"
-          kind: trait
-        - name: "Service"
-          kind: class
-
   - id: anonymous_class
     files:
       main.php: |

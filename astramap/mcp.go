@@ -518,16 +518,26 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 			if status.NodeCount == 0 {
 				statusStr = "indexing"
 			}
+			filter, _ := LoadIndexFilter(projectRoot)
+			languageRuntime := LanguageRuntimeForProject(projectRoot)
 			res := map[string]interface{}{
-				"status":               statusStr,
-				"database":             "SQLite (modernc-sqlite-adapter)",
-				"totalFiles":           status.FileCount,
-				"indexedNodes":         status.NodeCount,
-				"indexedEdges":         status.EdgeCount,
-				"dirtyCount":           status.DirtyCount,
-				"dirtyFiles":           status.DirtyFiles,
-				"supportedLanguages":   SupportedLanguageIDs(),
-				"languageCapabilities": SupportedLanguageCapabilities(),
+				"status":                        statusStr,
+				"database":                      "SQLite (modernc-sqlite-adapter)",
+				"totalFiles":                    status.FileCount,
+				"indexedNodes":                  status.NodeCount,
+				"indexedEdges":                  status.EdgeCount,
+				"dirtyCount":                    status.DirtyCount,
+				"dirtyFiles":                    status.DirtyFiles,
+				"supportedLanguages":            SupportedLanguageIDsForProject(projectRoot),
+				"languageCapabilities":          SupportedLanguageCapabilitiesForProject(projectRoot),
+				"declaredLanguageCapabilities":  SupportedLanguageCapabilitiesForProject(projectRoot),
+				"effectiveLanguageCapabilities": EffectiveLanguageCapabilitiesForProject(db, projectRoot),
+				"semanticProviders":             SemanticProviderSpecsForProject(projectRoot),
+				"projectUnits":                  DetectProjectUnits(projectRoot, SupportedLanguageIDsForProject(projectRoot), filter),
+				"builtinLanguages":              languageRuntime.BuiltinLanguages,
+				"installedLanguages":            languageRuntime.InstalledLanguages,
+				"effectiveLanguages":            languageRuntime.EffectiveLanguages,
+				"languagePackageDiagnostics":    languageRuntime.Diagnostics,
 			}
 			data, _ := json.MarshalIndent(res, "", "  ")
 			content = string(data)

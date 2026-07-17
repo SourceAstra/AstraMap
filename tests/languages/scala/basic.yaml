@@ -1,0 +1,18 @@
+metadata:
+  language: scala
+  description: "Scala language package function case"
+  complexity: package
+  scip_required: false
+fixtures:
+  - id: function_definition
+    files:
+      Main.scala: |
+        object Main {
+          def greet(name: String): String = s"Hello $name"
+        }
+    expected:
+      symbols:
+        - name: "Main"
+          kind: class
+        - name: "greet"
+          kind: function

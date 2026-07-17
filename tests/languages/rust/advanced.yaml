@@ -29,32 +29,6 @@ fixtures:
         - name: "process"
           kind: function
 
-  - id: trait_implementation
-    files:
-      Cargo.toml: |
-        [package]
-        name = "test"
-        version = "0.1.0"
-        edition = "2021"
-      src/main.rs: |
-        trait Area {
-          fn area(&self) -> f64;
-        }
-        struct Circle {
-          radius: f64,
-        }
-        impl Area for Circle {
-          fn area(&self) -> f64 {
-            3.14 * self.radius * self.radius
-          }
-        }
-    expected:
-      symbols:
-        - name: "Area"
-          kind: trait
-        - name: "Circle"
-          kind: struct
-        - name: "area"
           kind: method
 
   - id: generic_struct

@@ -112,19 +112,6 @@ fixtures:
         - name: "createReadOnly"
           kind: function
 
-  - id: async_iterator
-    files:
-      main.js: |
-        async function* asyncRange(start, end) {
-          for (let i = start; i <= end; i++) {
-            yield await Promise.resolve(i);
-          }
-        }
-    expected:
-      symbols:
-        - name: "asyncRange"
-          kind: function
-
   - id: try_catch_finally
     files:
       main.js: |

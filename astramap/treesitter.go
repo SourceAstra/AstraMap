@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"astramap-standalone/languageprotocol"
 	"github.com/jmoiron/sqlx"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -63,6 +64,18 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 		return nil, nil, contentHash, nil
 	}
 	lang := selection.ID
+	now := time.Now().Unix()
+	if selection.Module != nil {
+		facts, parseErr := selection.Module.Parse(languageprotocol.ParseRequest{
+			Language: lang, Dialect: selection.Dialect, ProjectRoot: projectRoot,
+			RelativePath: relPath, ContentHash: contentHash, Source: codeBytes,
+		})
+		if parseErr != nil {
+			return nil, nil, contentHash, parseErr
+		}
+		nodes, edges, graphErr := languageFactsToGraph(selection, facts, relPath, now)
+		return nodes, edges, contentHash, graphErr
+	}
 
 	parser := sitter.NewParser()
 	parser.SetLanguage(selection.Grammar)
@@ -75,8 +88,6 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 	defer tree.Close()
 
 	rootNode := tree.RootNode()
-	now := time.Now().Unix()
-
 	var nodes []*AstraMapNode
 	var edges []*AstraMapEdge
 	definedByName := make(map[string][]*AstraMapNode)
@@ -86,7 +97,7 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 	var importCaptures []*sitter.Node
 
 	resolveLocalDefinition := func(name string) (*AstraMapNode, bool) {
-		candidates := definedByName[name]
+		candidates := definedByName[LanguageIdentity(lang, name)]
 		if len(candidates) != 1 {
 			return nil, false
 		}
@@ -94,7 +105,7 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 	}
 
 	resolveContainer := func(name string) (*AstraMapNode, bool) {
-		if candidates := definedByQName[name]; len(candidates) == 1 {
+		if candidates := definedByQName[LanguageIdentity(lang, name)]; len(candidates) == 1 {
 			return candidates[0], true
 		}
 		return resolveLocalDefinition(name)
@@ -105,7 +116,8 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 			qname := caller.QualifiedName
 			separator := LanguageQualifiedSeparator(lang)
 			if idx := strings.LastIndex(qname, separator); idx >= 0 {
-				if candidates := definedByQName[qname[:idx+len(separator)]+name]; len(candidates) == 1 {
+				key := LanguageIdentity(lang, qname[:idx+len(separator)]+name)
+				if candidates := definedByQName[key]; len(candidates) == 1 {
 					return candidates[0], true
 				}
 			}
@@ -148,7 +160,8 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 				}
 
 				sig := firstSignatureLine(n, codeBytes)
-				usn := fmt.Sprintf("%s:%s::%s%s", getLangPrefix(lang), relPath, qname, record.IdentitySuffix)
+				identity := LanguageIdentity(lang, qname)
+				usn := fmt.Sprintf("%s:%s::%s%s", getLangPrefix(lang), relPath, identity, record.IdentitySuffix)
 				if _, exists := definedByID[usn]; exists {
 					usn = fmt.Sprintf("%s@%d", usn, int(n.StartPosition().Row)+1)
 				}
@@ -163,8 +176,10 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 
 				nodes = append(nodes, amNode)
 				definedByID[usn] = amNode
-				definedByName[record.Name] = append(definedByName[record.Name], amNode)
-				definedByQName[qname] = append(definedByQName[qname], amNode)
+				nameKey := LanguageIdentity(lang, record.Name)
+				qnameKey := LanguageIdentity(lang, qname)
+				definedByName[nameKey] = append(definedByName[nameKey], amNode)
+				definedByQName[qnameKey] = append(definedByQName[qnameKey], amNode)
 
 				parentID := fmt.Sprintf("file:%s", relPath)
 				if container != "" {
@@ -191,7 +206,8 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 	collect(rootNode, scopeFrame{Kind: initialKind, QName: initialName})
 
 	for _, extra := range supplementalDefinitions(lang, codeBytes, sourceLines) {
-		if len(definedByName[extra.Name]) > 0 {
+		nameKey := LanguageIdentity(lang, extra.Name)
+		if len(definedByName[nameKey]) > 0 {
 			continue
 		}
 		usn := fmt.Sprintf("%s:%s::%s", getLangPrefix(lang), relPath, extra.Name)
@@ -202,8 +218,8 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 		}
 		nodes = append(nodes, amNode)
 		definedByID[usn] = amNode
-		definedByName[extra.Name] = append(definedByName[extra.Name], amNode)
-		definedByQName[extra.Name] = append(definedByQName[extra.Name], amNode)
+		definedByName[nameKey] = append(definedByName[nameKey], amNode)
+		definedByQName[LanguageIdentity(lang, extra.Name)] = append(definedByQName[LanguageIdentity(lang, extra.Name)], amNode)
 		edges = append(edges, &AstraMapEdge{
 			Source: fmt.Sprintf("file:%s", relPath), Target: usn, Kind: "contains", Provenance: "tree-sitter",
 		})
@@ -215,6 +231,14 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 		fields, _ := callExpressionFields(lang, callNode.Kind())
 		var calleeNode *sitter.Node
 		for _, field := range fields {
+			if field == "$self" {
+				calleeNode = callNode
+				break
+			}
+			if field == "$first" {
+				calleeNode = callNode.NamedChild(0)
+				break
+			}
 			if calleeNode = callNode.ChildByFieldName(field); calleeNode != nil {
 				break
 			}
@@ -233,6 +257,7 @@ func ParseFileIncrementalWithProfile(profile ProjectProfile, filePath string) ([
 						edges = append(edges, &AstraMapEdge{
 							Source: callerNode.ID, Target: targetID, Kind: "calls", Provenance: "tree-sitter",
 							Line: lineNum, Col: int(callNode.StartPosition().Column) + 1,
+							Metadata: callMetadata(lang, callNode, codeBytes),
 						})
 					}
 				}

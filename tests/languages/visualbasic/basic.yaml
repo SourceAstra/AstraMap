@@ -1,0 +1,19 @@
+metadata:
+  language: visualbasic
+  description: "Visual Basic language package method case"
+  complexity: package
+  scip_required: false
+fixtures:
+  - id: method_definition
+    files:
+      Main.vb: |
+        Module Main
+          Sub Greet()
+          End Sub
+        End Module
+    expected:
+      symbols:
+        - name: "Main"
+          kind: module
+        - name: "Greet"
+          kind: method

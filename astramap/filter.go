@@ -95,8 +95,6 @@ var builtInRules = []ExcludeRule{
 	{ID: "gen.py.protobuf", Description: "Python protobuf generated files", Ecosystem: "python", Match: []string{"**/*_pb2.py", "**/*_pb2.pyi", "**/*_pb2_grpc.py"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
 	{ID: "gen.cc.protobuf", Description: "C++ protobuf generated files", Ecosystem: "cpp", Match: []string{"**/*.pb.cc", "**/*.pb.h", "**/*.grpc.pb.cc", "**/*.grpc.pb.h"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
 	{ID: "gen.cc.flatbuffers", Description: "FlatBuffers generated files", Ecosystem: "cpp", Match: []string{"**/*_generated.h"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
-	{ID: "gen.dart.all", Description: "Dart generated files", Ecosystem: "dart", Match: []string{"**/*.g.dart", "**/*.freezed.dart", "**/*.gr.dart", "**/*.mocks.dart", "**/*.pb.dart"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
-	{ID: "gen.rb.protobuf", Description: "Ruby protobuf generated files", Ecosystem: "ruby", Match: []string{"**/*_pb.rb"}, Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true},
 
 	// --- Binary Files (Non-overridable) ---
 	{ID: "binary.object", Description: "Compiled object files", Match: []string{"**/*.o", "**/*.obj", "**/*.a", "**/*.lib", "**/*.so", "**/*.dylib", "**/*.dll", "**/*.exe"}, Kind: ExcludeBinary, Confidence: 100, Overridable: false},
@@ -273,7 +271,7 @@ var rootMarkers = map[string]string{
 	"CMakeLists.txt":   "cmake",
 	"pyproject.toml":   "python",
 	"setup.py":         "python",
-	"Package.swift":    "swift",
+	"composer.json":    "php",
 	"WORKSPACE":        "bazel",
 	"WORKSPACE.bazel":  "bazel",
 	"MODULE.bazel":     "bazel",
@@ -281,6 +279,21 @@ var rootMarkers = map[string]string{
 
 // DetectProjectRoots scans the project directory to establish project root mappings
 func DetectProjectRoots(projectRoot string) []ProjectRoot {
+	markers := make(map[string]string, len(rootMarkers))
+	for name, ecosystem := range rootMarkers {
+		markers[name] = ecosystem
+	}
+	type projectSuffix struct{ suffix, ecosystem string }
+	var suffixes []projectSuffix
+	for _, spec := range languageRegistryForProject(projectRoot).languages {
+		for _, marker := range spec.projectManifests {
+			if strings.HasPrefix(marker, "*") {
+				suffixes = append(suffixes, projectSuffix{strings.TrimPrefix(marker, "*"), spec.ID})
+			} else {
+				markers[marker] = spec.ID
+			}
+		}
+	}
 	var roots []ProjectRoot
 	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -302,7 +315,20 @@ func DetectProjectRoots(projectRoot string) []ProjectRoot {
 			return nil
 		}
 
-		if ecosystem, ok := rootMarkers[info.Name()]; ok {
+		ecosystem, ok := markers[info.Name()]
+		if !ok {
+			lower := strings.ToLower(info.Name())
+			if strings.HasSuffix(lower, ".sln") || strings.HasSuffix(lower, ".csproj") {
+				ecosystem, ok = "dotnet", true
+			}
+			for _, candidate := range suffixes {
+				if strings.HasSuffix(lower, strings.ToLower(candidate.suffix)) {
+					ecosystem, ok = candidate.ecosystem, true
+					break
+				}
+			}
+		}
+		if ok {
 			dir := filepath.Dir(relPath)
 			if dir == "." {
 				dir = ""
@@ -356,10 +382,10 @@ func BuildEcosystemRules(roots []ProjectRoot) []ExcludeRule {
 				rules = append(rules, ExcludeRule{ID: "build.bazel.output", Description: "Bazel build output", Match: []string{prefix + "bazel-*/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
 				seen[key("build.bazel.output")] = true
 			}
-		case "swift":
-			if !seen[key("build.swift.output")] {
-				rules = append(rules, ExcludeRule{ID: "build.swift.output", Description: "Swift build output", Match: []string{prefix + ".build/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
-				seen[key("build.swift.output")] = true
+		case "dotnet":
+			if !seen[key("build.dotnet.output")] {
+				rules = append(rules, ExcludeRule{ID: "build.dotnet.output", Description: ".NET build output", Match: []string{prefix + "bin/**", prefix + "obj/**"}, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true})
+				seen[key("build.dotnet.output")] = true
 			}
 		}
 	}
@@ -497,6 +523,42 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 	// Ecosystem-aware
 	roots := DetectProjectRoots(projectRoot)
 	filter.ecosystemRules = BuildEcosystemRules(roots)
+	for _, spec := range languageRegistryForProject(projectRoot).languages {
+		if spec.module == nil {
+			continue
+		}
+		manifest := spec.module.Manifest()
+		if len(manifest.Filter.Files) > 0 {
+			filter.ecosystemRules = append(filter.ecosystemRules, ExcludeRule{
+				ID: "package." + spec.ID + ".files", Description: spec.DisplayName + " generated files",
+				Ecosystem: spec.ID, Match: append([]string(nil), manifest.Filter.Files...),
+				Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true,
+			})
+		}
+		for _, root := range roots {
+			if root.Ecosystem != spec.ID {
+				continue
+			}
+			prefix := root.Path
+			if prefix != "" {
+				prefix += "/"
+			}
+			var patterns []string
+			for _, directory := range manifest.Filter.Directories {
+				directory = strings.Trim(strings.TrimSpace(directory), "/")
+				if directory != "" {
+					patterns = append(patterns, prefix+directory+"/**")
+				}
+			}
+			if len(patterns) > 0 {
+				filter.ecosystemRules = append(filter.ecosystemRules, ExcludeRule{
+					ID:          "package." + spec.ID + ".directories@" + root.Path,
+					Description: spec.DisplayName + " project outputs", Ecosystem: spec.ID,
+					Match: patterns, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true,
+				})
+			}
+		}
+	}
 
 	return filter, nil
 }

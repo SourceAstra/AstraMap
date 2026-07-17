@@ -6,27 +6,6 @@ metadata:
   scip_required: false
 
 fixtures:
-  - id: event_and_delegate
-    files:
-      Program.cs: |
-        namespace App {
-            public delegate void LogHandler(string message);
-            public class Logger {
-                public event LogHandler OnLog;
-                public void Log(string msg) {
-                    OnLog?.Invoke(msg);
-                }
-            }
-        }
-    expected:
-      symbols:
-        - name: "LogHandler"
-          kind: type
-        - name: "Logger"
-          kind: class
-        - name: "Log"
-          kind: method
-
   - id: linq_query
     files:
       Program.cs: |

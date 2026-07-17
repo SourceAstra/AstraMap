@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"astramap-standalone/languageprotocol"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	c "github.com/tree-sitter/tree-sitter-c/bindings/go"
 	cpp "github.com/tree-sitter/tree-sitter-cpp/bindings/go"
@@ -15,13 +16,18 @@ import (
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
-type ScipDriver string
+type ScipRecipe string
 
 const (
-	ScipDriverGo     ScipDriver = "go"
-	ScipDriverNode   ScipDriver = "node"
-	ScipDriverPython ScipDriver = "python"
-	ScipDriverClang  ScipDriver = "clang"
+	ScipRecipeGo      ScipRecipe = "go"
+	ScipRecipeNode    ScipRecipe = "node"
+	ScipRecipePython  ScipRecipe = "python"
+	ScipRecipeClang   ScipRecipe = "clang"
+	ScipRecipeJVM     ScipRecipe = "jvm"
+	ScipRecipeRust    ScipRecipe = "rust"
+	ScipRecipeDotNet  ScipRecipe = "dotnet"
+	ScipRecipePHP     ScipRecipe = "php"
+	ScipRecipePackage ScipRecipe = "package"
 )
 
 type CapabilitySet struct {
@@ -40,9 +46,21 @@ type LanguageCapabilityInfo struct {
 	DisplayName  string        `json:"displayName"`
 	Level        string        `json:"level"`
 	Extensions   []string      `json:"extensions"`
+	Filenames    []string      `json:"filenames,omitempty"`
 	Capabilities CapabilitySet `json:"capabilities"`
 	ProviderID   string        `json:"semanticProvider,omitempty"`
+	SemanticMode string        `json:"semanticMode,omitempty"`
 	AutoSemantic bool          `json:"autoSemantic"`
+}
+
+type CapabilityState struct {
+	Language       string `json:"language"`
+	DeclaredLevel  string `json:"declaredLevel"`
+	EffectiveLevel string `json:"effectiveLevel"`
+	GrammarStatus  string `json:"grammarStatus"`
+	ProviderStatus string `json:"providerStatus"`
+	Artifacts      int    `json:"artifacts"`
+	LastError      string `json:"lastError,omitempty"`
 }
 
 type ToolchainRequirement struct {
@@ -81,6 +99,8 @@ type DefinitionNormalizer func(DefinitionContext, DefinitionRule) (DefinitionRec
 type InitialScopeResolver func(filePath string, root *sitter.Node, code []byte) (kind, name string)
 type SupplementDefinitions func(code []byte, lines []string) []SupplementDefinition
 type SemanticNodeNormalizer func(node *AstraMapNode, symbol string, sourceLines []string)
+type DetectionResolver func(ProjectProfile, string, string) bool
+type IdentityNormalizer func(string) string
 
 type SupplementDefinition struct {
 	Name      string
@@ -96,68 +116,116 @@ type SyntaxSpec struct {
 	Calls         map[string][]string
 	Imports       map[string]bool
 	NormalizeCall func(*sitter.Node, []byte) string
+	CallMetadata  func(*sitter.Node, []byte) string
 	ImportPaths   func(string) []string
 	InitialScope  InitialScopeResolver
 	Supplement    SupplementDefinitions
+}
+
+type ShebangRule struct {
+	Contains []string
+	Dialect  string
+}
+
+type DetectionSpec struct {
+	Extensions map[string]string
+	Filenames  map[string]string
+	Shebangs   []ShebangRule
+	Resolvers  []DetectionResolver
+}
+
+type SemanticBinding struct {
+	ProviderID string
+	Mode       string
 }
 
 type SemanticProviderSpec struct {
 	ID               string
 	Tool             string
 	InstallHint      string
-	Driver           ScipDriver
+	Recipe           ScipRecipe
 	AutoGenerateScip bool
+	Args             []string
+	Artifact         string
 }
 
 type LanguageSpec struct {
 	ID                 string
 	DisplayName        string
+	Aliases            []string
 	IDPrefix           string
 	QualifiedSeparator string
 	Extensions         []string
-	ProviderID         string
+	Filenames          []string
+	Detection          DetectionSpec
+	Semantic           *SemanticBinding
 	Capabilities       CapabilitySet
 	Toolchain          []ToolchainRequirement
 	NormalizeSemantic  SemanticNodeNormalizer
+	NormalizeIdentity  IdentityNormalizer
 	grammar            func(ext string) *sitter.Language
 	syntax             SyntaxSpec
+	module             languageModule
+	source             string
+	packageSemantic    *languageprotocol.Semantic
+	projectManifests   []string
 }
 
 type ProjectProfile struct {
 	ProjectRoot     string
 	ExtensionCounts map[string]int
+	LanguageCounts  map[string]int
+	registry        *languageRegistrySnapshot
 }
 
 type LanguageSelection struct {
 	ID      string
 	Dialect string
 	Grammar *sitter.Language
+	Module  languageModule
+	Spec    *LanguageSpec
 }
 
 var semanticProviders = map[string]SemanticProviderSpec{
 	"go": {
 		ID: "go", Tool: "scip-go",
 		InstallHint: "go install github.com/sourcegraph/scip-go/cmd/scip-go@latest",
-		Driver:      ScipDriverGo, AutoGenerateScip: true,
+		Recipe:      ScipRecipeGo, AutoGenerateScip: true,
 	},
 	"typescript": {
 		ID: "typescript", Tool: "scip-typescript",
 		InstallHint: "npm install -g @sourcegraph/scip-typescript",
-		Driver:      ScipDriverNode, AutoGenerateScip: true,
+		Recipe:      ScipRecipeNode, AutoGenerateScip: true,
 	},
 	"python": {
 		ID: "python", Tool: "scip-python",
 		InstallHint: "pip install scip-python",
-		Driver:      ScipDriverPython, AutoGenerateScip: true,
+		Recipe:      ScipRecipePython, AutoGenerateScip: true,
 	},
 	"java": {
 		ID: "java", Tool: "scip-java",
 		InstallHint: "See https://github.com/sourcegraph/scip-java",
+		Recipe:      ScipRecipeJVM, AutoGenerateScip: true,
+	},
+	"rust": {
+		ID: "rust", Tool: "rust-analyzer",
+		InstallHint: "rustup component add rust-analyzer",
+		Recipe:      ScipRecipeRust, AutoGenerateScip: true,
+	},
+	"dotnet": {
+		ID: "dotnet", Tool: "scip-dotnet",
+		InstallHint: "dotnet tool install --global scip-dotnet",
+		Recipe:      ScipRecipeDotNet, AutoGenerateScip: true,
+	},
+	"php": {
+		ID: "php", Tool: "scip-php",
+		InstallHint: "See https://github.com/davidrjenni/scip-php",
+		Recipe:      ScipRecipePHP, AutoGenerateScip: true,
 	},
 	"clang": {
 		ID: "clang", Tool: "scip-clang",
 		InstallHint: "See https://github.com/sourcegraph/scip-clang",
-		Driver:      ScipDriverClang, AutoGenerateScip: true,
+		Recipe:      ScipRecipeClang, AutoGenerateScip: true,
 	},
 }
 
@@ -172,7 +240,8 @@ var semanticCapabilities = CapabilitySet{
 
 var builtinLanguages = []LanguageSpec{
 	{
-		ID: "go", DisplayName: "Go", IDPrefix: "go", QualifiedSeparator: ".", Extensions: []string{".go"}, ProviderID: "go",
+		ID: "go", DisplayName: "Go", IDPrefix: "go", QualifiedSeparator: ".", Extensions: []string{".go"},
+		Semantic:          &SemanticBinding{ProviderID: "go", Mode: "stable"},
 		Capabilities:      semanticCapabilities,
 		NormalizeSemantic: normalizeGoScipNode,
 		Toolchain: []ToolchainRequirement{
@@ -192,8 +261,8 @@ var builtinLanguages = []LanguageSpec{
 		},
 	},
 	{
-		ID: "typescript", DisplayName: "TypeScript", IDPrefix: "ts", QualifiedSeparator: ".",
-		Extensions: []string{".ts", ".tsx"}, ProviderID: "typescript",
+		ID: "typescript", DisplayName: "TypeScript", Aliases: []string{"ts"}, IDPrefix: "ts", QualifiedSeparator: ".",
+		Extensions: []string{".ts", ".tsx"}, Semantic: &SemanticBinding{ProviderID: "typescript", Mode: "stable"},
 		Capabilities: semanticCapabilities,
 		Toolchain: []ToolchainRequirement{
 			{Label: "Node.js", Commands: []string{"node"}, InstallHint: "Ubuntu/Debian: sudo apt install nodejs npm | macOS: brew install node"},
@@ -204,8 +273,8 @@ var builtinLanguages = []LanguageSpec{
 		syntax:  scriptSyntaxSpec(),
 	},
 	{
-		ID: "javascript", DisplayName: "JavaScript", IDPrefix: "js", QualifiedSeparator: ".",
-		Extensions: []string{".js", ".jsx", ".mjs", ".cjs"}, ProviderID: "typescript",
+		ID: "javascript", DisplayName: "JavaScript", Aliases: []string{"js"}, IDPrefix: "js", QualifiedSeparator: ".",
+		Extensions: []string{".js", ".jsx", ".mjs", ".cjs"}, Semantic: &SemanticBinding{ProviderID: "typescript", Mode: "stable"},
 		Capabilities: semanticCapabilities,
 		Toolchain: []ToolchainRequirement{
 			{Label: "Node.js", Commands: []string{"node"}, InstallHint: "Ubuntu/Debian: sudo apt install nodejs npm | macOS: brew install node"},
@@ -215,7 +284,8 @@ var builtinLanguages = []LanguageSpec{
 		syntax:  scriptSyntaxSpec(),
 	},
 	{
-		ID: "python", DisplayName: "Python", IDPrefix: "py", QualifiedSeparator: ".", Extensions: []string{".py"}, ProviderID: "python",
+		ID: "python", DisplayName: "Python", IDPrefix: "py", QualifiedSeparator: ".", Extensions: []string{".py"},
+		Semantic:     &SemanticBinding{ProviderID: "python", Mode: "stable"},
 		Capabilities: semanticCapabilities,
 		Toolchain: []ToolchainRequirement{
 			{Label: "Python interpreter", Commands: []string{"python3", "python"}, InstallHint: "Ubuntu/Debian: sudo apt install python3 python3-pip | macOS: brew install python"},
@@ -234,8 +304,9 @@ var builtinLanguages = []LanguageSpec{
 		},
 	},
 	{
-		ID: "java", DisplayName: "Java", IDPrefix: "java", QualifiedSeparator: ".", Extensions: []string{".java"}, ProviderID: "java",
-		Capabilities: syntaxCapabilities,
+		ID: "java", DisplayName: "Java", IDPrefix: "java", QualifiedSeparator: ".", Extensions: []string{".java"},
+		Semantic:     &SemanticBinding{ProviderID: "java", Mode: "stable"},
+		Capabilities: semanticCapabilities,
 		Toolchain: []ToolchainRequirement{
 			{Label: "Java runtime", Commands: []string{"java"}, InstallHint: "Ubuntu/Debian: sudo apt install default-jdk | macOS: brew install openjdk"},
 			{Label: "Java compiler", Commands: []string{"javac"}, InstallHint: "Ubuntu/Debian: sudo apt install default-jdk | macOS: brew install openjdk"},
@@ -261,7 +332,8 @@ var builtinLanguages = []LanguageSpec{
 		},
 	},
 	{
-		ID: "c", DisplayName: "C", IDPrefix: "c", QualifiedSeparator: ".", Extensions: []string{".c", ".h"}, ProviderID: "clang",
+		ID: "c", DisplayName: "C", IDPrefix: "c", QualifiedSeparator: ".", Extensions: []string{".c", ".h"},
+		Semantic:          &SemanticBinding{ProviderID: "clang", Mode: "stable"},
 		Capabilities:      semanticCapabilities,
 		NormalizeSemantic: normalizeCScipNode,
 		grammar:           func(string) *sitter.Language { return sitter.NewLanguage(c.Language()) },
@@ -269,7 +341,8 @@ var builtinLanguages = []LanguageSpec{
 	},
 	{
 		ID: "cpp", DisplayName: "C++", IDPrefix: "cxx", QualifiedSeparator: "::",
-		Extensions: []string{".cc", ".cpp", ".cxx", ".hpp", ".hxx"}, ProviderID: "clang",
+		Extensions:        []string{".cc", ".cpp", ".cxx", ".hpp", ".hxx"},
+		Semantic:          &SemanticBinding{ProviderID: "clang", Mode: "stable"},
 		Capabilities:      semanticCapabilities,
 		NormalizeSemantic: normalizeCScipNode,
 		grammar:           func(string) *sitter.Language { return sitter.NewLanguage(cpp.Language()) },
@@ -317,15 +390,18 @@ func cFamilySyntaxSpec() SyntaxSpec {
 var (
 	languageByID  map[string]*LanguageSpec
 	extensionToID map[string]string
+	filenameToID  map[string]string
 )
 
 func init() {
+	builtinLanguages = append(builtinLanguages, extendedLanguages()...)
 	languageByID = make(map[string]*LanguageSpec, len(builtinLanguages))
 	extensionToID = make(map[string]string)
+	filenameToID = make(map[string]string)
 	prefixes := make(map[string]string)
 	for i := range builtinLanguages {
 		spec := &builtinLanguages[i]
-		if spec.ID == "" || spec.DisplayName == "" || spec.IDPrefix == "" || spec.grammar == nil {
+		if spec.ID == "" || spec.DisplayName == "" || spec.IDPrefix == "" || (spec.grammar == nil && spec.module == nil) {
 			panic("incomplete language spec: " + spec.ID)
 		}
 		if _, exists := languageByID[spec.ID]; exists {
@@ -334,9 +410,12 @@ func init() {
 		if owner, exists := prefixes[spec.IDPrefix]; exists {
 			panic("duplicate language id prefix: " + spec.IDPrefix + " (" + owner + ", " + spec.ID + ")")
 		}
-		if _, ok := semanticProviders[spec.ProviderID]; !ok {
-			panic("unknown semantic provider: " + spec.ProviderID)
+		if spec.Semantic != nil {
+			if _, ok := semanticProviders[spec.Semantic.ProviderID]; !ok {
+				panic("unknown semantic provider: " + spec.Semantic.ProviderID)
+			}
 		}
+		normalizeDetectionSpec(spec)
 		languageByID[spec.ID] = spec
 		prefixes[spec.IDPrefix] = spec.ID
 		for _, ext := range spec.Extensions {
@@ -347,6 +426,13 @@ func init() {
 				panic("ambiguous extension without resolver: " + ext + " (" + owner + ", " + spec.ID + ")")
 			}
 			extensionToID[ext] = spec.ID
+		}
+		for _, filename := range spec.Filenames {
+			key := strings.ToLower(filename)
+			if owner, exists := filenameToID[key]; exists {
+				panic("ambiguous filename without resolver: " + filename + " (" + owner + ", " + spec.ID + ")")
+			}
+			filenameToID[key] = spec.ID
 		}
 		for nodeKind, fields := range spec.syntax.Calls {
 			if nodeKind == "" || len(fields) == 0 {
@@ -364,7 +450,23 @@ func LanguageSpecs() []LanguageSpec {
 	copy(result, builtinLanguages)
 	for i := range result {
 		result[i].Extensions = append([]string(nil), result[i].Extensions...)
+		result[i].Filenames = append([]string(nil), result[i].Filenames...)
+		result[i].Aliases = append([]string(nil), result[i].Aliases...)
 		result[i].Toolchain = cloneToolchain(result[i].Toolchain)
+	}
+	return result
+}
+
+func LanguageSpecsForProject(projectRoot string) []LanguageSpec {
+	registry := languageRegistryForProject(projectRoot)
+	ids := make([]string, 0, len(registry.languages))
+	for id := range registry.languages {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]LanguageSpec, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, *cloneLanguageSpec(registry.languages[id]))
 	}
 	return result
 }
@@ -376,6 +478,8 @@ func LanguageSpecByID(id string) (LanguageSpec, bool) {
 	}
 	result := *spec
 	result.Extensions = append([]string(nil), spec.Extensions...)
+	result.Filenames = append([]string(nil), spec.Filenames...)
+	result.Aliases = append([]string(nil), spec.Aliases...)
 	result.Toolchain = cloneToolchain(spec.Toolchain)
 	return result, true
 }
@@ -400,11 +504,12 @@ func cloneToolchain(source []ToolchainRequirement) []ToolchainRequirement {
 
 func normalizeLanguageID(id string) string {
 	id = strings.ToLower(strings.TrimSpace(id))
-	if id == "ts" {
-		return "typescript"
-	}
-	if id == "js" {
-		return "javascript"
+	for _, spec := range builtinLanguages {
+		for _, alias := range spec.Aliases {
+			if id == strings.ToLower(alias) {
+				return spec.ID
+			}
+		}
 	}
 	return id
 }
@@ -412,6 +517,26 @@ func normalizeLanguageID(id string) string {
 func IsKnownLanguage(id string) bool {
 	_, ok := languageByID[normalizeLanguageID(id)]
 	return ok
+}
+
+func IsKnownLanguageForProject(projectRoot, id string) bool {
+	registry := languageRegistryForProject(projectRoot)
+	id = strings.ToLower(strings.TrimSpace(id))
+	_, language := registry.languages[id]
+	_, alias := registry.aliases[id]
+	return language || alias
+}
+
+func NormalizeLanguageIDForProject(projectRoot, id string) (string, bool) {
+	registry := languageRegistryForProject(projectRoot)
+	id = strings.ToLower(strings.TrimSpace(id))
+	if _, ok := registry.languages[id]; ok {
+		return id, true
+	}
+	if owner := registry.aliases[id]; owner != "" {
+		return owner, true
+	}
+	return "", false
 }
 
 func LanguageExtensions(id string) []string {
@@ -430,15 +555,64 @@ func SupportedLanguageIDs() []string {
 	return result
 }
 
+func SupportedLanguageIDsForProject(projectRoot string) []string {
+	registry := languageRegistryForProject(projectRoot)
+	result := make([]string, 0, len(registry.languages))
+	for id := range registry.languages {
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func InstalledLanguagePackageIDsForProject(projectRoot string) []string {
+	registry := languageRegistryForProject(projectRoot)
+	result := make([]string, 0)
+	for id, spec := range registry.languages {
+		if spec.module != nil {
+			result = append(result, id)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
 func SupportedLanguageCapabilities() []LanguageCapabilityInfo {
 	result := make([]LanguageCapabilityInfo, 0, len(builtinLanguages))
 	for i := range builtinLanguages {
 		spec := &builtinLanguages[i]
-		provider := semanticProviders[spec.ProviderID]
+		providerID, semanticMode, autoSemantic := "", "", false
+		if spec.Semantic != nil {
+			provider := semanticProviders[spec.Semantic.ProviderID]
+			providerID, semanticMode, autoSemantic = provider.ID, spec.Semantic.Mode, provider.AutoGenerateScip
+		}
 		result = append(result, LanguageCapabilityInfo{
 			ID: spec.ID, DisplayName: spec.DisplayName, Level: capabilityLevel(spec.Capabilities),
-			Extensions: append([]string(nil), spec.Extensions...), Capabilities: spec.Capabilities,
-			ProviderID: provider.ID, AutoSemantic: provider.AutoGenerateScip,
+			Extensions: append([]string(nil), spec.Extensions...), Filenames: append([]string(nil), spec.Filenames...),
+			Capabilities: spec.Capabilities, ProviderID: providerID, SemanticMode: semanticMode, AutoSemantic: autoSemantic,
+		})
+	}
+	return result
+}
+
+func SupportedLanguageCapabilitiesForProject(projectRoot string) []LanguageCapabilityInfo {
+	registry := languageRegistryForProject(projectRoot)
+	ids := make([]string, 0, len(registry.languages))
+	for id := range registry.languages {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]LanguageCapabilityInfo, 0, len(ids))
+	for _, id := range ids {
+		spec := registry.languages[id]
+		providerID, semanticMode, autoSemantic := "", "", false
+		if provider, ok := semanticProviderForSpec(spec); ok {
+			providerID, semanticMode, autoSemantic = provider.ID, spec.Semantic.Mode, provider.AutoGenerateScip
+		}
+		result = append(result, LanguageCapabilityInfo{
+			ID: spec.ID, DisplayName: spec.DisplayName, Level: capabilityLevel(spec.Capabilities),
+			Extensions: append([]string(nil), spec.Extensions...), Filenames: append([]string(nil), spec.Filenames...),
+			Capabilities: spec.Capabilities, ProviderID: providerID, SemanticMode: semanticMode, AutoSemantic: autoSemantic,
 		})
 	}
 	return result
@@ -471,9 +645,39 @@ func LanguageIDForExtension(ext string) (string, bool) {
 	return id, ok
 }
 
+func LanguageIDForFilename(name string) (string, bool) {
+	id, ok := filenameToID[strings.ToLower(filepath.Base(name))]
+	return id, ok
+}
+
 func IsSupportedExtension(ext string) bool {
 	_, ok := LanguageIDForExtension(ext)
 	return ok
+}
+
+func IsPotentialSupportedPath(path string) bool {
+	if IsSupportedExtension(strings.ToLower(filepath.Ext(path))) {
+		return true
+	}
+	return isPotentialNamedOrScriptFile(path)
+}
+
+func IsPotentialSupportedPathForProject(projectRoot, path string) bool {
+	registry := languageRegistryForProject(projectRoot)
+	if registry.supportsExtension(strings.ToLower(filepath.Ext(path))) {
+		return true
+	}
+	return registry.isPotentialNamedOrScript(path)
+}
+
+func IsSupportedFile(profile ProjectProfile, filePath string) bool {
+	_, ok := ResolveLanguageWithProfile(profile, filePath)
+	return ok
+}
+
+func IsLanguageFile(profile ProjectProfile, filePath string, languages map[string]bool) bool {
+	selection, ok := ResolveLanguageWithProfile(profile, filePath)
+	return ok && (len(languages) == 0 || languages[selection.ID])
 }
 
 func LanguageDisplayName(id string) string {
@@ -490,6 +694,17 @@ func LanguageIDPrefix(id string) string {
 	return "unknown"
 }
 
+func languageIDPrefixForProfile(profile ProjectProfile, id string) string {
+	registry := profile.registry
+	if registry == nil {
+		registry = languageRegistryForProject(profile.ProjectRoot)
+	}
+	if spec := registry.specForID(id); spec != nil {
+		return spec.IDPrefix
+	}
+	return "unknown"
+}
+
 func LanguageQualifiedSeparator(id string) string {
 	if spec := languageByID[normalizeLanguageID(id)]; spec != nil && spec.QualifiedSeparator != "" {
 		return spec.QualifiedSeparator
@@ -497,18 +712,102 @@ func LanguageQualifiedSeparator(id string) string {
 	return "."
 }
 
+func LanguageIdentity(id, value string) string {
+	spec := languageByID[normalizeLanguageID(id)]
+	if spec != nil && spec.NormalizeIdentity != nil {
+		return spec.NormalizeIdentity(value)
+	}
+	return value
+}
+
 func SemanticProviderForLanguage(id string) (SemanticProviderSpec, bool) {
 	spec := languageByID[normalizeLanguageID(id)]
-	if spec == nil {
+	if spec == nil || spec.Semantic == nil {
 		return SemanticProviderSpec{}, false
 	}
-	provider, ok := semanticProviders[spec.ProviderID]
+	provider, ok := semanticProviders[spec.Semantic.ProviderID]
 	return provider, ok
+}
+
+func SemanticProviderForProjectLanguage(projectRoot, id string) (SemanticProviderSpec, bool) {
+	registry := languageRegistryForProject(projectRoot)
+	spec := registry.specForID(id)
+	return semanticProviderForSpec(spec)
+}
+
+func SemanticProviderForProjectByID(projectRoot, id string) (SemanticProviderSpec, bool) {
+	registry := languageRegistryForProject(projectRoot)
+	for _, spec := range registry.languages {
+		provider, ok := semanticProviderForSpec(spec)
+		if ok && provider.ID == id {
+			return provider, true
+		}
+	}
+	return SemanticProviderSpec{}, false
+}
+
+func semanticProviderForSpec(spec *LanguageSpec) (SemanticProviderSpec, bool) {
+	if spec == nil || spec.Semantic == nil {
+		return SemanticProviderSpec{}, false
+	}
+	if provider, ok := semanticProviders[spec.Semantic.ProviderID]; ok {
+		return provider, true
+	}
+	if spec.packageSemantic != nil {
+		semantic := spec.packageSemantic
+		return SemanticProviderSpec{
+			ID: semantic.ProviderID, Tool: semantic.Tool, InstallHint: semantic.InstallHint,
+			Recipe: ScipRecipePackage, AutoGenerateScip: semantic.Tool != "" && len(semantic.Args) > 0,
+			Args: append([]string(nil), semantic.Args...), Artifact: semantic.Artifact,
+		}, true
+	}
+	return SemanticProviderSpec{}, false
+}
+
+func LanguageToolchainRequirementsForProject(projectRoot, id string) []ToolchainRequirement {
+	registry := languageRegistryForProject(projectRoot)
+	if spec := registry.specForID(id); spec != nil {
+		return cloneToolchain(spec.Toolchain)
+	}
+	return nil
+}
+
+func LanguageDisplayNameForProject(projectRoot, id string) string {
+	registry := languageRegistryForProject(projectRoot)
+	if spec := registry.specForID(id); spec != nil {
+		return spec.DisplayName
+	}
+	return id
 }
 
 func SemanticProviderByID(id string) (SemanticProviderSpec, bool) {
 	provider, ok := semanticProviders[strings.ToLower(strings.TrimSpace(id))]
 	return provider, ok
+}
+
+func SemanticProviderSpecs() []SemanticProviderSpec {
+	result := make([]SemanticProviderSpec, 0, len(semanticProviders))
+	for _, provider := range semanticProviders {
+		result = append(result, provider)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+func SemanticProviderSpecsForProject(projectRoot string) []SemanticProviderSpec {
+	registry := languageRegistryForProject(projectRoot)
+	providers := make(map[string]SemanticProviderSpec)
+	for _, spec := range registry.languages {
+		if provider, ok := semanticProviderForSpec(spec); ok {
+			providers[provider.ID] = provider
+		}
+	}
+	result := make([]SemanticProviderSpec, 0, len(providers))
+	for _, provider := range providers {
+		result = append(result, provider)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
 }
 
 func ScipToolName(id string) string {
@@ -523,23 +822,41 @@ func ScipInstallHint(id string) string {
 
 func CanAutoGenerateScip(id string) bool {
 	provider, ok := SemanticProviderForLanguage(id)
-	return ok && provider.AutoGenerateScip && provider.Tool != "" && provider.Driver != ""
+	return ok && provider.AutoGenerateScip && provider.Tool != "" && provider.Recipe != ""
 }
 
-func ScipDriverForLanguage(id string) ScipDriver {
-	provider, _ := SemanticProviderForLanguage(id)
-	return provider.Driver
+func ScipToolNameForProject(projectRoot, id string) string {
+	provider, _ := SemanticProviderForProjectLanguage(projectRoot, id)
+	return provider.Tool
 }
 
-func normalizeSemanticNode(language string, node *AstraMapNode, symbol string, sourceLines []string) {
-	spec := languageByID[normalizeLanguageID(language)]
+func ScipInstallHintForProject(projectRoot, id string) string {
+	provider, _ := SemanticProviderForProjectLanguage(projectRoot, id)
+	return provider.InstallHint
+}
+
+func CanAutoGenerateScipForProject(projectRoot, id string) bool {
+	provider, ok := SemanticProviderForProjectLanguage(projectRoot, id)
+	return ok && provider.AutoGenerateScip && provider.Tool != "" && provider.Recipe != ""
+}
+
+func normalizeSemanticNode(profile ProjectProfile, language string, node *AstraMapNode, symbol string, sourceLines []string) {
+	registry := profile.registry
+	if registry == nil {
+		registry = languageRegistryForProject(profile.ProjectRoot)
+	}
+	spec := registry.specForID(language)
 	if spec != nil && spec.NormalizeSemantic != nil {
 		spec.NormalizeSemantic(node, symbol, sourceLines)
 	}
 }
 
 func BuildProjectProfile(projectRoot string, filter *IndexFilter, stage IndexStage) ProjectProfile {
-	profile := ProjectProfile{ProjectRoot: projectRoot, ExtensionCounts: make(map[string]int)}
+	profile := ProjectProfile{
+		ProjectRoot: projectRoot, ExtensionCounts: make(map[string]int), LanguageCounts: make(map[string]int),
+		registry: languageRegistryForProject(projectRoot),
+	}
+	var files []string
 	_ = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -555,31 +872,72 @@ func BuildProjectProfile(projectRoot string, filter *IndexFilter, stage IndexSta
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
-		if IsSupportedExtension(ext) && (filter == nil || filter.Allows(relPath, stage)) {
+		if (profile.registry.supportsExtension(ext) || profile.registry.isPotentialNamedOrScript(path)) && (filter == nil || filter.Allows(relPath, stage)) {
 			profile.ExtensionCounts[ext]++
+			files = append(files, path)
 		}
 		return nil
 	})
+	for _, path := range files {
+		if selection, ok := ResolveLanguageWithProfile(profile, path); ok {
+			profile.LanguageCounts[selection.ID]++
+		}
+	}
 	return profile
 }
 
 func ResolveLanguageWithProfile(profile ProjectProfile, filePath string) (LanguageSelection, bool) {
+	registry := profile.registry
+	if registry == nil {
+		registry = languageRegistryForProject(profile.ProjectRoot)
+	}
 	ext := strings.ToLower(filepath.Ext(filePath))
-	id, ok := LanguageIDForExtension(ext)
+	id, ok := registry.languageForFilename(filepath.Base(filePath))
+	dialect := ""
+	if ok {
+		dialect = registry.languages[id].Detection.Filenames[strings.ToLower(filepath.Base(filePath))]
+	} else {
+		id, ok = registry.languageForExtension(ext)
+		if ok {
+			dialect = registry.languages[id].Detection.Extensions[ext]
+		}
+	}
+	if !ok && ext == "" {
+		id, dialect, ok = registry.languageFromShebang(filePath)
+	}
 	if !ok {
 		return LanguageSelection{}, false
 	}
 	if ext == ".h" && hasCxxProfile(profile) {
 		id = "cpp"
 	}
-	spec := languageByID[id]
-	if spec == nil || spec.grammar == nil {
+	spec := registry.languages[id]
+	if spec == nil || (spec.grammar == nil && spec.module == nil) {
 		return LanguageSelection{}, false
 	}
-	return LanguageSelection{ID: id, Dialect: dialectForExtension(id, ext), Grammar: spec.grammar(ext)}, true
+	if dialect == "" {
+		dialect = dialectForExtension(id, ext)
+	}
+	for _, resolver := range spec.Detection.Resolvers {
+		if !resolver(profile, filePath, dialect) {
+			return LanguageSelection{}, false
+		}
+	}
+	selection := LanguageSelection{ID: id, Dialect: dialect, Module: spec.module, Spec: spec}
+	if spec.grammar != nil {
+		selection.Grammar = spec.grammar(dialect)
+	}
+	return selection, true
 }
 
 func ProjectLanguageCounts(profile ProjectProfile) map[string]int {
+	if len(profile.LanguageCounts) > 0 {
+		result := make(map[string]int, len(profile.LanguageCounts))
+		for lang, count := range profile.LanguageCounts {
+			result[lang] = count
+		}
+		return result
+	}
 	result := make(map[string]int, len(builtinLanguages))
 	for _, spec := range builtinLanguages {
 		for _, ext := range spec.Extensions {
@@ -659,6 +1017,14 @@ func normalizeCallee(language string, node *sitter.Node, code []byte) string {
 	return extractCalleeShortName(node, code)
 }
 
+func callMetadata(language string, node *sitter.Node, code []byte) string {
+	syntax, ok := languageSyntax(language)
+	if !ok || syntax.CallMetadata == nil {
+		return ""
+	}
+	return syntax.CallMetadata(node, code)
+}
+
 func importPaths(language, nodeKind, source string) []string {
 	syntax, ok := languageSyntax(language)
 	if !ok || !syntax.Imports[nodeKind] || syntax.ImportPaths == nil {
@@ -689,10 +1055,74 @@ func supplementalDefinitions(language string, code []byte, lines []string) []Sup
 }
 
 func typescriptGrammar(ext string) *sitter.Language {
-	if ext == ".tsx" || ext == ".jsx" {
+	if ext == ".tsx" || ext == ".jsx" || ext == "tsx" || ext == "jsx" {
 		return sitter.NewLanguage(typescript.LanguageTSX())
 	}
 	return sitter.NewLanguage(typescript.LanguageTypescript())
+}
+
+func normalizeDetectionSpec(spec *LanguageSpec) {
+	if spec.Detection.Extensions == nil {
+		spec.Detection.Extensions = make(map[string]string, len(spec.Extensions))
+	}
+	for _, ext := range spec.Extensions {
+		if _, exists := spec.Detection.Extensions[ext]; !exists {
+			spec.Detection.Extensions[ext] = strings.TrimPrefix(ext, ".")
+		}
+	}
+	if len(spec.Extensions) == 0 {
+		for ext := range spec.Detection.Extensions {
+			spec.Extensions = append(spec.Extensions, ext)
+		}
+		sort.Strings(spec.Extensions)
+	}
+	if spec.Detection.Filenames == nil {
+		spec.Detection.Filenames = make(map[string]string, len(spec.Filenames))
+	}
+	for _, filename := range spec.Filenames {
+		key := strings.ToLower(filename)
+		if _, exists := spec.Detection.Filenames[key]; !exists {
+			spec.Detection.Filenames[key] = key
+		}
+	}
+	if len(spec.Filenames) == 0 {
+		for filename := range spec.Detection.Filenames {
+			spec.Filenames = append(spec.Filenames, filename)
+		}
+		sort.Strings(spec.Filenames)
+	}
+}
+
+func isPotentialNamedOrScriptFile(path string) bool {
+	if _, ok := LanguageIDForFilename(filepath.Base(path)); ok {
+		return true
+	}
+	return filepath.Ext(path) == ""
+}
+
+func languageFromShebang(filePath string) (string, string, bool) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", "", false
+	}
+	defer file.Close()
+	buffer := make([]byte, 256)
+	count, _ := file.Read(buffer)
+	firstLine := strings.SplitN(string(buffer[:count]), "\n", 2)[0]
+	if !strings.HasPrefix(firstLine, "#!") {
+		return "", "", false
+	}
+	lower := strings.ToLower(firstLine)
+	for i := range builtinLanguages {
+		for _, rule := range builtinLanguages[i].Detection.Shebangs {
+			for _, marker := range rule.Contains {
+				if strings.Contains(lower, strings.ToLower(marker)) {
+					return builtinLanguages[i].ID, rule.Dialect, true
+				}
+			}
+		}
+	}
+	return "", "", false
 }
 
 func quotedImportPaths(source string) []string {

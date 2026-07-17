@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "zig",
+  "version": "1.0.0",
+  "protocolMin": 1,
+  "protocolMax": 1,
+  "displayName": "Zig",
+  "idPrefix": "zig",
+  "qualifiedSeparator": ".",
+  "detection": {"extensions": {".zig": "zig"}},
+  "capabilities": {"definitions": true, "containers": true, "localCalls": true, "imports": true, "incrementalSyntax": true},
+  "toolchain": [{"label": "Zig", "commands": ["zig"], "installHint": "https://ziglang.org/download/"}],
+  "project": {"manifests": ["build.zig"]},
+  "filter": {"directories": [".zig-cache", "zig-out"]},
+  "artifacts": [], "publisher": "astramap", "keyId": "astramap-release-1", "files": {}, "signature": ""
+}

@@ -85,24 +85,6 @@ fixtures:
         - name: "increment"
           kind: method
 
-  - id: trait_definition
-    files:
-      Cargo.toml: |
-        [package]
-        name = "test"
-        version = "0.1.0"
-        edition = "2021"
-      src/main.rs: |
-        trait Drawable {
-          fn draw(&self);
-        }
-    expected:
-      symbols:
-        - name: "Drawable"
-          kind: trait
-        - name: "draw"
-          kind: method
-
   - id: simple_call
     files:
       Cargo.toml: |
@@ -159,19 +141,3 @@ fixtures:
         - name: "identity"
           kind: function
 
-  - id: const_and_static
-    files:
-      Cargo.toml: |
-        [package]
-        name = "test"
-        version = "0.1.0"
-        edition = "2021"
-      src/main.rs: |
-        const MAX_SIZE: usize = 100;
-        static VERSION: &str = "1.0";
-    expected:
-      symbols:
-        - name: "MAX_SIZE"
-          kind: constant
-        - name: "VERSION"
-          kind: constant

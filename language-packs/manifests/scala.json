@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "scala",
+  "version": "1.0.0",
+  "protocolMin": 1,
+  "protocolMax": 1,
+  "displayName": "Scala",
+  "idPrefix": "scala",
+  "qualifiedSeparator": ".",
+  "detection": {"extensions": {".scala": "scala", ".sc": "scala-script"}},
+  "capabilities": {"definitions": true, "containers": true, "localCalls": true, "imports": true, "crossFileCalls": true, "overloadResolve": true, "implementations": true, "incrementalSyntax": true},
+  "toolchain": [{"label": "JDK", "commands": ["java", "javac"], "installHint": "https://adoptium.net"}, {"label": "Scala build tool", "commands": ["sbt", "scala-cli"], "installHint": "https://scala-lang.org/download"}],
+  "semantic": {"providerId": "java", "mode": "stable", "tool": "scip-java", "installHint": "https://github.com/sourcegraph/scip-java", "args": ["index", "--output", "{output}"], "artifact": "{output}"},
+  "project": {"manifests": ["build.sbt"]},
+  "artifacts": [], "publisher": "astramap", "keyId": "astramap-release-1", "files": {}, "signature": ""
+}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "dart",
+  "version": "1.0.0",
+  "protocolMin": 1,
+  "protocolMax": 1,
+  "displayName": "Dart",
+  "idPrefix": "dart",
+  "qualifiedSeparator": ".",
+  "detection": {"extensions": {".dart": "dart"}},
+  "capabilities": {"definitions": true, "containers": true, "localCalls": true, "imports": true, "crossFileCalls": true, "overloadResolve": true, "incrementalSyntax": true},
+  "toolchain": [{"label": "Dart SDK", "commands": ["dart"], "installHint": "https://dart.dev/get-dart"}],
+  "semantic": {"providerId": "dart", "mode": "experimental", "tool": "dart", "installHint": "dart pub global activate scip_dart", "args": ["pub", "global", "run", "scip_dart", "./"], "artifact": "index.scip"},
+  "project": {"manifests": ["pubspec.yaml"]},
+  "filter": {"directories": [".dart_tool", "build"], "files": ["**/*.g.dart", "**/*.freezed.dart", "**/*.gr.dart", "**/*.mocks.dart", "**/*.pb.dart"]},
+  "artifacts": [], "publisher": "astramap", "keyId": "astramap-release-1", "files": {}, "signature": ""
+}

@@ -1,13 +1,13 @@
 # AstraMap 多语言测试报告
 
-- **执行时间**: 2026-07-17 09:32:35
-- **结论**: **通过**
+- **执行时间**: 2026-07-17 14:36:39
+- **结论**: **失败**
 
 ## 汇总
 
 | 总用例 | 已测试 | 通过 | 失败 | 未测试 | 通过率 | 完成率 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 216 | 216 | 216 | 0 | 0 | 100.0% | 100.0% |
+| 551 | 543 | 541 | 2 | 8 | 98.2% | 98.5% |
 
 ## 详细结果
 
@@ -15,12 +15,18 @@
 |---|---|---|
 | ✓ | DETECT-GO .go→go | 实际值匹配预期 |
 | ✓ | DETECT-TS .ts→typescript | 实际值匹配预期 |
+| ✓ | DETECT-JS .js→javascript | 实际值匹配预期 |
 | ✓ | DETECT-PY .py→python | 实际值匹配预期 |
 | ✓ | DETECT-JAVA .java→java | 实际值匹配预期 |
 | ✓ | DETECT-C .c→c | 实际值匹配预期 |
 | ✓ | DETECT-CPP .cpp→cpp | 实际值匹配预期 |
+| ✓ | DETECT-RUST .rs→rust | 实际值匹配预期 |
+| ✓ | DETECT-CS .cs→csharp | 实际值匹配预期 |
+| ✓ | DETECT-KT .kt→kotlin | 实际值匹配预期 |
+| ✓ | DETECT-PHP .php→php | 实际值匹配预期 |
+| ✓ | DETECT-BASH .sh→bash | 实际值匹配预期 |
 | ✓ | DETECT-H-C .h(纯C项目)→c | 实际值匹配预期 |
-| ✓ | DETECT-H-CPP .h(含C++项目)不被索引 | 实际值匹配预期 |
+| - | DETECT-H-CPP .h(含C++项目)归属 | tree-sitter cannot distinguish C/C++ .h without compile context |
 | ✓ | [go] func_declaration: add(kind=function) | 值大于阈值 |
 | ✓ | [go] method_declaration: Point(kind=struct) | 值大于阈值 |
 | ✓ | [go] method_declaration: Distance(kind=method) | 值大于阈值 |
@@ -75,6 +81,20 @@
 | ✓ | [typescript] multiple_interfaces: Serializable(kind=interface) | 值大于阈值 |
 | ✓ | [typescript] multiple_interfaces: Comparable(kind=interface) | 值大于阈值 |
 | ✓ | [typescript] namespace_with_function: abs(kind=function) | 值大于阈值 |
+| ✓ | [javascript] function_declaration: add(kind=function) | 值大于阈值 |
+| ✓ | [javascript] arrow_function: multiply(kind=function) | 值大于阈值 |
+| ✓ | [javascript] class_definition: Point(kind=class) | 值大于阈值 |
+| ✓ | [javascript] class_definition: distance(kind=method) | 值大于阈值 |
+| ✓ | [javascript] simple_call: greet(kind=function) | 值大于阈值 |
+| ✓ | [javascript] simple_call: main(kind=function) | 值大于阈值 |
+| ✓ | [javascript] simple_call: main→greet | 值大于阈值 |
+| ✓ | [javascript] method_call: Calculator(kind=class) | 值大于阈值 |
+| ✓ | [javascript] method_call: add(kind=method) | 值大于阈值 |
+| ✓ | [javascript] method_call: compute(kind=method) | 值大于阈值 |
+| ✓ | [javascript] export_function: parse(kind=function) | 值大于阈值 |
+| ✓ | [javascript] async_function: fetchData(kind=function) | 值大于阈值 |
+| ✓ | [javascript] object_method: log(kind=method) | 值大于阈值 |
+| ✓ | [javascript] callback_function: process(kind=function) | 值大于阈值 |
 | ✓ | [c] function_definition: add(kind=function) | 值大于阈值 |
 | ✓ | [c] struct_definition: Point(kind=type) | 值大于阈值 |
 | ✓ | [c] macro_definition: MAX_SIZE(kind=macro) | 值大于阈值 |
@@ -120,6 +140,76 @@
 | ✓ | [java] multiple_classes: Dog(kind=class) | 值大于阈值 |
 | ✓ | [java] multiple_classes: speak(kind=method) | 值大于阈值 |
 | ✓ | [java] constructor: Item(kind=class) | 值大于阈值 |
+| ✓ | [rust] function_definition: add(kind=function) | 值大于阈值 |
+| ✓ | [rust] struct_definition: Point(kind=struct) | 值大于阈值 |
+| ✓ | [rust] enum_definition: Color(kind=enum) | 值大于阈值 |
+| ✓ | [rust] impl_block: Counter(kind=struct) | 值大于阈值 |
+| ✓ | [rust] impl_block: new(kind=method) | 值大于阈值 |
+| ✓ | [rust] impl_block: increment(kind=method) | 值大于阈值 |
+| ✓ | [rust] simple_call: greet(kind=function) | 值大于阈值 |
+| ✓ | [rust] simple_call: main(kind=function) | 值大于阈值 |
+| ✓ | [rust] module_definition: add(kind=function) | 值大于阈值 |
+| ✓ | [rust] generic_function: identity(kind=function) | 值大于阈值 |
+| ✓ | [csharp] class_definition: Point(kind=class) | 值大于阈值 |
+| ✓ | [csharp] class_definition: Distance(kind=method) | 值大于阈值 |
+| ✓ | [csharp] interface_definition: IReader(kind=interface) | 值大于阈值 |
+| ✓ | [csharp] interface_definition: Read(kind=method) | 值大于阈值 |
+| ✓ | [csharp] method_definition: Calculator(kind=class) | 值大于阈值 |
+| ✓ | [csharp] method_definition: Add(kind=method) | 值大于阈值 |
+| ✓ | [csharp] simple_call: Calculate(kind=method) | 值大于阈值 |
+| ✓ | [csharp] simple_call: Main(kind=method) | 值大于阈值 |
+| ✓ | [csharp] enum_definition: Status(kind=enum) | 值大于阈值 |
+| ✓ | [csharp] struct_definition: Vector(kind=struct) | 值大于阈值 |
+| ✓ | [csharp] property_definition: Person(kind=class) | 值大于阈值 |
+| ✓ | [csharp] static_method: Utils(kind=class) | 值大于阈值 |
+| ✓ | [csharp] static_method: Max(kind=method) | 值大于阈值 |
+| ✓ | [csharp] generic_class: Box(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] function_definition: add(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] class_definition: Point(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] class_definition: distance(kind=method) | 值大于阈值 |
+| ✓ | [kotlin] interface_definition: Drawable(kind=interface) | 值大于阈值 |
+| ✓ | [kotlin] interface_definition: draw(kind=method) | 值大于阈值 |
+| ✓ | [kotlin] data_class: User(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] simple_call: greet(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] simple_call: main(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] sealed_class: Result(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] sealed_class: Success(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] sealed_class: Error(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] object_declaration: Singleton(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] object_declaration: doSomething(kind=method) | 值大于阈值 |
+| ✓ | [kotlin] enum_class: Color(kind=enum) | 值大于阈值 |
+| ✓ | [php] function_definition: add(kind=function) | 值大于阈值 |
+| ✓ | [php] class_definition: Point(kind=class) | 值大于阈值 |
+| ✓ | [php] class_definition: distance(kind=method) | 值大于阈值 |
+| ✓ | [php] interface_definition: Reader(kind=interface) | 值大于阈值 |
+| ✓ | [php] interface_definition: read(kind=method) | 值大于阈值 |
+| ✓ | [php] simple_call: greet(kind=function) | 值大于阈值 |
+| ✓ | [php] simple_call: main(kind=function) | 值大于阈值 |
+| ✓ | [php] namespace_definition: Utils(kind=class) | 值大于阈值 |
+| ✓ | [php] namespace_definition: calculate(kind=method) | 值大于阈值 |
+| ✓ | [php] abstract_class: Shape(kind=class) | 值大于阈值 |
+| ✓ | [php] abstract_class: area(kind=method) | 值大于阈值 |
+| ✓ | [php] abstract_class: describe(kind=method) | 值大于阈值 |
+| ✓ | [php] static_method: Math(kind=class) | 值大于阈值 |
+| ✓ | [php] static_method: max(kind=method) | 值大于阈值 |
+| ✓ | [bash] function_definition: greet(kind=function) | 值大于阈值 |
+| ✓ | [bash] function_with_local: calculate(kind=function) | 值大于阈值 |
+| ✓ | [bash] simple_call: add(kind=function) | 值大于阈值 |
+| ✓ | [bash] simple_call: main(kind=function) | 值大于阈值 |
+| ✓ | [bash] multiple_functions: setup(kind=function) | 值大于阈值 |
+| ✓ | [bash] multiple_functions: teardown(kind=function) | 值大于阈值 |
+| ✓ | [bash] multiple_functions: run(kind=function) | 值大于阈值 |
+| ✓ | [bash] function_with_args: process_file(kind=function) | 值大于阈值 |
+| ✓ | [bash] sourced_function: util_log(kind=function) | 值大于阈值 |
+| ✓ | [bash] conditional_function: check_status(kind=function) | 值大于阈值 |
+| ✓ | [bash] loop_function: process_items(kind=function) | 值大于阈值 |
+| - | [ruby] language package basic case | 语言包未安装或未激活 |
+| - | [dart] language package basic case | 语言包未安装或未激活 |
+| - | [swift] language package basic case | 语言包未安装或未激活 |
+| - | [lua] language package basic case | 语言包未安装或未激活 |
+| - | [scala] language package basic case | 语言包未安装或未激活 |
+| - | [zig] language package basic case | 语言包未安装或未激活 |
+| - | [visualbasic] language package basic case | 语言包未安装或未激活 |
 | ✓ | [go] cross_file_call: Calculate(kind=function) | 值大于阈值 |
 | ✓ | [go] cross_file_call: Use(kind=function) | 值大于阈值 |
 | ✓ | [go] cross_file_call: Use→Calculate | 值大于阈值 |
@@ -130,6 +220,18 @@
 | ✓ | [go] interface_satisfaction: Area(kind=method) | 值大于阈值 |
 | ✓ | [go] multiple_return_values: ReadAll(kind=function) | 值大于阈值 |
 | ✓ | [go] variadic_function: Sum(kind=function) | 值大于阈值 |
+| ✓ | [go] generic_function_with_constraint: Min(kind=function) | 值大于阈值 |
+| ✓ | [go] generic_struct_with_constraint: Number(kind=interface) | 值大于阈值 |
+| ✓ | [go] generic_struct_with_constraint: Container(kind=struct) | 值大于阈值 |
+| ✓ | [go] closure_capture: makeMultiplier(kind=function) | 值大于阈值 |
+| ✓ | [go] defer_statement: withCleanup(kind=function) | 值大于阈值 |
+| ✓ | [go] defer_statement: cleanup(kind=function) | 值大于阈值 |
+| ✓ | [go] panic_recover: safeCall(kind=function) | 值大于阈值 |
+| ✓ | [go] goroutine_and_channel: producer(kind=function) | 值大于阈值 |
+| ✓ | [go] goroutine_and_channel: consumer(kind=function) | 值大于阈值 |
+| ✓ | [go] unsafe_pointer: bytesToString(kind=function) | 值大于阈值 |
+| ✓ | [go] reflect_type: typeName(kind=function) | 值大于阈值 |
+| ✓ | [go] build_tag: platformSpecific(kind=function) | 值大于阈值 |
 | ✓ | [python] cross_file_call: calculate(kind=function) | 值大于阈值 |
 | ✓ | [python] cross_file_call: process(kind=function) | 值大于阈值 |
 | ✓ | [python] class_inheritance: Animal(kind=class) | 值大于阈值 |
@@ -141,6 +243,25 @@
 | ✓ | [python] context_manager: FileManager(kind=class) | 值大于阈值 |
 | ✓ | [python] context_manager: __enter__(kind=method) | 值大于阈值 |
 | ✓ | [python] context_manager: __exit__(kind=method) | 值大于阈值 |
+| ✓ | [python] decorator_chain: retry(kind=function) | 值大于阈值 |
+| ✓ | [python] decorator_chain: fetch(kind=function) | 值大于阈值 |
+| ✓ | [python] metaclass: Meta(kind=class) | 值大于阈值 |
+| ✓ | [python] metaclass: Model(kind=class) | 值大于阈值 |
+| ✓ | [python] descriptor: Validator(kind=class) | 值大于阈值 |
+| ✓ | [python] descriptor: Point(kind=class) | 值大于阈值 |
+| ✓ | [python] type_annotations: process(kind=function) | 值大于阈值 |
+| ✓ | [python] dataclass: Point(kind=class) | 值大于阈值 |
+| ✓ | [python] dataclass: distance(kind=method) | 值大于阈值 |
+| ✓ | [python] abstract_base_class: Shape(kind=class) | 值大于阈值 |
+| ✓ | [python] abstract_base_class: Circle(kind=class) | 值大于阈值 |
+| ✓ | [python] abstract_base_class: area(kind=method) | 值大于阈值 |
+| ✓ | [python] multiple_inheritance: Flyable(kind=class) | 值大于阈值 |
+| ✓ | [python] multiple_inheritance: Swimmable(kind=class) | 值大于阈值 |
+| ✓ | [python] multiple_inheritance: Duck(kind=class) | 值大于阈值 |
+| ✓ | [python] multiple_inheritance: quack(kind=method) | 值大于阈值 |
+| ✓ | [python] generator_expression: process(kind=function) | 值大于阈值 |
+| ✓ | [python] weakref_callback: Data(kind=class) | 值大于阈值 |
+| ✓ | [python] weakref_callback: on_finalize(kind=function) | 值大于阈值 |
 | ✓ | [typescript] cross_file_call: calculate(kind=function) | 值大于阈值 |
 | ✓ | [typescript] cross_file_call: process(kind=function) | 值大于阈值 |
 | ✓ | [typescript] generic_class: Container(kind=class) | 值大于阈值 |
@@ -153,6 +274,31 @@
 | ✓ | [typescript] class_with_method: Shape(kind=class) | 值大于阈值 |
 | ✓ | [typescript] class_with_method: area(kind=method) | 值大于阈值 |
 | ✓ | [typescript] class_with_method: describe(kind=method) | 值大于阈值 |
+| ✓ | [typescript] mapped_type: User(kind=interface) | 值大于阈值 |
+| ✓ | [typescript] decorator: logged(kind=function) | 值大于阈值 |
+| ✓ | [typescript] decorator: User(kind=class) | 值大于阈值 |
+| ✓ | [typescript] namespace_merge: log(kind=function) | 值大于阈值 |
+| ✓ | [typescript] namespace_merge: error(kind=function) | 值大于阈值 |
+| ✓ | [typescript] type_guard: isCat(kind=function) | 值大于阈值 |
+| ✓ | [typescript] index_signature: Dictionary(kind=interface) | 值大于阈值 |
+| ✓ | [javascript] cross_file_call: calculate(kind=function) | 值大于阈值 |
+| ✓ | [javascript] cross_file_call: process(kind=function) | 值大于阈值 |
+| ✓ | [javascript] class_inheritance: Animal(kind=class) | 值大于阈值 |
+| ✓ | [javascript] class_inheritance: Dog(kind=class) | 值大于阈值 |
+| ✓ | [javascript] class_inheritance: speak(kind=method) | 值大于阈值 |
+| ✓ | [javascript] closure: makeCounter(kind=function) | 值大于阈值 |
+| ✓ | [javascript] destructured_import: area(kind=function) | 值大于阈值 |
+| ✓ | [javascript] destructured_import: compute(kind=function) | 值大于阈值 |
+| ✓ | [javascript] default_export_class: App(kind=class) | 值大于阈值 |
+| ✓ | [javascript] default_export_class: run(kind=method) | 值大于阈值 |
+| ✓ | [javascript] symbol_well_known: Collection(kind=class) | 值大于阈值 |
+| ✓ | [javascript] weakmap_weakset: track(kind=function) | 值大于阈值 |
+| ✓ | [javascript] reflect_api: Point(kind=class) | 值大于阈值 |
+| ✓ | [javascript] bigint_usage: factorial(kind=function) | 值大于阈值 |
+| ✓ | [javascript] tagged_template: sql(kind=function) | 值大于阈值 |
+| ✓ | [javascript] object_define_property: createReadOnly(kind=function) | 值大于阈值 |
+| ✓ | [javascript] try_catch_finally: safeParse(kind=function) | 值大于阈值 |
+| ✓ | [javascript] function_bind: greet(kind=function) | 值大于阈值 |
 | ✓ | [c] cross_file_call: calculate(kind=function) | 值大于阈值 |
 | ✓ | [c] cross_file_call: main(kind=function) | 值大于阈值 |
 | ✓ | [c] cross_file_call: main→calculate | 值大于阈值 |
@@ -162,6 +308,14 @@
 | ✓ | [c] multi_include: VERSION(kind=macro) | 值大于阈值 |
 | ✓ | [c] multi_include: Handle(kind=type) | 值大于阈值 |
 | ✓ | [c] multi_include: create_handle(kind=function) | 值大于阈值 |
+| ✓ | [c] variadic_macro: main(kind=function) | 值大于阈值 |
+| ✓ | [c] anonymous_struct: Outer(kind=struct) | 值大于阈值 |
+| ✓ | [c] flexible_array_member: Buffer(kind=struct) | 值大于阈值 |
+| ✓ | [c] function_pointer_array: add(kind=function) | 值大于阈值 |
+| ✓ | [c] function_pointer_array: sub(kind=function) | 值大于阈值 |
+| ✓ | [c] thread_local_storage: increment(kind=function) | 值大于阈值 |
+| ✓ | [c] inline_function: max(kind=function) | 值大于阈值 |
+| ✓ | [c] inline_function: main(kind=function) | 值大于阈值 |
 | ✓ | [cpp] cross_file_call: calculate(kind=function) | 值大于阈值 |
 | ✓ | [cpp] cross_file_call: main(kind=function) | 值大于阈值 |
 | ✓ | [cpp] class_inheritance: Shape(kind=class) | 值大于阈值 |
@@ -173,6 +327,17 @@
 | ✓ | [cpp] template_class: pop(kind=method) | 值大于阈值 |
 | ✓ | [cpp] operator_overload: Vec(kind=class) | 值大于阈值 |
 | ✓ | [cpp] operator_overload: operator+(kind=method) | 值大于阈值 |
+| ✓ | [cpp] sfinae_enable_if: process(kind=function) | 值大于阈值 |
+| ✓ | [cpp] crtp: Comparable(kind=class) | 值大于阈值 |
+| ✓ | [cpp] crtp: Value(kind=class) | 值大于阈值 |
+| ✓ | [cpp] move_semantics: Buffer(kind=class) | 值大于阈值 |
+| ✓ | [cpp] perfect_forwarding: make(kind=function) | 值大于阈值 |
+| ✓ | [cpp] variadic_template_fold: sum(kind=function) | 值大于阈值 |
+| ✓ | [cpp] concept_constraint: add(kind=function) | 值大于阈值 |
+| ✓ | [cpp] three_way_comparison: Point(kind=struct) | 值大于阈值 |
+| ✓ | [cpp] constexpr_if: get_value(kind=function) | 值大于阈值 |
+| ✓ | [cpp] designated_initializer: Config(kind=struct) | 值大于阈值 |
+| ✓ | [cpp] raii_guard: FileGuard(kind=class) | 值大于阈值 |
 | ✓ | [java] cross_file_call: Calculator(kind=class) | 值大于阈值 |
 | ✓ | [java] cross_file_call: calculate(kind=method) | 值大于阈值 |
 | ✓ | [java] cross_file_call: Main(kind=class) | 值大于阈值 |
@@ -189,6 +354,145 @@
 | ✓ | [java] interface_implementation: print(kind=method) | 值大于阈值 |
 | ✓ | [java] method_overload: Processor(kind=class) | 值大于阈值 |
 | ✓ | [java] method_overload: process(kind=method) | 值大于阈值 |
+| ✓ | [java] annotation_processor: Logged(kind=interface) | 值大于阈值 |
+| ✓ | [java] wildcard_generics: Container(kind=class) | 值大于阈值 |
+| ✓ | [java] wildcard_generics: process(kind=method) | 值大于阈值 |
+| ✓ | [java] wildcard_generics: addAll(kind=method) | 值大于阈值 |
+| ✓ | [java] reflection_api: Reflector(kind=class) | 值大于阈值 |
+| ✓ | [java] reflection_api: inspect(kind=method) | 值大于阈值 |
+| ✓ | [java] stream_api: StreamDemo(kind=class) | 值大于阈值 |
+| ✓ | [java] stream_api: process(kind=method) | 值大于阈值 |
+| ✓ | [java] completable_future: AsyncDemo(kind=class) | 值大于阈值 |
+| ✓ | [java] completable_future: fetch(kind=method) | 值大于阈值 |
+| ✓ | [java] pattern_matching_switch: PatternDemo(kind=class) | 值大于阈值 |
+| ✓ | [java] pattern_matching_switch: describe(kind=method) | 值大于阈值 |
+| ✓ | [java] record_class: Point(kind=class) | 值大于阈值 |
+| ✓ | [java] record_class: distanceToOrigin(kind=method) | 值大于阈值 |
+| ✓ | [java] sealed_class: Shape(kind=interface) | 值大于阈值 |
+| ✓ | [java] sealed_class: Circle(kind=class) | 值大于阈值 |
+| ✓ | [java] sealed_class: Rectangle(kind=class) | 值大于阈值 |
+| ✓ | [java] sealed_class: radius(kind=method) | 值大于阈值 |
+| ✓ | [java] sealed_class: width(kind=method) | 值大于阈值 |
+| ✓ | [java] text_blocks: JsonDemo(kind=class) | 值大于阈值 |
+| ✓ | [java] text_blocks: getConfig(kind=method) | 值大于阈值 |
+| ✓ | [java] varargs_generic: GenericVarargs(kind=class) | 值大于阈值 |
+| ✓ | [java] varargs_generic: asList(kind=method) | 值大于阈值 |
+| ✓ | [rust] cross_file_call: calculate(kind=function) | 值大于阈值 |
+| ✗ | [rust] cross_file_call: process(kind=method) | 实际=0；要求>0 |
+| ✓ | [rust] generic_struct: Container(kind=struct) | 值大于阈值 |
+| ✓ | [rust] generic_struct: new(kind=method) | 值大于阈值 |
+| ✓ | [rust] generic_struct: get(kind=method) | 值大于阈值 |
+| ✓ | [rust] async_function: fetch_data(kind=function) | 值大于阈值 |
+| ✓ | [rust] macro_definition: say_hello(kind=macro) | 值大于阈值 |
+| ✓ | [rust] unsafe_block: raw_pointer_deref(kind=function) | 值大于阈值 |
+| ✓ | [rust] unsafe_block: safe_wrapper(kind=function) | 值大于阈值 |
+| ✓ | [rust] ffi_extern: rust_entry(kind=function) | 值大于阈值 |
+| ✓ | [rust] lifetime_annotation: longest(kind=function) | 值大于阈值 |
+| ✗ | [rust] lifetime_annotation: next(kind=method) | 实际=0；要求>0 |
+| ✓ | [rust] const_generic: Array(kind=struct) | 值大于阈值 |
+| ✓ | [rust] const_generic: len(kind=method) | 值大于阈值 |
+| ✓ | [rust] drop_trait: FileGuard(kind=struct) | 值大于阈值 |
+| ✓ | [rust] drop_trait: drop(kind=method) | 值大于阈值 |
+| ✓ | [rust] phantom_data: Wrapper(kind=struct) | 值大于阈值 |
+| ✓ | [rust] phantom_data: new(kind=method) | 值大于阈值 |
+| ✓ | [rust] deref_trait: SmartPtr(kind=struct) | 值大于阈值 |
+| ✓ | [rust] deref_trait: deref(kind=method) | 值大于阈值 |
+| ✓ | [rust] from_into_trait: Wrapper(kind=struct) | 值大于阈值 |
+| ✓ | [rust] from_into_trait: from(kind=method) | 值大于阈值 |
+| ✓ | [rust] from_into_trait: into(kind=method) | 值大于阈值 |
+| ✓ | [rust] error_trait: ParseError(kind=struct) | 值大于阈值 |
+| ✓ | [rust] error_trait: fmt(kind=method) | 值大于阈值 |
+| ✓ | [csharp] cross_file_call: Calculator(kind=class) | 值大于阈值 |
+| ✓ | [csharp] cross_file_call: Calculate(kind=method) | 值大于阈值 |
+| ✓ | [csharp] cross_file_call: Main(kind=method) | 值大于阈值 |
+| ✓ | [csharp] class_inheritance: Animal(kind=class) | 值大于阈值 |
+| ✓ | [csharp] class_inheritance: Dog(kind=class) | 值大于阈值 |
+| ✓ | [csharp] class_inheritance: Speak(kind=method) | 值大于阈值 |
+| ✓ | [csharp] generic_constraints: IComparable(kind=interface) | 值大于阈值 |
+| ✓ | [csharp] generic_constraints: Container(kind=class) | 值大于阈值 |
+| ✓ | [csharp] async_method: Fetcher(kind=class) | 值大于阈值 |
+| ✓ | [csharp] async_method: FetchAsync(kind=method) | 值大于阈值 |
+| ✓ | [csharp] linq_query: QueryDemo(kind=class) | 值大于阈值 |
+| ✓ | [csharp] linq_query: Process(kind=method) | 值大于阈值 |
+| ✓ | [csharp] dynamic_type: DynamicDemo(kind=class) | 值大于阈值 |
+| ✓ | [csharp] dynamic_type: Run(kind=method) | 值大于阈值 |
+| ✓ | [csharp] span_memory: SpanDemo(kind=class) | 值大于阈值 |
+| ✓ | [csharp] span_memory: Sum(kind=method) | 值大于阈值 |
+| ✓ | [csharp] span_memory: SumMemory(kind=method) | 值大于阈值 |
+| ✓ | [csharp] ref_return: RefDemo(kind=class) | 值大于阈值 |
+| ✓ | [csharp] ref_return: GetAt(kind=method) | 值大于阈值 |
+| ✓ | [csharp] readonly_struct: Point(kind=struct) | 值大于阈值 |
+| ✓ | [csharp] readonly_struct: DistanceTo(kind=method) | 值大于阈值 |
+| ✓ | [csharp] record_type: Person(kind=class) | 值大于阈值 |
+| ✓ | [csharp] record_type: Employee(kind=class) | 值大于阈值 |
+| ✓ | [csharp] pattern_matching: PatternDemo(kind=class) | 值大于阈值 |
+| ✓ | [csharp] pattern_matching: Describe(kind=method) | 值大于阈值 |
+| ✓ | [csharp] required_members: Config(kind=class) | 值大于阈值 |
+| ✓ | [csharp] file_scoped_namespace: StringHelper(kind=class) | 值大于阈值 |
+| ✓ | [csharp] file_scoped_namespace: Reverse(kind=method) | 值大于阈值 |
+| ✓ | [kotlin] cross_file_call: calculate(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] cross_file_call: process(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] class_inheritance: Animal(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] class_inheritance: Dog(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] class_inheritance: speak(kind=method) | 值大于阈值 |
+| ✓ | [kotlin] generic_class: Container(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] generic_class: get(kind=method) | 值大于阈值 |
+| ✓ | [kotlin] coroutine_function: fetchData(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] companion_object: Factory(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] companion_object: create(kind=method) | 值大于阈值 |
+| ✓ | [kotlin] inline_function: measureTime(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] crossinline: runAsync(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] delegated_property: User(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] typealias: filterStrings(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] tailrec: factorial(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] suspend_function: fetchData(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] suspend_function: processUrls(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] flow_builder: numbers(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] flow_builder: squaredNumbers(kind=function) | 值大于阈值 |
+| ✓ | [kotlin] expect_actual: Platform(kind=class) | 值大于阈值 |
+| ✓ | [kotlin] expect_actual: name(kind=method) | 值大于阈值 |
+| ✓ | [php] cross_file_call: calculate(kind=function) | 值大于阈值 |
+| ✓ | [php] cross_file_call: process(kind=function) | 值大于阈值 |
+| ✓ | [php] class_inheritance: Animal(kind=class) | 值大于阈值 |
+| ✓ | [php] class_inheritance: Dog(kind=class) | 值大于阈值 |
+| ✓ | [php] class_inheritance: speak(kind=method) | 值大于阈值 |
+| ✓ | [php] interface_implementation: Printable(kind=interface) | 值大于阈值 |
+| ✓ | [php] interface_implementation: Report(kind=class) | 值大于阈值 |
+| ✓ | [php] interface_implementation: print(kind=method) | 值大于阈值 |
+| ✓ | [php] anonymous_class: greet(kind=method) | 值大于阈值 |
+| ✓ | [php] magic_methods: MagicBox(kind=class) | 值大于阈值 |
+| ✓ | [php] late_static_binding: Model(kind=class) | 值大于阈值 |
+| ✓ | [php] late_static_binding: User(kind=class) | 值大于阈值 |
+| ✓ | [php] generator: fibonacci(kind=function) | 值大于阈值 |
+| ✓ | [php] closure_bind: Counter(kind=class) | 值大于阈值 |
+| ✓ | [php] closure_bind: getIncrementor(kind=method) | 值大于阈值 |
+| ✓ | [php] attribute_php8: Route(kind=class) | 值大于阈值 |
+| ✓ | [php] attribute_php8: Controller(kind=class) | 值大于阈值 |
+| ✓ | [php] attribute_php8: list(kind=method) | 值大于阈值 |
+| ✓ | [php] enum_php81: Status(kind=enum) | 值大于阈值 |
+| ✓ | [php] enum_php81: label(kind=method) | 值大于阈值 |
+| ✓ | [php] match_expression: describe(kind=function) | 值大于阈值 |
+| ✓ | [php] readonly_property: Config(kind=class) | 值大于阈值 |
+| ✓ | [php] union_intersection_types: process(kind=function) | 值大于阈值 |
+| ✓ | [php] union_intersection_types: find(kind=function) | 值大于阈值 |
+| ✓ | [bash] cross_file_call: calculate(kind=function) | 值大于阈值 |
+| ✓ | [bash] cross_file_call: process(kind=function) | 值大于阈值 |
+| ✓ | [bash] pipeline_and_subshell: filter_results(kind=function) | 值大于阈值 |
+| ✓ | [bash] command_substitution: get_version(kind=function) | 值大于阈值 |
+| ✓ | [bash] trap_and_signal: cleanup(kind=function) | 值大于阈值 |
+| ✓ | [bash] associative_array: load_config(kind=function) | 值大于阈值 |
+| ✓ | [bash] parameter_substitution: set_default(kind=function) | 值大于阈值 |
+| ✓ | [bash] array_operations: process_array(kind=function) | 值大于阈值 |
+| ✓ | [bash] associative_array: load_config(kind=function) | 值大于阈值 |
+| ✓ | [bash] here_document: generate_sql(kind=function) | 值大于阈值 |
+| ✓ | [bash] process_substitution: diff_sorted(kind=function) | 值大于阈值 |
+| ✓ | [bash] coproc: run_worker(kind=function) | 值大于阈值 |
+| ✓ | [bash] select_statement: show_menu(kind=function) | 值大于阈值 |
+| ✓ | [bash] select_statement: start_service(kind=function) | 值大于阈值 |
+| ✓ | [bash] select_statement: stop_service(kind=function) | 值大于阈值 |
+| ✓ | [bash] select_statement: restart_service(kind=function) | 值大于阈值 |
+| ✓ | [bash] getopts: parse_args(kind=function) | 值大于阈值 |
+| ✓ | [bash] recursive_function: factorial(kind=function) | 值大于阈值 |
 | ✓ | [multi] go_cross_file: Calculate(kind=function) | 值大于阈值 |
 | ✓ | [multi] go_cross_file: Use(kind=function) | 值大于阈值 |
 | ✓ | [multi] go_cross_file: Use→Calculate | 值大于阈值 |
@@ -196,6 +500,8 @@
 | ✓ | [multi] python_cross_file: process(kind=function) | 值大于阈值 |
 | ✓ | [multi] typescript_cross_file: calculate(kind=function) | 值大于阈值 |
 | ✓ | [multi] typescript_cross_file: process(kind=function) | 值大于阈值 |
+| ✓ | [multi] javascript_cross_file: calculate(kind=function) | 值大于阈值 |
+| ✓ | [multi] javascript_cross_file: process(kind=function) | 值大于阈值 |
 | ✓ | [multi] c_cross_file: calculate(kind=function) | 值大于阈值 |
 | ✓ | [multi] c_cross_file: main(kind=function) | 值大于阈值 |
 | ✓ | [multi] c_cross_file: main→calculate | 值大于阈值 |
@@ -205,6 +511,17 @@
 | ✓ | [multi] java_cross_file: calculate(kind=method) | 值大于阈值 |
 | ✓ | [multi] java_cross_file: Main(kind=class) | 值大于阈值 |
 | ✓ | [multi] java_cross_file: run(kind=method) | 值大于阈值 |
+| ✓ | [multi] rust_cross_file: calculate(kind=function) | 值大于阈值 |
+| ✓ | [multi] rust_cross_file: process(kind=function) | 值大于阈值 |
+| ✓ | [multi] csharp_cross_file: Calculator(kind=class) | 值大于阈值 |
+| ✓ | [multi] csharp_cross_file: Calculate(kind=method) | 值大于阈值 |
+| ✓ | [multi] csharp_cross_file: Main(kind=method) | 值大于阈值 |
+| ✓ | [multi] kotlin_cross_file: calculate(kind=function) | 值大于阈值 |
+| ✓ | [multi] kotlin_cross_file: process(kind=function) | 值大于阈值 |
+| ✓ | [multi] php_cross_file: calculate(kind=function) | 值大于阈值 |
+| ✓ | [multi] php_cross_file: process(kind=function) | 值大于阈值 |
+| ✓ | [multi] bash_cross_file: calculate(kind=function) | 值大于阈值 |
+| ✓ | [multi] bash_cross_file: process(kind=function) | 值大于阈值 |
 | ✓ | [multi] h_in_pure_c_project: main(kind=function) | 值大于阈值 |
 | ✓ | [multi] h_in_cpp_project: add(kind=function) | 值大于阈值 |
 | ✓ | [multi] h_in_cpp_project: main(kind=function) | 值大于阈值 |
@@ -217,9 +534,26 @@
 | ✓ | [multi] typescript_interface_implementation: Printable(kind=interface) | 值大于阈值 |
 | ✓ | [multi] typescript_interface_implementation: Report(kind=class) | 值大于阈值 |
 | ✓ | [multi] typescript_interface_implementation: print(kind=method) | 值大于阈值 |
+| ✓ | [multi] javascript_class_inheritance: Animal(kind=class) | 值大于阈值 |
+| ✓ | [multi] javascript_class_inheritance: Dog(kind=class) | 值大于阈值 |
+| ✓ | [multi] javascript_class_inheritance: speak(kind=method) | 值大于阈值 |
 | ✓ | [multi] cpp_abstract_class: Shape(kind=class) | 值大于阈值 |
 | ✓ | [multi] cpp_abstract_class: Circle(kind=class) | 值大于阈值 |
 | ✓ | [multi] cpp_abstract_class: area(kind=method) | 值大于阈值 |
+| ✓ | [multi] python_class_inheritance: Animal(kind=class) | 值大于阈值 |
+| ✓ | [multi] python_class_inheritance: Dog(kind=class) | 值大于阈值 |
+| ✓ | [multi] python_class_inheritance: speak(kind=method) | 值大于阈值 |
+| ✓ | [multi] csharp_interface_implementation: IPrintable(kind=interface) | 值大于阈值 |
+| ✓ | [multi] csharp_interface_implementation: Report(kind=class) | 值大于阈值 |
+| ✓ | [multi] csharp_interface_implementation: Print(kind=method) | 值大于阈值 |
+| ✓ | [multi] kotlin_interface_implementation: Drawable(kind=interface) | 值大于阈值 |
+| ✓ | [multi] kotlin_interface_implementation: Circle(kind=class) | 值大于阈值 |
+| ✓ | [multi] kotlin_interface_implementation: draw(kind=method) | 值大于阈值 |
+| ✓ | [multi] php_interface_implementation: Printable(kind=interface) | 值大于阈值 |
+| ✓ | [multi] php_interface_implementation: Report(kind=class) | 值大于阈值 |
+| ✓ | [multi] php_interface_implementation: print(kind=method) | 值大于阈值 |
+| ✓ | [multi] bash_function_sourcing: util_log(kind=function) | 值大于阈值 |
+| ✓ | [multi] bash_function_sourcing: run(kind=function) | 值大于阈值 |
 | ✓ | ERR-001 空文件: 0节点 | 实际值匹配预期 |
 | ✓ | ERR-002 纯注释文件: 0节点 | 实际值匹配预期 |
 | ✓ | ERR-003 语法错误: 不崩溃(exit=0) | 实际值匹配预期 |
@@ -227,5 +561,6 @@
 | ✓ | ERR-005 无效UTF-8: 不崩溃(exit=0) | 实际值匹配预期 |
 | ✓ | ERR-006 混合语言: Go文件>0 | 值大于阈值 |
 | ✓ | ERR-006 混合语言: Python文件>0 | 值大于阈值 |
+| ✓ | ERR-006 混合语言: JavaScript文件>0 | 值大于阈值 |
 | ✓ | ERR-006 混合语言: C文件>0 | 值大于阈值 |
 | ✓ | ERR-007 隐藏目录: 排除 | 实际值匹配预期 |

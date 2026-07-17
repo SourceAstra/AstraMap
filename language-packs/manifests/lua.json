@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "lua",
+  "version": "1.0.0",
+  "protocolMin": 1,
+  "protocolMax": 1,
+  "displayName": "Lua",
+  "idPrefix": "lua",
+  "qualifiedSeparator": ".",
+  "detection": {"extensions": {".lua": "lua"}, "shebangs": [{"contains": ["lua"], "dialect": "lua"}]},
+  "capabilities": {"definitions": true, "containers": true, "localCalls": true, "imports": true, "incrementalSyntax": true},
+  "artifacts": [], "publisher": "astramap", "keyId": "astramap-release-1", "files": {}, "signature": ""
+}

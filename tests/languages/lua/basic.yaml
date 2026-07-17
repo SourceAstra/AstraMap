@@ -1,0 +1,16 @@
+metadata:
+  language: lua
+  description: "Lua language package function case"
+  complexity: package
+  scip_required: false
+fixtures:
+  - id: function_definition
+    files:
+      main.lua: |
+        function greet(name)
+          return "Hello " .. name
+        end
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function

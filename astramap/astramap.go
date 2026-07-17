@@ -86,18 +86,42 @@ type AstraMapFile struct {
 // ===== SCIP Index Importer =====
 
 func ValidateScipIndexFile(scipPath string) error {
+	_, err := readScipIndexFile(scipPath)
+	return err
+}
+
+func ScipIndexLanguages(scipPath string) ([]string, error) {
+	index, err := readScipIndexFile(scipPath)
+	if err != nil {
+		return nil, err
+	}
+	languages := make(map[string]bool)
+	for _, document := range index.Documents {
+		if language := strings.ToLower(strings.TrimSpace(document.Language)); language != "" {
+			languages[language] = true
+		}
+	}
+	result := make([]string, 0, len(languages))
+	for language := range languages {
+		result = append(result, language)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func readScipIndexFile(scipPath string) (scip.Index, error) {
 	data, err := os.ReadFile(scipPath)
 	if err != nil {
-		return fmt.Errorf("failed to read SCIP index file: %w", err)
+		return scip.Index{}, fmt.Errorf("failed to read SCIP index file: %w", err)
 	}
 	var index scip.Index
 	if err := proto.Unmarshal(data, &index); err != nil {
-		return fmt.Errorf("SCIP Protobuf deserialization failed: %w", err)
+		return scip.Index{}, fmt.Errorf("SCIP Protobuf deserialization failed: %w", err)
 	}
 	if len(index.Documents) == 0 {
-		return fmt.Errorf("SCIP index contains no documents")
+		return scip.Index{}, fmt.Errorf("SCIP index contains no documents")
 	}
-	return nil
+	return index, nil
 }
 
 func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error {
@@ -304,7 +328,7 @@ func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot st
 				IsExported:    isExported,
 				UpdatedAt:     now,
 			}
-			normalizeSemanticNode(docLang, node, occ.Symbol, sourceLines)
+			normalizeSemanticNode(profile, docLang, node, occ.Symbol, sourceLines)
 			nodes = append(nodes, node)
 			documentNodes = append(documentNodes, node)
 			fileNodeCounts[relPath]++
@@ -582,7 +606,7 @@ func syncFileAstraMapWithProfile(db *sqlx.DB, profile ProjectProfile, filePath s
 	_ = tx.Select(&deletedNodes, "SELECT id, name, language, kind FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
 	for _, dn := range deletedNodes {
 		if dn.Kind == "function" || dn.Kind == "method" {
-			prefix := getLangPrefix(dn.Language)
+			prefix := languageIDPrefixForProfile(profile, dn.Language)
 			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, dn.Name)
 			_, _ = tx.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND provenance != 'heuristic'", extID, dn.ID)
 		}
@@ -681,7 +705,7 @@ func syncFileAstraMapWithProfile(db *sqlx.DB, profile ProjectProfile, filePath s
 	// Bind existing external calls to the newly indexed functions/methods
 	for _, n := range nodes {
 		if n.Kind == "function" || n.Kind == "method" {
-			prefix := getLangPrefix(n.Language)
+			prefix := languageIDPrefixForProfile(profile, n.Language)
 			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, n.Name)
 			_, _ = db.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND kind = 'calls'", n.ID, extID)
 		}
@@ -809,7 +833,7 @@ func reuseExistingExternalIDs(db *sqlx.DB, edges []*AstraMapEdge) error {
 func ensureTreeSitterOverlay(db *sqlx.DB, profile ProjectProfile, relPath, absPath string) (bool, error) {
 	selection, _ := ResolveLanguageWithProfile(profile, absPath)
 	lang := selection.ID
-	prefix := getLangPrefix(lang)
+	prefix := languageIDPrefixForProfile(profile, lang)
 	if prefix == "unknown" {
 		return false, nil
 	}
@@ -1005,19 +1029,7 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 		logInfo("PruneDeletedFiles: Cleaned up residual records for %d deleted files", prunedDeleted)
 	}
 
-	extensions := make(map[string]bool)
-	if len(langFilter) > 0 {
-		for _, lang := range langFilter {
-			for _, ext := range LanguageExtensions(lang) {
-				extensions[ext] = true
-			}
-		}
-	}
-	if len(extensions) == 0 {
-		for _, ext := range SupportedExtensions() {
-			extensions[ext] = true
-		}
-	}
+	languages := languageFilterSet(profile, langFilter)
 
 	scanned := 0
 	updated := 0
@@ -1034,8 +1046,7 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 			return nil
 		}
 
-		ext := strings.ToLower(filepath.Ext(path))
-		if !extensions[ext] {
+		if !IsLanguageFile(profile, path, languages) {
 			return nil
 		}
 		if !filter.Allows(relPath, StageTreeSitter) {
@@ -1090,7 +1101,7 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 	}
 	profile := BuildProjectProfile(projectRoot, filter, StageTreeSitter)
 
-	extensions := indexExtensions(langFilter...)
+	languages := languageFilterSet(profile, langFilter)
 	seen := make(map[string]bool)
 	for _, rawPath := range paths {
 		if rawPath == "" {
@@ -1119,14 +1130,11 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 			continue
 		}
 
-		ext := strings.ToLower(filepath.Ext(absPath))
-		if ext == "" {
-			if statErr != nil {
-				result.PrunedDeleted += pruneDeletedUnderPath(db, projectRoot, relPath)
-			}
+		if statErr != nil {
+			result.PrunedDeleted += pruneDeletedUnderPath(db, projectRoot, relPath)
 			continue
 		}
-		if !extensions[ext] {
+		if !IsLanguageFile(profile, absPath, languages) {
 			continue
 		}
 
@@ -1163,19 +1171,18 @@ func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []str
 	return result, nil
 }
 
-func indexExtensions(langFilter ...string) map[string]bool {
-	extensions := make(map[string]bool)
-	for _, lang := range langFilter {
-		for _, ext := range LanguageExtensions(lang) {
-			extensions[ext] = true
+func languageFilterSet(profile ProjectProfile, filters []string) map[string]bool {
+	result := make(map[string]bool, len(filters))
+	registry := profile.registry
+	if registry == nil {
+		registry = languageRegistryForProject(profile.ProjectRoot)
+	}
+	for _, filter := range filters {
+		if spec := registry.specForID(filter); spec != nil {
+			result[spec.ID] = true
 		}
 	}
-	if len(extensions) == 0 {
-		for _, ext := range SupportedExtensions() {
-			extensions[ext] = true
-		}
-	}
-	return extensions
+	return result
 }
 
 func pruneDeletedUnderPath(db *sqlx.DB, projectRoot, relPath string) int {
@@ -1324,6 +1331,38 @@ func ProvenanceStats(db *sqlx.DB) (map[string]int, map[string]int, error) {
 		}
 	}
 	return nodeStats, edgeStats, nil
+}
+
+func EffectiveLanguageCapabilities(db *sqlx.DB) []CapabilityState {
+	return EffectiveLanguageCapabilitiesForProject(db, "")
+}
+
+func EffectiveLanguageCapabilitiesForProject(db *sqlx.DB, projectRoot string) []CapabilityState {
+	registry := languageRegistryForProject(projectRoot)
+	ids := make([]string, 0, len(registry.languages))
+	for id := range registry.languages {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]CapabilityState, 0, len(ids))
+	for _, id := range ids {
+		spec := registry.languages[id]
+		state := CapabilityState{
+			Language: spec.ID, DeclaredLevel: capabilityLevel(spec.Capabilities),
+			EffectiveLevel: capabilityLevel(syntaxCapabilities), GrammarStatus: "ready",
+			ProviderStatus: "not-applicable",
+		}
+		if spec.Semantic != nil {
+			state.ProviderStatus = "not-configured"
+			_ = db.Get(&state.Artifacts, "SELECT CASE WHEN EXISTS (SELECT 1 FROM astramap_nodes WHERE language = ? AND provenance = 'scip') THEN 1 ELSE 0 END", spec.ID)
+			if state.Artifacts > 0 {
+				state.EffectiveLevel = state.DeclaredLevel
+				state.ProviderStatus = "imported"
+			}
+		}
+		result = append(result, state)
+	}
+	return result
 }
 
 // ===== Heuristic Resolvers =====
@@ -1679,7 +1718,11 @@ func normalizeLanguage(profile ProjectProfile, lang, filePath string) string {
 	if selection, ok := ResolveLanguageWithProfile(profile, filePath); ok {
 		return selection.ID
 	}
-	if spec, ok := LanguageSpecByID(strings.ToLower(strings.TrimSpace(lang))); ok {
+	registry := profile.registry
+	if registry == nil {
+		registry = languageRegistryForProject(profile.ProjectRoot)
+	}
+	if spec := registry.specForID(lang); spec != nil {
 		return spec.ID
 	}
 	return "unknown"

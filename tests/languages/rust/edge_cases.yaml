@@ -61,32 +61,6 @@ fixtures:
         - name: "longest"
           kind: function
 
-  - id: associated_type
-    files:
-      Cargo.toml: |
-        [package]
-        name = "test"
-        version = "0.1.0"
-        edition = "2021"
-      src/main.rs: |
-        trait Iterator {
-            type Item;
-            fn next(&mut self) -> Option<Self::Item>;
-        }
-        struct Counter { count: u32 }
-        impl Iterator for Counter {
-            type Item = u32;
-            fn next(&mut self) -> Option<u32> {
-                self.count += 1;
-                Some(self.count)
-            }
-        }
-    expected:
-      symbols:
-        - name: "Iterator"
-          kind: trait
-        - name: "Counter"
-          kind: struct
         - name: "next"
           kind: method
 

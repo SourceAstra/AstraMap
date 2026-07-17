@@ -1,0 +1,16 @@
+metadata:
+  language: ruby
+  description: "Ruby language package function case"
+  complexity: package
+  scip_required: false
+fixtures:
+  - id: method_definition
+    files:
+      main.rb: |
+        def greet(name)
+          "Hello #{name}"
+        end
+    expected:
+      symbols:
+        - name: "greet"
+          kind: method

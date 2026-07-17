@@ -1,0 +1,16 @@
+metadata:
+  language: swift
+  description: "Swift language package function case"
+  complexity: package
+  scip_required: false
+fixtures:
+  - id: function_definition
+    files:
+      main.swift: |
+        func greet(name: String) -> String {
+          return "Hello \(name)"
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function

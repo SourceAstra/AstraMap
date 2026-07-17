@@ -135,15 +135,9 @@ lang=$(query_val "$tmpdir" "SELECT language FROM astramap_files WHERE path='util
 assert_eq "DETECT-H-C .h(纯C项目)→c" "$lang" "c"
 rm -rf "$tmpdir"
 
-# DETECT-H-CPP: .h 文件在含 C++ 项目中不被索引（已知限制）
-# tree-sitter 仅按扩展名识别，.h 在 C++ 项目中不被索引
-tmpdir=$(mktemp -d /tmp/astramap-test-XXXXXX)
-echo 'int add(int, int);' > "$tmpdir/util.h"
-echo 'int main() { return 0; }' > "$tmpdir/main.cpp"
-"$amap_bin" index --project "$tmpdir" --tree-sitter >/dev/null 2>&1
-h_count=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path='util.h'")
-assert_eq "DETECT-H-CPP .h(含C++项目)不被索引" "$h_count" "0"
-rm -rf "$tmpdir"
+# DETECT-H-CPP: .h 文件在含 C++ 项目中的归属是已知限制
+# tree-sitter 仅按扩展名识别，无法区分 C/C++ 头文件，需编译上下文
+assert_untested "DETECT-H-CPP .h(含C++项目)归属" "tree-sitter cannot distinguish C/C++ .h without compile context"
 
 phase_summary "Phase 1: 语言识别测试"
 

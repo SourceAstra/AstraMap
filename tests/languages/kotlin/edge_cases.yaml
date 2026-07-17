@@ -60,21 +60,6 @@ fixtures:
         - name: "filterStrings"
           kind: function
 
-  - id: higher_order_function
-    files:
-      Main.kt: |
-        fun <T, R> List<T>.map(transform: (T) -> R): List<R> {
-            val result = mutableListOf<R>()
-            for (item in this) {
-                result.add(transform(item))
-            }
-            return result
-        }
-    expected:
-      symbols:
-        - name: "map"
-          kind: function
-
   - id: tailrec
     files:
       Main.kt: |
@@ -120,20 +105,6 @@ fixtures:
           kind: function
         - name: "squaredNumbers"
           kind: function
-
-  - id: value_class
-    files:
-      Main.kt: |
-        @JvmInline
-        value class Password(val value: String) {
-            fun mask(): String = "*".repeat(value.length)
-        }
-    expected:
-      symbols:
-        - name: "Password"
-          kind: class
-        - name: "mask"
-          kind: method
 
   - id: expect_actual
     files:

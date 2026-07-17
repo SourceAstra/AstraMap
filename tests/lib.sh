@@ -42,8 +42,28 @@ language_ext() {
     kotlin) echo "kt" ;;
     php) echo "php" ;;
     bash) echo "sh" ;;
+    ruby) echo "rb" ;;
+    dart) echo "dart" ;;
+    swift) echo "swift" ;;
+    lua) echo "lua" ;;
+    scala) echo "scala" ;;
+    zig) echo "zig" ;;
+    visualbasic) echo "vb" ;;
     *) echo "" ;;
   esac
+}
+
+# 语言包必须已安装且处于 active lock，测试不得把未安装包伪装成通过。
+astramap_language_active() {
+  local language="$1"
+  local packages
+  packages=$("$(get_amap_bin)" language list --json 2>/dev/null) || return 1
+  python3 -c '
+import json, sys
+items = json.loads(sys.argv[1])
+language = sys.argv[2]
+raise SystemExit(0 if any(item.get("id") == language and item.get("enabled") for item in items) else 1)
+' "$packages" "$language" 2>/dev/null
 }
 
 # ── 辅助函数 ──

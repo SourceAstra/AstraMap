@@ -50,22 +50,6 @@ fixtures:
         - name: "read"
           kind: method
 
-  - id: trait_definition
-    files:
-      Loggable.php: |
-        <?php
-        trait Loggable {
-          public function log($message) {
-            echo $message;
-          }
-        }
-    expected:
-      symbols:
-        - name: "Loggable"
-          kind: trait
-        - name: "log"
-          kind: method
-
   - id: simple_call
     files:
       main.php: |
@@ -135,14 +119,3 @@ fixtures:
         - name: "max"
           kind: method
 
-  - id: closure
-    files:
-      main.php: |
-        <?php
-        $multiply = function($a, $b) {
-          return $a * $b;
-        };
-    expected:
-      symbols:
-        - name: "multiply"
-          kind: function

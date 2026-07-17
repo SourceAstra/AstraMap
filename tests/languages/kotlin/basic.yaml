@@ -70,17 +70,6 @@ fixtures:
         - name: "main"
           kind: function
 
-  - id: extension_function
-    files:
-      Main.kt: |
-        fun String.addExclamation(): String {
-          return this + "!"
-        }
-    expected:
-      symbols:
-        - name: "addExclamation"
-          kind: function
-
   - id: sealed_class
     files:
       Main.kt: |

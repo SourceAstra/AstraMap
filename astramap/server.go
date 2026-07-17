@@ -59,16 +59,26 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 		if status.NodeCount == 0 {
 			statusStr = "indexing"
 		}
+		filter, _ := LoadIndexFilter(projectRoot)
+		languageRuntime := LanguageRuntimeForProject(projectRoot)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":               statusStr,
-			"database":             "SQLite",
-			"totalFiles":           status.FileCount,
-			"indexedNodes":         status.NodeCount,
-			"indexedEdges":         status.EdgeCount,
-			"dirtyCount":           status.DirtyCount,
-			"dirtyFiles":           status.DirtyFiles,
-			"supportedLanguages":   SupportedLanguageIDs(),
-			"languageCapabilities": SupportedLanguageCapabilities(),
+			"status":                        statusStr,
+			"database":                      "SQLite",
+			"totalFiles":                    status.FileCount,
+			"indexedNodes":                  status.NodeCount,
+			"indexedEdges":                  status.EdgeCount,
+			"dirtyCount":                    status.DirtyCount,
+			"dirtyFiles":                    status.DirtyFiles,
+			"supportedLanguages":            SupportedLanguageIDsForProject(projectRoot),
+			"languageCapabilities":          SupportedLanguageCapabilitiesForProject(projectRoot),
+			"declaredLanguageCapabilities":  SupportedLanguageCapabilitiesForProject(projectRoot),
+			"effectiveLanguageCapabilities": EffectiveLanguageCapabilitiesForProject(readDB, projectRoot),
+			"semanticProviders":             SemanticProviderSpecsForProject(projectRoot),
+			"projectUnits":                  DetectProjectUnits(projectRoot, SupportedLanguageIDsForProject(projectRoot), filter),
+			"builtinLanguages":              languageRuntime.BuiltinLanguages,
+			"installedLanguages":            languageRuntime.InstalledLanguages,
+			"effectiveLanguages":            languageRuntime.EffectiveLanguages,
+			"languagePackageDiagnostics":    languageRuntime.Diagnostics,
 		})
 	})
 
@@ -813,14 +823,14 @@ func inferRole(nodes []*AstraMapNode) string {
 		"Middleware": 0, "TestHelper": 0,
 	}
 	keywordMap := map[string][]string{
-		"RequestHandler": {"handler", "controller", "router", "route", "serve", "endpoint", "action"},
+		"RequestHandler":  {"handler", "controller", "router", "route", "serve", "endpoint", "action"},
 		"BusinessService": {"service", "query", "process", "execute", "compute", "analyze", "transform"},
-		"DataAccess": {"repo", "store", "db", "sql", "dal", "database", "persist", "cache", "dao"},
-		"DataModel": {"model", "entity", "dto", "vo", "schema", "struct", "type", "message"},
-		"Utility": {"util", "helper", "common", "shared", "format", "convert", "parse", "marshal"},
-		"Configuration": {"config", "setting", "option", "flag", "env", "init", "setup"},
-		"Middleware":  {"middleware", "interceptor", "filter", "guard", "auth", "logging"},
-		"TestHelper": {"test", "mock", "stub", "fake", "fixture"},
+		"DataAccess":      {"repo", "store", "db", "sql", "dal", "database", "persist", "cache", "dao"},
+		"DataModel":       {"model", "entity", "dto", "vo", "schema", "struct", "type", "message"},
+		"Utility":         {"util", "helper", "common", "shared", "format", "convert", "parse", "marshal"},
+		"Configuration":   {"config", "setting", "option", "flag", "env", "init", "setup"},
+		"Middleware":      {"middleware", "interceptor", "filter", "guard", "auth", "logging"},
+		"TestHelper":      {"test", "mock", "stub", "fake", "fixture"},
 	}
 
 	exportedCount := 0
@@ -2492,16 +2502,12 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) && !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 				continue
 			}
-			ext := strings.ToLower(filepath.Ext(event.Name))
-			if !IsSupportedExtension(ext) && event.Name != "" {
+			if !IsPotentialSupportedPathForProject(projectRoot, event.Name) && event.Name != "" {
 				// Also handle Remove/Rename of directories
 				if !event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
 					continue
 				}
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					continue
-				}
-				if ext == "" && !event.Has(fsnotify.Remove) {
 					continue
 				}
 			}

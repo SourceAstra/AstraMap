@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "ruby",
+  "version": "1.0.0",
+  "protocolMin": 1,
+  "protocolMax": 1,
+  "displayName": "Ruby",
+  "aliases": ["rb"],
+  "idPrefix": "rb",
+  "qualifiedSeparator": "::",
+  "detection": {
+    "extensions": {".rb": "ruby", ".rake": "ruby"},
+    "filenames": {"gemfile": "ruby", "rakefile": "ruby", "guardfile": "ruby"},
+    "shebangs": [{"contains": ["ruby"], "dialect": "ruby"}]
+  },
+  "capabilities": {"definitions": true, "containers": true, "localCalls": true, "imports": true, "crossFileCalls": true, "overloadResolve": true, "implementations": true, "incrementalSyntax": true},
+  "toolchain": [{"label": "Ruby", "commands": ["ruby"], "installHint": "https://www.ruby-lang.org/en/downloads/"}],
+  "semantic": {"providerId": "ruby", "mode": "stable", "tool": "scip-ruby", "installHint": "gem install scip-ruby", "args": ["index"], "artifact": "index.scip"},
+  "project": {"manifests": ["Gemfile"]},
+  "filter": {"files": ["**/*_pb.rb"]},
+  "artifacts": [], "publisher": "astramap", "keyId": "astramap-release-1", "files": {}, "signature": ""
+}

@@ -1,0 +1,16 @@
+metadata:
+  language: dart
+  description: "Dart language package function case"
+  complexity: package
+  scip_required: false
+fixtures:
+  - id: function_definition
+    files:
+      main.dart: |
+        String greet(String name) {
+          return 'Hello $name';
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function

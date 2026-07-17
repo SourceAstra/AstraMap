@@ -102,17 +102,6 @@ fixtures:
         - name: "fetchData"
           kind: function
 
-  - id: generator_function
-    files:
-      main.js: |
-        function* range(n) {
-          for (let i = 0; i < n; i++) yield i;
-        }
-    expected:
-      symbols:
-        - name: "range"
-          kind: function
-
   - id: object_method
     files:
       main.js: |

@@ -1,0 +1,14 @@
+metadata:
+  language: zig
+  description: "Zig language package function case"
+  complexity: package
+  scip_required: false
+fixtures:
+  - id: function_definition
+    files:
+      main.zig: |
+        fn greet() void {}
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function

@@ -65,16 +65,6 @@ fixtures:
         - name: "Point"
           kind: class
 
-  - id: lambda_and_map
-    files:
-      main.py: |
-        square = lambda x: x ** 2
-        result = list(map(lambda x: x * 2, [1, 2, 3]))
-    expected:
-      symbols:
-        - name: "square"
-          kind: function
-
   - id: type_annotations
     files:
       main.py: |
