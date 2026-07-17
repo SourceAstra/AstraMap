@@ -89,6 +89,7 @@ func stripProjectArg() {
 
 func main() {
 	stripProjectArg()
+	defer astramap.CloseLanguageModules()
 
 	if len(os.Args) < 2 {
 		printHelp()
@@ -107,6 +108,8 @@ func main() {
 		watchCmd()
 	case "install":
 		installCmd()
+	case "language":
+		languageCmd()
 	case "diff":
 		diffCmd()
 	case "locate":
@@ -152,6 +155,7 @@ Core Commands:
       --watch [seconds]                      Continue low-frequency monitoring and incremental refresh after indexing (default 10s)
   watch [seconds]                            Initial indexing then continuous low-frequency monitoring with incremental refresh (default 10s)
   install                                   One-click MCP installation to Claude Code / Cursor
+  language <action>                         Install and manage versioned language packages
 
 Common Examples:
   amap index                                  Quick incremental update once
@@ -330,7 +334,7 @@ func detectProjectLanguages(projectRoot string, filter *astramap.IndexFilter) []
 	countsByLanguage := astramap.ProjectLanguageCounts(profile)
 
 	ranked := make([]LangCount, 0, len(countsByLanguage))
-	for _, spec := range astramap.LanguageSpecs() {
+	for _, spec := range astramap.LanguageSpecsForProject(projectRoot) {
 		count := countsByLanguage[spec.ID]
 		if count > 0 {
 			ranked = append(ranked, LangCount{Lang: spec.ID, Count: count})
@@ -342,19 +346,21 @@ func detectProjectLanguages(projectRoot string, filter *astramap.IndexFilter) []
 	return ranked
 }
 
-func scipToolName(lang string) string {
-	return astramap.ScipToolName(lang)
-}
-
-func findScipTool(lang string) (string, bool) {
-	name := scipToolName(lang)
+func findScipTool(lang, registryRoot, unitRoot string) (string, bool) {
+	name := astramap.ScipToolNameForProject(registryRoot, lang)
 	if name == "" {
 		return "", false
+	}
+	if provider, ok := astramap.SemanticProviderForProjectLanguage(registryRoot, lang); ok && provider.Recipe == astramap.ScipRecipePHP {
+		projectTool := filepath.Join(unitRoot, "vendor", "bin", "scip-php")
+		if info, err := os.Stat(projectTool); err == nil && !info.IsDir() {
+			return projectTool, true
+		}
 	}
 	if p, err := exec.LookPath(name); err == nil {
 		return p, true
 	}
-	if astramap.ScipDriverForLanguage(lang) == astramap.ScipDriverGo {
+	if provider, ok := astramap.SemanticProviderForProjectLanguage(registryRoot, lang); ok && provider.Recipe == astramap.ScipRecipeGo {
 		gopath := os.Getenv("GOPATH")
 		if gopath == "" {
 			gopath = filepath.Join(os.Getenv("HOME"), "go")
@@ -368,177 +374,272 @@ func findScipTool(lang string) (string, bool) {
 }
 
 func languageDisplayName(lang string) string {
-	return astramap.LanguageDisplayName(lang)
+	return astramap.LanguageDisplayNameForProject(projectRoot, lang)
 }
 
-func scipInstallHint(lang string) string {
-	return astramap.ScipInstallHint(lang)
+type cleanupStack struct {
+	actions []func() error
 }
 
-func printToolStatus(label string, commands []string, installHint string) bool {
-	if path := firstAvailableTool(commands...); path != "" {
-		fmt.Printf("  ✓ %s: %s\n", label, path)
+func (stack *cleanupStack) add(action func() error) {
+	stack.actions = append(stack.actions, action)
+}
+
+func (stack *cleanupStack) runReverse() {
+	for i := len(stack.actions) - 1; i >= 0; i-- {
+		if err := stack.actions[i](); err != nil && !os.IsNotExist(err) {
+			logWarn("SCIP cleanup failed: %v", err)
+		}
+	}
+}
+
+type preparedScipRun struct {
+	command  *exec.Cmd
+	artifact string
+	cleanup  cleanupStack
+}
+
+type scipRecipe func(string, astramap.SemanticProviderSpec, string, string, *astramap.IndexFilter) (preparedScipRun, error)
+
+var scipRecipes = map[astramap.ScipRecipe]scipRecipe{
+	astramap.ScipRecipeGo:      prepareGoScip,
+	astramap.ScipRecipeNode:    prepareNodeScip,
+	astramap.ScipRecipePython:  preparePythonScip,
+	astramap.ScipRecipeClang:   prepareClangScip,
+	astramap.ScipRecipeJVM:     commandRecipe("index", "--output"),
+	astramap.ScipRecipeRust:    defaultArtifactRecipe("scip", "."),
+	astramap.ScipRecipeDotNet:  defaultArtifactRecipe("index"),
+	astramap.ScipRecipePHP:     defaultArtifactRecipe(),
+	astramap.ScipRecipePackage: preparePackageScip,
+}
+
+type scipReadiness func(astramap.ProjectUnit) bool
+
+var scipReadinessChecks = map[astramap.ScipRecipe]scipReadiness{
+	astramap.ScipRecipeGo:     unitHasExactManifest("go.mod"),
+	astramap.ScipRecipeClang:  clangUnitReady,
+	astramap.ScipRecipeJVM:    unitHasExactManifest("pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "build.sbt"),
+	astramap.ScipRecipeRust:   unitHasExactManifest("Cargo.toml"),
+	astramap.ScipRecipeDotNet: unitHasManifestSuffix(".sln", ".csproj", ".vbproj"),
+	astramap.ScipRecipePHP:    unitHasExactManifest("composer.json"),
+	astramap.ScipRecipePackage: func(unit astramap.ProjectUnit) bool {
+		return len(unit.Manifests) > 0
+	},
+}
+
+func scipUnitReady(recipe astramap.ScipRecipe, unit astramap.ProjectUnit) bool {
+	check := scipReadinessChecks[recipe]
+	return check == nil || check(unit)
+}
+
+func clangUnitReady(unit astramap.ProjectUnit) bool {
+	compdbPath := filepath.Join(unit.Root, "compile_commands.json")
+	if requireCompileCommands(compdbPath) == nil {
 		return true
 	}
-	fmt.Printf("  ⚠ Not found %s: %s\n", label, strings.Join(commands, " / "))
-	if installHint != "" {
-		fmt.Printf("    Install: %s\n", installHint)
+	// compdb absent or invalid — check whether it can be generated
+	if _, err := exec.LookPath("bear"); err != nil {
+		return false
 	}
-	return false
-}
-
-func printScipToolStatus(lang string) {
-	if !astramap.CanAutoGenerateScip(lang) {
-		fmt.Printf("  ℹ %s: Only supports importing existing index via --scip\n", scipToolName(lang))
-		return
+	if _, err := exec.LookPath("make"); err != nil {
+		return false
 	}
-	name := scipToolName(lang)
-	if path, ok := findScipTool(lang); ok {
-		fmt.Printf("  ✓ %s: %s\n", name, path)
-		return
-	}
-	fmt.Printf("  ⚠ Not found %s\n", name)
-	if hint := scipInstallHint(lang); hint != "" {
-		fmt.Printf("    Install: %s\n", hint)
-	}
-}
-
-func printLanguageToolchainHints(lang, projectRoot string) {
-	fmt.Printf("Detected %s project, checking toolchain...\n", languageDisplayName(lang))
-	printScipToolStatus(lang)
-
-	for _, requirement := range astramap.LanguageToolchainRequirements(lang) {
-		if len(requirement.WhenAnyFiles) > 0 && !hasAnyProjectFile(projectRoot, requirement.WhenAnyFiles...) {
-			continue
-		}
-		if requirement.ProjectExecutable != "" {
-			projectTool := filepath.Join(projectRoot, requirement.ProjectExecutable)
-			if info, err := os.Stat(projectTool); err == nil && !info.IsDir() {
-				fmt.Printf("  ✓ %s: %s\n", requirement.Label, projectTool)
-				continue
-			}
-		}
-		printToolStatus(requirement.Label, requirement.Commands, requirement.InstallHint)
-	}
-
-	if provider, ok := astramap.SemanticProviderForLanguage(lang); ok && provider.Driver == astramap.ScipDriverClang {
-		printCppToolchainHints(projectRoot)
-	}
-}
-
-func printCppToolchainHints(projectRoot string) {
-	compdbPath := filepath.Join(projectRoot, "compile_commands.json")
-	if _, err := os.Stat(compdbPath); err == nil {
-		fmt.Printf("  ✓ compile_commands.json: %s\n", compdbPath)
-	} else {
-		fmt.Println("  ⚠ compile_commands.json not found; scip-clang high-precision indexing requires this file")
-		if _, err := exec.LookPath("bear"); err == nil {
-			fmt.Println("  ✓ bear is installed, will automatically execute: bear -- make")
-		} else {
-			fmt.Println("  ⚠ bear is not installed, cannot automatically capture Makefile compilation commands")
-			fmt.Println("    Install: Ubuntu/Debian: sudo apt install bear | macOS: brew install bear")
-		}
-		if _, err := exec.LookPath("cmake"); err == nil {
-			fmt.Println("  ✓ cmake is installed, can generate: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
-		} else if _, err := os.Stat(filepath.Join(projectRoot, "CMakeLists.txt")); err == nil {
-			fmt.Println("  ⚠ CMakeLists.txt detected but cmake not found")
-			fmt.Println("    Install: Ubuntu/Debian: sudo apt install cmake | macOS: brew install cmake")
-		}
-	}
-
-	if _, err := exec.LookPath("make"); err == nil {
-		fmt.Println("  ✓ make is installed")
-	} else if hasAnyProjectFile(projectRoot, "Makefile", "makefile") {
-		fmt.Println("  ⚠ Makefile detected but make not found")
-		fmt.Println("    Install: Ubuntu/Debian: sudo apt install make | macOS: xcode-select --install")
-	}
-
-	if compiler := firstAvailableTool("cc", "clang", "gcc"); compiler != "" {
-		fmt.Printf("  ✓ C/C++ compiler available: %s\n", compiler)
-	} else {
-		fmt.Println("  ⚠ No C/C++ compiler found: cc / clang / gcc")
-		fmt.Println("    Install: Ubuntu/Debian: sudo apt install build-essential clang | macOS: xcode-select --install")
-	}
-}
-
-func hasAnyProjectFile(projectRoot string, names ...string) bool {
-	for _, name := range names {
-		if _, err := os.Stat(filepath.Join(projectRoot, name)); err == nil {
+	for _, name := range []string{"Makefile", "makefile"} {
+		if _, err := os.Stat(filepath.Join(unit.Root, name)); err == nil {
 			return true
 		}
 	}
 	return false
 }
 
-func firstAvailableTool(names ...string) string {
+func unitHasExactManifest(names ...string) scipReadiness {
+	wanted := make(map[string]bool, len(names))
 	for _, name := range names {
-		if p, err := exec.LookPath(name); err == nil {
-			return p
-		}
+		wanted[strings.ToLower(name)] = true
 	}
-	return ""
-}
-
-func runScipGeneration(toolPath string, provider astramap.SemanticProviderSpec, projectRoot string, filter *astramap.IndexFilter) (string, error) {
-	_ = os.MkdirAll(filepath.Join(projectRoot, ".astramap"), 0755)
-	scipPath := filepath.Join(projectRoot, ".astramap", "index-"+provider.ID+".scip")
-	_ = os.Remove(scipPath)
-	var cmd *exec.Cmd
-	switch provider.Driver {
-	case astramap.ScipDriverGo:
-		cmd = exec.Command(toolPath, "index", "--module-root", projectRoot, "-o", scipPath)
-	case astramap.ScipDriverNode:
-		createdConfig, err := ensureTsConfig(projectRoot, filter)
-		if err != nil {
-			return "", err
-		}
-		if createdConfig {
-			defer removeOwnedFile(filepath.Join(projectRoot, "tsconfig.json"))
-		}
-		cmd = exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", scipPath)
-	case astramap.ScipDriverPython:
-		cmd = exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", scipPath)
-	case astramap.ScipDriverClang:
-		compdbPath := filepath.Join(projectRoot, "compile_commands.json")
-		createdCompdb := false
-		if _, err := os.Stat(compdbPath); err != nil {
-			var err error
-			createdCompdb, err = ensureCompileCommands(projectRoot, compdbPath)
-			if err != nil {
-				return "", err
+	return func(unit astramap.ProjectUnit) bool {
+		for _, manifest := range unit.Manifests {
+			if wanted[strings.ToLower(filepath.Base(manifest))] {
+				return true
 			}
 		}
-		if createdCompdb {
-			defer removeOwnedFile(compdbPath)
-		}
-		preparedCompdbPath, err := prepareCompileCommandsJson(compdbPath, projectRoot, filter)
-		if err != nil {
-			logWarn("Failed to prepare compile_commands.json: %v", err)
-			preparedCompdbPath = compdbPath
-		}
-		if preparedCompdbPath != compdbPath {
-			defer removeOwnedFile(preparedCompdbPath)
-		}
-		if ok, count, reason := validateCompileCommandsJson(preparedCompdbPath); !ok {
-			return "", fmt.Errorf("compile_commands.json invalid: %s (entries=%d)", reason, count)
-		}
-		cmd = exec.Command(toolPath, "--compdb-path", preparedCompdbPath, "--index-output-path", scipPath, "--no-progress-report")
-	default:
-		return "", fmt.Errorf("Semantic Provider %s has no SCIP generation driver configured", provider.ID)
+		return false
 	}
-	cmd.Dir = projectRoot
+}
+
+func unitHasManifestSuffix(suffixes ...string) scipReadiness {
+	return func(unit astramap.ProjectUnit) bool {
+		for _, manifest := range unit.Manifests {
+			name := strings.ToLower(filepath.Base(manifest))
+			for _, suffix := range suffixes {
+				if strings.HasSuffix(name, strings.ToLower(suffix)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+}
+
+func runScipGeneration(toolPath string, provider astramap.SemanticProviderSpec, unitRoot, repositoryRoot, unitID string, filter *astramap.IndexFilter) (string, error) {
+	artifactDir := filepath.Join(repositoryRoot, ".astramap", "scip", provider.ID, unitID)
+	if err := os.MkdirAll(artifactDir, 0755); err != nil {
+		return "", err
+	}
+	scipPath := filepath.Join(artifactDir, "index.scip")
+	pendingPath := scipPath + ".pending"
+	removeOwnedFile(pendingPath)
+
+	recipe := scipRecipes[provider.Recipe]
+	if recipe == nil {
+		return "", fmt.Errorf("Semantic Provider %s has no SCIP recipe configured", provider.ID)
+	}
+	prepared, err := recipe(toolPath, provider, unitRoot, pendingPath, filter)
+	if err != nil {
+		prepared.cleanup.runReverse()
+		return "", err
+	}
+	defer prepared.cleanup.runReverse()
+	cmd := prepared.command
+	cmd.Dir = unitRoot
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
-		removeOwnedFile(scipPath)
+		removeOwnedFile(pendingPath)
 		return "", fmt.Errorf("SCIP generation failed (%s): %w\n%s", provider.ID, err, strings.TrimSpace(output.String()))
 	}
-	if err := astramap.ValidateScipIndexFile(scipPath); err != nil {
-		removeOwnedFile(scipPath)
+	if prepared.artifact != pendingPath {
+		if err := os.Rename(prepared.artifact, pendingPath); err != nil {
+			return "", fmt.Errorf("SCIP artifact staging failed (%s): %w", provider.ID, err)
+		}
+	}
+	if err := astramap.ValidateScipIndexFile(pendingPath); err != nil {
+		removeOwnedFile(pendingPath)
 		return "", fmt.Errorf("SCIP output validation failed (%s): %w", provider.ID, err)
 	}
+	if err := os.Rename(pendingPath, scipPath); err != nil {
+		return "", fmt.Errorf("SCIP artifact commit failed (%s): %w", provider.ID, err)
+	}
 	return scipPath, nil
+}
+
+func commandRecipe(arguments ...string) scipRecipe {
+	return func(toolPath string, _ astramap.SemanticProviderSpec, _, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+		args := append([]string(nil), arguments...)
+		args = append(args, output)
+		return preparedScipRun{command: exec.Command(toolPath, args...), artifact: output}, nil
+	}
+}
+
+func defaultArtifactRecipe(arguments ...string) scipRecipe {
+	return func(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, _ string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+		artifact := filepath.Join(projectRoot, "index.scip")
+		prepared := preparedScipRun{command: exec.Command(toolPath, arguments...), artifact: artifact}
+		if _, err := os.Stat(artifact); err == nil {
+			backup := filepath.Join(projectRoot, ".index.scip.astramap-backup")
+			removeOwnedFile(backup)
+			if err := os.Rename(artifact, backup); err != nil {
+				return preparedScipRun{}, err
+			}
+			prepared.cleanup.add(func() error {
+				removeOwnedFile(artifact)
+				return os.Rename(backup, artifact)
+			})
+		} else {
+			prepared.cleanup.add(func() error { return os.Remove(artifact) })
+		}
+		return prepared, nil
+	}
+}
+
+func prepareGoScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+	return preparedScipRun{
+		command: exec.Command(toolPath, "index", "--module-root", projectRoot, "-o", output), artifact: output,
+	}, nil
+}
+
+func prepareNodeScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, filter *astramap.IndexFilter) (preparedScipRun, error) {
+	prepared := preparedScipRun{artifact: output}
+	createdConfig, err := ensureTsConfig(projectRoot, filter)
+	if err != nil {
+		return prepared, err
+	}
+	if createdConfig {
+		prepared.cleanup.add(func() error { return os.Remove(filepath.Join(projectRoot, "tsconfig.json")) })
+	}
+	prepared.command = exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", output)
+	return prepared, nil
+}
+
+func preparePythonScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+	return preparedScipRun{
+		command: exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", output), artifact: output,
+	}, nil
+}
+
+func prepareClangScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, filter *astramap.IndexFilter) (preparedScipRun, error) {
+	prepared := preparedScipRun{artifact: output}
+	compdbPath := filepath.Join(projectRoot, "compile_commands.json")
+	_, createErr := ensureCompileCommands(projectRoot, compdbPath)
+	if createErr != nil {
+		return prepared, createErr
+	}
+	// Do NOT add compdb to cleanup: compile_commands.json is a project build
+	// artifact that should persist for reuse in subsequent index runs.
+	filteredPath, err := prepareCompileCommandsJson(compdbPath, projectRoot, filter)
+	if err != nil {
+		prepared.cleanup.runReverse()
+		return preparedScipRun{}, fmt.Errorf("prepare compile_commands.json: %w", err)
+	}
+	if filteredPath != compdbPath {
+		prepared.cleanup.add(func() error { return os.Remove(filteredPath) })
+	}
+	if ok, count, reason := validateCompileCommandsJson(filteredPath); !ok {
+		prepared.cleanup.runReverse()
+		return preparedScipRun{}, fmt.Errorf("compile_commands.json invalid: %s (entries=%d)", reason, count)
+	}
+	prepared.command = exec.Command(toolPath, "--compdb-path", filteredPath, "--index-output-path", output, "--no-progress-report")
+	return prepared, nil
+}
+
+func preparePackageScip(toolPath string, provider astramap.SemanticProviderSpec, projectRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+	expand := func(value string) string {
+		value = strings.ReplaceAll(value, "{projectRoot}", projectRoot)
+		return strings.ReplaceAll(value, "{output}", output)
+	}
+	args := make([]string, len(provider.Args))
+	for i, arg := range provider.Args {
+		args[i] = expand(arg)
+	}
+	artifact := output
+	if provider.Artifact != "" {
+		artifact = expand(provider.Artifact)
+		if !filepath.IsAbs(artifact) {
+			artifact = filepath.Join(projectRoot, artifact)
+		}
+	}
+	command := exec.Command(toolPath, args...)
+	command.Dir = projectRoot
+	prepared := preparedScipRun{command: command, artifact: artifact}
+	if artifact != output {
+		if _, err := os.Stat(artifact); err == nil {
+			backup := artifact + ".astramap-backup"
+			removeOwnedFile(backup)
+			if err := os.Rename(artifact, backup); err != nil {
+				return preparedScipRun{}, err
+			}
+			prepared.cleanup.add(func() error {
+				removeOwnedFile(artifact)
+				return os.Rename(backup, artifact)
+			})
+		} else if !os.IsNotExist(err) {
+			return preparedScipRun{}, err
+		} else {
+			prepared.cleanup.add(func() error { return os.Remove(artifact) })
+		}
+	}
+	return prepared, nil
 }
 
 func removeOwnedFile(path string) {
@@ -553,31 +654,132 @@ func cleanupOwnedFiles(paths []string) {
 	}
 }
 
+func requireCompileCommands(compdbPath string) error {
+	if _, err := os.Stat(compdbPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("compile_commands.json not found; generate it with the project build system")
+		}
+		return fmt.Errorf("inspect compile_commands.json: %w", err)
+	}
+	if valid, count, reason := validateCompileCommandsJson(compdbPath); !valid {
+		return fmt.Errorf("compile_commands.json invalid: %s (entries=%d)", reason, count)
+	}
+	return nil
+}
+
+// ensureCompileCommands ensures a valid compile_commands.json exists.
+// If one already exists and is valid, it is reused (created=false).
+// Otherwise, it attempts to generate one via "bear -- make" with
+// backup/restore safety: existing file is backed up before regeneration
+// and restored on failure.
 func ensureCompileCommands(projectRoot, compdbPath string) (bool, error) {
+	if requireCompileCommands(compdbPath) == nil {
+		return false, nil
+	}
+
 	if _, err := exec.LookPath("bear"); err != nil {
-		return false, fmt.Errorf("C/C++ SCIP requires compile_commands.json; bear not found, cannot auto-generate\nInstall: Ubuntu/Debian: sudo apt install bear | macOS: brew install bear")
+		return false, fmt.Errorf("C/C++ SCIP requires a valid compile_commands.json; bear not found, cannot auto-generate\nInstall: Ubuntu/Debian: sudo apt install bear | macOS: brew install bear")
 	}
 	if _, err := exec.LookPath("make"); err != nil {
 		return false, fmt.Errorf("C/C++ SCIP requires compile_commands.json; make not found, cannot execute bear -- make\nInstall: Ubuntu/Debian: sudo apt install make | macOS: xcode-select --install")
 	}
-	if !hasAnyProjectFile(projectRoot, "Makefile", "makefile") {
-		return false, fmt.Errorf("C/C++ SCIP requires compile_commands.json; no Makefile found in current project, cannot execute bear -- make")
+
+	hasMakefile := false
+	for _, name := range []string{"Makefile", "makefile"} {
+		if _, err := os.Stat(filepath.Join(projectRoot, name)); err == nil {
+			hasMakefile = true
+			break
+		}
+	}
+	if !hasMakefile {
+		return false, fmt.Errorf("C/C++ SCIP requires compile_commands.json; no Makefile found in %s, cannot execute bear -- make", projectRoot)
 	}
 
-	fmt.Println("compile_commands.json not found, executing bear -- make to generate compilation database...")
+	// Backup existing invalid compdb before regeneration.
+	hadExisting := false
+	var backupPath string
+	if _, err := os.Stat(compdbPath); err == nil {
+		hadExisting = true
+		backupPath = compdbPath + ".astramap-backup"
+		removeOwnedFile(backupPath)
+		if err := os.Rename(compdbPath, backupPath); err != nil {
+			return false, fmt.Errorf("backup invalid compile_commands.json: %w", err)
+		}
+	}
+
+	fmt.Println("Regenerating compile_commands.json via bear -- make...")
 	cmd := exec.Command("bear", "--", "make")
 	cmd.Dir = projectRoot
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
-	if err := cmd.Run(); err != nil {
-		return false, fmt.Errorf("bear -- make execution failed: %w\n%s", err, strings.TrimSpace(output.String()))
+	regenErr := cmd.Run()
+
+	if regenErr != nil {
+		restoreCompileCommands(compdbPath, backupPath)
+		return false, fmt.Errorf("bear -- make failed: %w\n%s", regenErr, strings.TrimSpace(output.String()))
 	}
+
+	// Check if incremental build produced empty compile_commands.json.
+	compdbEmpty := false
+	if info, statErr := os.Stat(compdbPath); statErr != nil || info.Size() < 4 {
+		compdbEmpty = true
+	} else if valid, count, _ := validateCompileCommandsJson(compdbPath); !valid || count == 0 {
+		compdbEmpty = true
+	}
+
+	if compdbEmpty {
+		// Incremental build produced no compilation commands.
+		// Force a clean rebuild to capture all compiler invocations.
+		fmt.Println("Incremental build produced empty compile_commands.json, forcing clean rebuild...")
+		removeOwnedFile(compdbPath)
+		cleanCmd := exec.Command("make", "clean")
+		cleanCmd.Dir = projectRoot
+		var cleanOut bytes.Buffer
+		cleanCmd.Stdout = &cleanOut
+		cleanCmd.Stderr = &cleanOut
+		if cleanErr := cleanCmd.Run(); cleanErr != nil {
+			logWarn("make clean failed (non-fatal): %v", cleanErr)
+		}
+		output.Reset()
+		cmd2 := exec.Command("bear", "--", "make")
+		cmd2.Dir = projectRoot
+		cmd2.Stdout = &output
+		cmd2.Stderr = &output
+		if regenErr = cmd2.Run(); regenErr != nil {
+			restoreCompileCommands(compdbPath, backupPath)
+			return false, fmt.Errorf("bear -- make (clean rebuild) failed: %w\n%s", regenErr, strings.TrimSpace(output.String()))
+		}
+	}
+
 	if _, err := os.Stat(compdbPath); err != nil {
-		return false, fmt.Errorf("bear -- make executed but compile_commands.json not generated\n%s", strings.TrimSpace(output.String()))
+		restoreCompileCommands(compdbPath, backupPath)
+		return false, fmt.Errorf("bear -- make produced no compile_commands.json\n%s", strings.TrimSpace(output.String()))
+	}
+	if valid, count, reason := validateCompileCommandsJson(compdbPath); !valid {
+		removeOwnedFile(compdbPath)
+		restoreCompileCommands(compdbPath, backupPath)
+		return false, fmt.Errorf("generated compile_commands.json invalid: %s (entries=%d)", reason, count)
+	}
+
+	// New compdb valid; discard backup.
+	if backupPath != "" {
+		removeOwnedFile(backupPath)
 	}
 	fmt.Println("compile_commands.json generation complete")
-	return true, nil
+	return !hadExisting, nil
+}
+
+func restoreCompileCommands(compdbPath, backupPath string) {
+	if err := os.Remove(compdbPath); err != nil && !os.IsNotExist(err) {
+		logWarn("Failed to remove invalid compile_commands.json: %v", err)
+	}
+	if backupPath == "" {
+		return
+	}
+	if err := os.Rename(backupPath, compdbPath); err != nil {
+		logWarn("Failed to restore compile_commands.json from backup: %v", err)
+	}
 }
 
 // ensureTsConfig generates an owned temporary tsconfig.json for JS/TS projects
@@ -711,45 +913,70 @@ func prepareCompileCommandsJson(compdbPath, projectRoot string, filter *astramap
 	return filteredPath, nil
 }
 
-// autoGenerateScip runs each shared semantic provider at most once.
-func autoGenerateScip(projectRoot string, selectedLangs []LangCount, filter *astramap.IndexFilter) []string {
+// autoGenerateScip runs each semantic provider once per detected project unit.
+func autoGenerateScip(projectRoot string, selectedLangs []LangCount, filter *astramap.IndexFilter, reuseExisting bool) ([]string, []string) {
 	if len(selectedLangs) == 0 {
 		fmt.Println("No known project language detected, using Tree-sitter mode")
-		return nil
+		return nil, nil
 	}
 	var scipPaths []string
-	generatedProviders := make(map[string]bool)
-	for _, lc := range selectedLangs {
-		lang := lc.Lang
-		provider, providerOK := astramap.SemanticProviderForLanguage(lang)
-		if providerOK && generatedProviders[provider.ID] {
+	var generatedPaths []string
+	usedPaths := make(map[string]bool)
+	languages := langIDs(selectedLangs)
+	for _, unit := range astramap.DetectProjectUnits(projectRoot, languages, filter) {
+		if len(unit.Languages) == 0 {
 			continue
 		}
-		if providerOK {
-			generatedProviders[provider.ID] = true
+		lang := unit.Languages[0]
+		if reuseExisting {
+			if path, ok := matchingExistingScip(projectRoot, unit); ok {
+				if !usedPaths[path] {
+					fmt.Printf("Using existing SCIP: %s (%s)\n", languageDisplayName(lang), path)
+					scipPaths = append(scipPaths, path)
+					usedPaths[path] = true
+				}
+				continue
+			}
 		}
-		printLanguageToolchainHints(lang, projectRoot)
-		if !astramap.CanAutoGenerateScip(lang) {
-			fmt.Printf("%s currently only supports importing existing SCIP index, auto-generation not configured, falling back to Tree-sitter\n", languageDisplayName(lang))
+		provider, providerOK := astramap.SemanticProviderForProjectByID(projectRoot, unit.ProviderID)
+		if !astramap.CanAutoGenerateScipForProject(projectRoot, lang) {
 			continue
 		}
-		if !providerOK {
+		if !providerOK || !scipUnitReady(provider.Recipe, unit) {
 			continue
 		}
-		toolPath, found := findScipTool(lang)
+		toolPath, found := findScipTool(lang, projectRoot, unit.Root)
 		if !found {
-			fmt.Printf("Detected %s project but %s not found, skipping SCIP\n", languageDisplayName(lang), scipToolName(lang))
 			continue
 		}
-		fmt.Printf("Detected %s project, generating SCIP index (%s)...\n", languageDisplayName(lang), toolPath)
-		scipPath, err := runScipGeneration(toolPath, provider, projectRoot, filter)
+		fmt.Printf("Generating SCIP: %s (%s)\n", languageDisplayName(lang), unit.Root)
+		scipPath, err := runScipGeneration(toolPath, provider, unit.Root, projectRoot, unit.Identity, filter)
 		if err != nil {
 			logWarn("SCIP generation failed: %v, falling back to Tree-sitter", err)
 			continue
 		}
 		scipPaths = append(scipPaths, scipPath)
+		generatedPaths = append(generatedPaths, scipPath)
 	}
-	return scipPaths
+	return scipPaths, generatedPaths
+}
+
+func matchingExistingScip(projectRoot string, unit astramap.ProjectUnit) (string, bool) {
+	path := filepath.Join(unit.Root, "index.scip")
+	languages, err := astramap.ScipIndexLanguages(path)
+	if err != nil {
+		return "", false
+	}
+	wanted := make(map[string]bool, len(unit.Languages))
+	for _, language := range unit.Languages {
+		wanted[language] = true
+	}
+	for _, language := range languages {
+		if normalized, ok := astramap.NormalizeLanguageIDForProject(projectRoot, language); ok && wanted[normalized] {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 type indexOptions struct {
@@ -866,6 +1093,11 @@ func runIndex(opts indexOptions) {
 		if saved, ok := loadSavedIndexLanguages(projectRoot, db); ok {
 			selected = saved
 			quiet = plainIncremental
+			var added bool
+			selected, added = mergeNewPackageLanguages(projectRoot, filter, selected)
+			if added {
+				quiet = false
+			}
 		}
 	}
 	if len(selected) == 0 {
@@ -927,8 +1159,7 @@ func runIndex(opts indexOptions) {
 		if opts.scipFile != "" {
 			scipPaths = []string{opts.scipFile}
 		} else {
-			scipAutoPaths = autoGenerateScip(projectRoot, selected, filter)
-			scipPaths = scipAutoPaths
+			scipPaths, scipAutoPaths = autoGenerateScip(projectRoot, selected, filter, !opts.refreshScip && !opts.full)
 		}
 	} else if !opts.treeSitter && !quiet {
 		fmt.Println("Existing SCIP index detected, skipping full SCIP refresh. Use --refresh-scip to force refresh.")
@@ -997,6 +1228,30 @@ func runIndex(opts indexOptions) {
 			os.Exit(1)
 		}
 	}
+}
+
+func mergeNewPackageLanguages(projectRoot string, filter *astramap.IndexFilter, selected []LangCount) ([]LangCount, bool) {
+	selectedIDs := make(map[string]bool, len(selected))
+	for _, language := range selected {
+		selectedIDs[language.Lang] = true
+	}
+	missing := make(map[string]bool)
+	for _, id := range astramap.InstalledLanguagePackageIDsForProject(projectRoot) {
+		if !selectedIDs[id] {
+			missing[id] = true
+		}
+	}
+	if len(missing) == 0 {
+		return selected, false
+	}
+	added := false
+	for _, detected := range detectProjectLanguages(projectRoot, filter) {
+		if missing[detected.Lang] {
+			selected = append(selected, detected)
+			added = true
+		}
+	}
+	return selected, added
 }
 
 func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, langFilter ...string) error {
@@ -1463,14 +1718,15 @@ func selectKnownLanguages(langs []string) []LangCount {
 	seen := make(map[string]bool, len(langs))
 	for _, lang := range langs {
 		lang = strings.TrimSpace(lang)
-		if lang == "" || seen[lang] {
+		if lang == "" {
 			continue
 		}
-		if !astramap.IsKnownLanguage(lang) {
+		normalized, ok := astramap.NormalizeLanguageIDForProject(projectRoot, lang)
+		if !ok || seen[normalized] {
 			continue
 		}
-		selected = append(selected, LangCount{Lang: lang})
-		seen[lang] = true
+		selected = append(selected, LangCount{Lang: normalized})
+		seen[normalized] = true
 	}
 	return selected
 }
@@ -1507,11 +1763,7 @@ func isIndexWatchEvent(event fsnotify.Event) bool {
 	if event.Name == "" {
 		return false
 	}
-	ext := strings.ToLower(filepath.Ext(event.Name))
-	if ext == "" {
-		return event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
-	}
-	return astramap.IsSupportedExtension(ext)
+	return astramap.IsPotentialSupportedPathForProject(projectRoot, event.Name)
 }
 
 func parseLangSelection(input string, detected []LangCount) []LangCount {
@@ -1630,7 +1882,19 @@ func installCmd() {
 	}
 
 	probes := probeInstallTargets()
-	printInstallProbeReport(probes)
+
+	// Collect detected IDE names in stable order
+	ideOrder := []string{"Claude Code", "VS Code", "Cursor", "Codex", "Windsurf", "Antigravity"}
+	var detectedIDEs []string
+	for _, name := range ideOrder {
+		if probes[name] {
+			detectedIDEs = append(detectedIDEs, name)
+		}
+	}
+
+	// Interactive IDE selection when multiple IDEs detected
+	selectedIDEs := resolveIDESelection(detectedIDEs, ideOrder, probes)
+	printInstallProbeReport(probes, selectedIDEs)
 
 	fmt.Println("Registering AstraMap MCP service and rule files...")
 	fmt.Println()
@@ -1638,72 +1902,78 @@ func installCmd() {
 	success := 0
 	total := 0
 
+	// Install only user-selected IDEs
+	selectedSet := make(map[string]bool, len(selectedIDEs))
+	for _, name := range selectedIDEs {
+		selectedSet[name] = true
+	}
+
 	// 3.1 Claude Code (MCP + /amap slash command)
-	if probes["Claude Code"] {
+	if selectedSet["Claude Code"] {
 		total++
 		if installClaudeCode(selfPath, absProj) {
 			success++
 		}
 	} else {
-		fmt.Println("  - Claude Code  — claude CLI not detected, skipping")
+		fmt.Println("  - Claude Code  — not selected, skipping")
 	}
 
 	// 3.2 VS Code (MCP + Copilot instructions)
-	if probes["VS Code"] {
+	if selectedSet["VS Code"] {
 		total++
 		if installVSCode(selfPath, absProj) {
 			success++
 		}
 	} else {
-		fmt.Println("  - VS Code      — code CLI not detected, skipping")
+		fmt.Println("  - VS Code      — not selected, skipping")
 	}
 
 	// 3.3 Cursor (MCP + .cursor/rules)
-	if probes["Cursor"] {
+	if selectedSet["Cursor"] {
 		total++
 		if installCursor(selfPath, absProj) {
 			success++
 		}
 	} else {
-		fmt.Println("  - Cursor       — cursor CLI not detected, skipping")
+		fmt.Println("  - Cursor       — not selected, skipping")
 	}
 
-	// 3.4 项目级 .mcp.json
+	// 3.4 Project-level .mcp.json (always installed)
 	total++
 	if installProjectMcpJson(selfPath, absProj) {
 		success++
 	}
 
 	// 3.5 Codex (MCP + AGENTS.md)
-	if probes["Codex"] {
+	if selectedSet["Codex"] {
 		total++
 		if installCodex(selfPath, absProj) {
 			success++
 		}
 	} else {
-		fmt.Println("  - Codex        — codex CLI not detected, skipping")
+		fmt.Println("  - Codex        — not selected, skipping")
 	}
 
-	// 3.6 Windsurf (.windsurfrules)
+	// 3.6 Windsurf (.windsurfrules) (always installed as project-level)
 	total++
 	if installWindsurf(absProj) {
 		success++
 	}
 
-	// 3.7 Cline (.clinerules)
+	// 3.7 Cline (.clinerules) (always installed as project-level)
 	total++
 	if installCline(absProj) {
 		success++
 	}
 
 	// 3.8 Antigravity (mcp_config.json + AGENTS.md)
-	if probes["Antigravity"] {
+	if selectedSet["Antigravity"] {
 		total++
 		if installAntigravity(selfPath, absProj) {
 			success++
 		}
 	} else {
-		fmt.Println("  - Antigravity  — gemini/.gemini not detected, skipping")
+		fmt.Println("  - Antigravity  — not selected, skipping")
 	}
 
 	fmt.Println()
@@ -1760,17 +2030,79 @@ func probeNameFromCommand(name string) string {
 	}
 }
 
-func printInstallProbeReport(probes map[string]bool) {
+func printInstallProbeReport(probes map[string]bool, selectedIDEs []string) {
+	selectedSet := make(map[string]bool, len(selectedIDEs))
+	for _, name := range selectedIDEs {
+		selectedSet[name] = true
+	}
 	fmt.Println("Detected IDE Clients:")
+	idx := 0
 	for _, name := range []string{"Claude Code", "VS Code", "Cursor", "Codex", "Windsurf", "Antigravity"} {
 		if probes[name] {
-			fmt.Printf("  ✓ %s\n", name)
+			idx++
+			if selectedSet[name] {
+				fmt.Printf("  %d. ✓ %s  [selected]\n", idx, name)
+			} else {
+				fmt.Printf("  %d. ✓ %s\n", idx, name)
+			}
 			continue
 		}
-		fmt.Printf("  - %s\n", name)
+		fmt.Printf("     - %s\n", name)
 	}
-	fmt.Println("Workspace Shared Targets:")
-	fmt.Println("  - 项目 .mcp.json / .claude/commands / .cursor/rules / .windsurfrules / .clinerules")
+	fmt.Println("Workspace Shared Targets (always installed):")
+	fmt.Println("  - .mcp.json / .windsurfrules / .clinerules")
+}
+
+// resolveIDESelection prompts the user to select which detected IDEs to integrate.
+// Returns the list of selected IDE names. If 0 or 1 IDE detected, returns all without prompting.
+func resolveIDESelection(detectedIDEs []string, ideOrder []string, probes map[string]bool) []string {
+	if len(detectedIDEs) <= 1 {
+		return detectedIDEs
+	}
+	// Non-interactive: skip prompt when stdin is not a terminal
+	if !isTerminal() {
+		return detectedIDEs
+	}
+	fmt.Println("Detected IDE Clients:")
+	for i, name := range detectedIDEs {
+		fmt.Printf("  %d. %s\n", i+1, name)
+	}
+	fmt.Println()
+	fmt.Print("Select IDEs to integrate (enter index numbers, e.g., 1,2; press Enter for all): ")
+	var input string
+	fmt.Scanln(&input)
+	if input == "" {
+		return detectedIDEs
+	}
+	return parseIDESelection(input, detectedIDEs)
+}
+
+// parseIDESelection parses comma-separated index numbers into IDE names.
+func parseIDESelection(input string, detected []string) []string {
+	parts := strings.Split(input, ",")
+	var selected []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		idx, err := strconv.Atoi(p)
+		if err != nil || idx < 1 || idx > len(detected) {
+			fmt.Printf("Ignoring invalid index: %s\n", p)
+			continue
+		}
+		selected = append(selected, detected[idx-1])
+	}
+	if len(selected) == 0 {
+		return detected
+	}
+	return selected
+}
+
+// isTerminal returns true when stdin is connected to a terminal.
+func isTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 func printInstallVerification(projectPath string) {
@@ -1780,6 +2112,7 @@ func printInstallVerification(projectPath string) {
 		ok   bool
 	}{
 		{"Claude Code slash command", fileContains(filepath.Join(projectPath, ".claude", "commands", "amap.md"), "allowed-tools: astramap_search")},
+			{"Claude Code tool permissions", fileContains(filepath.Join(projectPath, ".claude", "settings.local.json"), "mcp__astramap__astramap_search")},
 		{"VS Code Copilot rules", fileContains(filepath.Join(projectPath, ".github", "copilot-instructions.md"), "## AstraMap")},
 		{"Cursor MCP", fileContains(filepath.Join(projectPath, ".cursor", "mcp.json"), "\"astramap\"")},
 		{"Cursor rules", fileContains(filepath.Join(projectPath, ".cursor", "rules", "astramap.mdc"), "alwaysApply: true")},
@@ -2002,14 +2335,19 @@ func installClaudeCode(amapPath, projectPath string) bool {
 		mcpMethod = configPath
 	}
 
-	// 注册 /amap slash command
+	// Register /amap slash command
 	cmdOK := installSlashCommand(projectPath)
 
-	// 汇总输出
-	if mcpOK && cmdOK {
-		fmt.Printf("  ✓ Claude Code  — MCP registered (%s) + /amap command ready\n", mcpMethod)
+	// Grant tool permissions in .claude/settings.local.json
+	permOK := installClaudeCodePermissions(projectPath)
+
+	// Summary
+	if mcpOK && cmdOK && permOK {
+		fmt.Printf("  ✓ Claude Code  — MCP registered (%s) + /amap command + tool permissions\n", mcpMethod)
+	} else if mcpOK && cmdOK {
+		fmt.Printf("  ✓ Claude Code  — MCP registered (%s) + /amap command (permissions write failed)\n", mcpMethod)
 	} else if mcpOK {
-		fmt.Printf("  ✓ Claude Code  — MCP registered (%s), /amap command registration failed\n", mcpMethod)
+		fmt.Printf("  ✓ Claude Code  — MCP registered (%s), /amap command and permissions failed\n", mcpMethod)
 	}
 	return mcpOK
 }
@@ -2025,6 +2363,114 @@ func installSlashCommand(projectPath string) bool {
 	amapCmdPath := filepath.Join(cmdsDir, "amap.md")
 	if err := os.WriteFile(amapCmdPath, []byte(amapSlashCommandTpl), 0644); err != nil {
 		logWarn("Failed to write %s: %v", amapCmdPath, err)
+		return false
+	}
+	return true
+}
+
+// installClaudeCodePermissions writes mcp__astramap__* tool permissions
+// into the project-level .claude/settings.local.json so Claude Code
+// auto-approves AstraMap tool calls without per-call confirmation.
+func installClaudeCodePermissions(projectPath string) bool {
+	settingsDir := filepath.Join(projectPath, ".claude")
+	settingsPath := filepath.Join(settingsDir, "settings.local.json")
+
+	// AstraMap MCP tool permission entries
+	toolPerms := []string{
+		"mcp__astramap__astramap_search",
+		"mcp__astramap__astramap_explore",
+		"mcp__astramap__astramap_node",
+		"mcp__astramap__astramap_callers",
+		"mcp__astramap__astramap_callees",
+		"mcp__astramap__astramap_impact",
+		"mcp__astramap__astramap_status",
+		"mcp__astramap__astramap_trace",
+		"mcp__astramap__astramap_files",
+	}
+
+	// Read existing settings
+	var cfg map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			backupPath := settingsPath + ".bak"
+			_ = os.WriteFile(backupPath, data, 0644)
+			logWarn("Existing settings.local.json corrupted, backed up to %s and will rebuild", backupPath)
+			cfg = make(map[string]interface{})
+		}
+	}
+	if cfg == nil {
+		cfg = make(map[string]interface{})
+	}
+
+	// Ensure permissions.allow array exists
+	permMap, _ := cfg["permissions"].(map[string]interface{})
+	if permMap == nil {
+		permMap = make(map[string]interface{})
+	}
+	allowRaw, exists := permMap["allow"]
+	var allowList []interface{}
+	if exists {
+		if arr, ok := allowRaw.([]interface{}); ok {
+			allowList = arr
+		}
+	}
+
+	// Build a set of existing entries for dedup
+	existing := make(map[string]bool, len(allowList))
+	for _, v := range allowList {
+		if s, ok := v.(string); ok {
+			existing[s] = true
+		}
+	}
+
+	// Append missing tool permissions
+	added := 0
+	for _, perm := range toolPerms {
+		if !existing[perm] {
+			allowList = append(allowList, perm)
+			added++
+		}
+	}
+
+	if added == 0 && existing["mcp__astramap__astramap_search"] {
+		// All permissions already present
+		return true
+	}
+
+	permMap["allow"] = allowList
+	cfg["permissions"] = permMap
+
+	// Ensure enabledMcpjsonServers includes "astramap"
+	serversRaw, _ := cfg["enabledMcpjsonServers"]
+	var servers []interface{}
+	if arr, ok := serversRaw.([]interface{}); ok {
+		servers = arr
+	}
+	hasAstramap := false
+	for _, v := range servers {
+		if s, ok := v.(string); ok && s == "astramap" {
+			hasAstramap = true
+			break
+		}
+	}
+	if !hasAstramap {
+		servers = append(servers, "astramap")
+		cfg["enabledMcpjsonServers"] = servers
+	}
+
+	// Write
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		logWarn("Failed to create .claude directory: %v", err)
+		return false
+	}
+	newData, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		logWarn("Failed to encode settings.local.json: %v", err)
+		return false
+	}
+	if err := os.WriteFile(settingsPath, newData, 0644); err != nil {
+		logWarn("Failed to write %s: %v", settingsPath, err)
 		return false
 	}
 	return true
