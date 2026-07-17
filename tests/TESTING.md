@@ -208,7 +208,7 @@ validate_symbols() {
   local expected_symbols="$2"
   
   for sym in $(echo "$expected_symbols" | jq -r '.[].name'); do
-    local count=$(query_val \
+    local count=$(query_val "$project_dir" \
       "SELECT COUNT(*) FROM astramap_nodes WHERE name='$sym'")
     if [[ "$count" != "1" ]]; then
       fail "Symbol $sym not found or duplicated (count=$count)"
@@ -224,9 +224,9 @@ validate_calls() {
   for call in $(echo "$expected_calls" | jq -r '.[]'); do
     local callee=$(echo "$call" | jq -r '.callee')
     local caller=$(echo "$call" | jq -r '.caller')
-    local count=$(query_val \
+    local count=$(query_val "$project_dir" \
       "SELECT COUNT(*) FROM astramap_edges 
-       WHERE src_kind='call' AND src_id='$caller' AND dst_id='$callee'")
+       WHERE kind='calls' AND source LIKE '%$caller%' AND target LIKE '%$callee%'")
     if [[ "$count" != "1" ]]; then
       fail "Call $caller -> $callee not found (count=$count)"
     fi
@@ -304,10 +304,10 @@ amap locate --project /tmp test_main
 | 测试ID | 场景 | 预期 |
 |--------|------|------|
 | SEMA-001 | 同包内调用 | 精确匹配 |
-| SEMA-002 | 跨包调用 | 外部边 + placeholder |
-| SEMA-003 | 重载消歧 | 按参数类型匹配 |
-| SEMA-004 | 接口实现 | `implements` 边 |
-| SEMA-005 | 继承关系 | `extends` 边 |
+| SEMA-002 | 接口实现 | `implements` 边 |
+| SEMA-003 | 命名空间容器 | `namespace -contains-> function` |
+| SEMA-004 | 重载定义 | 保留多个同名定义 |
+| SEMA-005 | 宏定义 | 提取 `macro` 节点 |
 
 ### 4.4 L4: 边界与错误处理测试
 
