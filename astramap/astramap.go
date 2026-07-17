@@ -1782,7 +1782,13 @@ func findLeadingComments(lines []string, startLine int) string {
 			}
 			continue
 		}
-		if !inBlock && !strings.HasPrefix(line, "//") && !strings.HasSuffix(line, "*/") && !strings.HasPrefix(line, "/*") {
+		blockEnd := strings.HasSuffix(line, "*/")
+		if blockEnd {
+			if blockStart := strings.LastIndex(line, "/*"); blockStart > 0 && strings.TrimSpace(line[:blockStart]) != "" {
+				break
+			}
+		}
+		if !inBlock && !strings.HasPrefix(line, "//") && !blockEnd && !strings.HasPrefix(line, "/*") {
 			break
 		}
 
@@ -1794,7 +1800,7 @@ func findLeadingComments(lines []string, startLine int) string {
 			emptyLineCount = 0
 			continue
 		}
-		if strings.HasSuffix(line, "*/") {
+		if blockEnd {
 			inBlock = true
 			lineContent := strings.TrimSuffix(line, "*/")
 			if strings.HasPrefix(lineContent, "/*") {
@@ -1817,6 +1823,10 @@ func findLeadingComments(lines []string, startLine int) string {
 			break
 		}
 		if inBlock {
+			if blockStart := strings.Index(line, "/*"); blockStart > 0 && strings.TrimSpace(line[:blockStart]) != "" {
+				commentLines = nil
+				break
+			}
 			lineContent := line
 			if strings.HasPrefix(line, "*") {
 				lineContent = strings.TrimPrefix(line, "*")
