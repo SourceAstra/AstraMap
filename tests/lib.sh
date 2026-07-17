@@ -263,8 +263,9 @@ try:
     else:
         print(0)
 except Exception as e:
-    print(0)
-" "$project_dir" "$sql" 2>/dev/null
+    print(f'SQL 查询失败: {e}; SQL={sql}', file=sys.stderr)
+    raise SystemExit(1)
+" "$project_dir" "$sql"
 }
 
 # 统计指定项目中匹配名称的节点数
