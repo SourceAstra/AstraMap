@@ -269,6 +269,17 @@ phase_summary "Phase 4: 边界容错测试"
 # ── 生成报告 ──
 generate_report "$REPORT_FILE"
 
+# ── 导出结果供父脚本读取 ──
+cat > /tmp/astramap_unit_results.txt <<EOF
+GLOBAL_TOTAL=$GLOBAL_TOTAL
+GLOBAL_PASSED=$GLOBAL_PASSED
+GLOBAL_FAILED=$GLOBAL_FAILED
+GLOBAL_UNTESTED=$GLOBAL_UNTESTED
+EOF
+
+# 导出详细结果数组
+printf '%s\n' "${TEST_RESULTS[@]}" > /tmp/astramap_unit_details.txt
+
 # ── 汇总 ──
 phase_summary "全部测试"
 
