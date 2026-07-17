@@ -28,8 +28,9 @@ fixtures:
           kind: function
         - name: "process"
           kind: function
-
-          kind: method
+      calls:
+        - caller: "process"
+          callee: "calculate"
 
   - id: generic_struct
     files:
