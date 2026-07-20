@@ -108,8 +108,8 @@ func main() {
 		watchCmd()
 	case "install":
 		installCmd()
-	case "language":
-		languageCmd()
+	case "syntax":
+		syntaxCmd()
 	case "diff":
 		diffCmd()
 	case "locate":
@@ -148,14 +148,14 @@ Core Commands:
   index [options]                            Build/update code map index
       --lang c,python                        Specify language
       --scip index.scip                      Import existing SCIP index file
-      --scip-only                           Import only SCIP
+      --scip-only                           Import only SCIP, skip optional Syntax Overlay
+      --tree-sitter                         Syntax Overlay only, skip SCIP generation and import
       --refresh-scip                         Force regenerate and import SCIP
-      --full                                Full refresh SCIP layer, then Tree-sitter incremental scan
-      --tree-sitter                         Run only Tree-sitter
+      --full                                Full refresh SCIP layer, then optional Syntax Overlay
       --watch [seconds]                      Continue low-frequency monitoring and incremental refresh after indexing (default 10s)
   watch [seconds]                            Initial indexing then continuous low-frequency monitoring with incremental refresh (default 10s)
   install                                   One-click MCP installation to Claude Code / Cursor
-  language <action>                         Install and manage versioned language packages
+  syntax <action>                           Install and manage optional Syntax Overlays
 
 Common Examples:
   amap index                                  Quick incremental update once
@@ -351,12 +351,7 @@ func findScipTool(lang, registryRoot, unitRoot string) (string, bool) {
 	if name == "" {
 		return "", false
 	}
-	if provider, ok := astramap.SemanticProviderForProjectLanguage(registryRoot, lang); ok && provider.Recipe == astramap.ScipRecipePHP {
-		projectTool := filepath.Join(unitRoot, "vendor", "bin", "scip-php")
-		if info, err := os.Stat(projectTool); err == nil && !info.IsDir() {
-			return projectTool, true
-		}
-	}
+	_ = unitRoot
 	if p, err := exec.LookPath(name); err == nil {
 		return p, true
 	}
@@ -402,14 +397,13 @@ type preparedScipRun struct {
 type scipRecipe func(string, astramap.SemanticProviderSpec, string, string, *astramap.IndexFilter) (preparedScipRun, error)
 
 var scipRecipes = map[astramap.ScipRecipe]scipRecipe{
-	astramap.ScipRecipeGo:      prepareGoScip,
+	astramap.ScipRecipeGo:      defaultArtifactRecipe(),
 	astramap.ScipRecipeNode:    prepareNodeScip,
 	astramap.ScipRecipePython:  preparePythonScip,
 	astramap.ScipRecipeClang:   prepareClangScip,
 	astramap.ScipRecipeJVM:     commandRecipe("index", "--output"),
 	astramap.ScipRecipeRust:    defaultArtifactRecipe("scip", "."),
 	astramap.ScipRecipeDotNet:  defaultArtifactRecipe("index"),
-	astramap.ScipRecipePHP:     defaultArtifactRecipe(),
 	astramap.ScipRecipePackage: preparePackageScip,
 }
 
@@ -418,10 +412,9 @@ type scipReadiness func(astramap.ProjectUnit) bool
 var scipReadinessChecks = map[astramap.ScipRecipe]scipReadiness{
 	astramap.ScipRecipeGo:     unitHasExactManifest("go.mod"),
 	astramap.ScipRecipeClang:  clangUnitReady,
-	astramap.ScipRecipeJVM:    unitHasExactManifest("pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "build.sbt"),
+	astramap.ScipRecipeJVM:    unitHasExactManifest("pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "build.sbt", "scip-java.json"),
 	astramap.ScipRecipeRust:   unitHasExactManifest("Cargo.toml"),
-	astramap.ScipRecipeDotNet: unitHasManifestSuffix(".sln", ".csproj", ".vbproj"),
-	astramap.ScipRecipePHP:    unitHasExactManifest("composer.json"),
+	astramap.ScipRecipeDotNet: unitHasManifestSuffix(".sln", ".csproj"),
 	astramap.ScipRecipePackage: func(unit astramap.ProjectUnit) bool {
 		return len(unit.Manifests) > 0
 	},
@@ -430,6 +423,95 @@ var scipReadinessChecks = map[astramap.ScipRecipe]scipReadiness{
 func scipUnitReady(recipe astramap.ScipRecipe, unit astramap.ProjectUnit) bool {
 	check := scipReadinessChecks[recipe]
 	return check == nil || check(unit)
+}
+
+func ensureUnitToolchains(projectRoot string, unit astramap.ProjectUnit) error {
+	for _, language := range unit.Languages {
+		if provider, ok := astramap.SemanticProviderForProjectLanguage(projectRoot, language); ok && provider.Recipe == astramap.ScipRecipeJVM {
+			var supportedBuildFiles []string
+			switch language {
+			case "kotlin":
+				supportedBuildFiles = []string{"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "scip-java.json"}
+			case "scala":
+				supportedBuildFiles = []string{"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "build.sbt", "scip-java.json"}
+			default:
+				supportedBuildFiles = []string{"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "build.sbt", "scip-java.json"}
+			}
+			if !unitHasAnyManifest(unit, supportedBuildFiles) {
+				return fmt.Errorf("%s is not supported by scip-java for the detected build tool in %s", languageDisplayName(language), unit.Root)
+			}
+		}
+		for _, requirement := range astramap.LanguageToolchainRequirementsForProject(projectRoot, language) {
+			if len(requirement.WhenAnyFiles) > 0 && !unitHasAnyManifest(unit, requirement.WhenAnyFiles) {
+				continue
+			}
+			if toolchainRequirementAvailable(unit.Root, requirement) {
+				continue
+			}
+			if requirement.Installer == nil {
+				return fmt.Errorf("%s dependency is unavailable for %s\nInstall: %s",
+					requirement.Label, languageDisplayName(language), requirement.InstallHint)
+			}
+			if err := installToolchainRequirement(unit.Root, requirement); err != nil {
+				return fmt.Errorf("install %s dependency for %s: %w\nInstall manually: %s",
+					requirement.Label, languageDisplayName(language), err, requirement.InstallHint)
+			}
+			if !toolchainRequirementAvailable(unit.Root, requirement) {
+				return fmt.Errorf("%s installation completed but its command is still unavailable for %s\nCheck PATH or install manually: %s",
+					requirement.Label, languageDisplayName(language), requirement.InstallHint)
+			}
+		}
+	}
+	return nil
+}
+
+func toolchainRequirementAvailable(unitRoot string, requirement astramap.ToolchainRequirement) bool {
+	if requirement.ProjectExecutable != "" {
+		path := filepath.Join(unitRoot, requirement.ProjectExecutable)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+			return true
+		}
+	}
+	for _, command := range requirement.Commands {
+		if _, err := exec.LookPath(command); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func installToolchainRequirement(unitRoot string, requirement astramap.ToolchainRequirement) error {
+	installer := requirement.Installer
+	if installer == nil {
+		return fmt.Errorf("no automatic installer is registered")
+	}
+	commandPath, err := exec.LookPath(installer.Command)
+	if err != nil {
+		return fmt.Errorf("installer %s is unavailable", installer.Command)
+	}
+	fmt.Printf("Installing missing dependency: %s...\n", requirement.Label)
+	cmd := exec.Command(commandPath, installer.Args...)
+	cmd.Dir = unitRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s failed: %w", strings.Join(append([]string{installer.Command}, installer.Args...), " "), err)
+	}
+	fmt.Printf("Installed dependency: %s\n", requirement.Label)
+	return nil
+}
+
+func unitHasAnyManifest(unit astramap.ProjectUnit, names []string) bool {
+	wanted := make(map[string]bool, len(names))
+	for _, name := range names {
+		wanted[strings.ToLower(name)] = true
+	}
+	for _, manifest := range unit.Manifests {
+		if wanted[strings.ToLower(filepath.Base(manifest))] {
+			return true
+		}
+	}
+	return false
 }
 
 func clangUnitReady(unit astramap.ProjectUnit) bool {
@@ -553,19 +635,18 @@ func defaultArtifactRecipe(arguments ...string) scipRecipe {
 	}
 }
 
-func prepareGoScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
-	return preparedScipRun{
-		command: exec.Command(toolPath, "index", "--module-root", projectRoot, "-o", output), artifact: output,
-	}, nil
-}
-
 func prepareNodeScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, filter *astramap.IndexFilter) (preparedScipRun, error) {
 	prepared := preparedScipRun{artifact: output}
-	createdConfig, err := ensureTsConfig(projectRoot, filter)
+	backupPath, createdConfig, err := ensureTsConfig(projectRoot, filter)
 	if err != nil {
 		return prepared, err
 	}
-	if createdConfig {
+	if backupPath != "" {
+		prepared.cleanup.add(func() error {
+			_ = os.Rename(backupPath, filepath.Join(projectRoot, "tsconfig.json"))
+			return nil
+		})
+	} else if createdConfig {
 		prepared.cleanup.add(func() error { return os.Remove(filepath.Join(projectRoot, "tsconfig.json")) })
 	}
 	prepared.command = exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", output)
@@ -782,16 +863,82 @@ func restoreCompileCommands(compdbPath, backupPath string) {
 	}
 }
 
-// ensureTsConfig generates an owned temporary tsconfig.json for JS/TS projects
-// that lack one. The caller must remove it after SCIP generation.
-// scip-typescript requires tsconfig.json to discover source files.
-func ensureTsConfig(projectRoot string, filter *astramap.IndexFilter) (bool, error) {
+// ensureTsConfig guarantees a tsconfig.json with allowJs so scip-typescript
+// indexes both .ts and .js sources. Three cases:
+//  1. No tsconfig exists → generate one (caller removes it).
+//  2. tsconfig exists but lacks allowJs → back it up, generate a complete
+//     one (caller restores the backup).
+//  3. tsconfig exists with allowJs → no-op.
+func ensureTsConfig(projectRoot string, filter *astramap.IndexFilter) (backupPath string, created bool, err error) {
 	tsconfigPath := filepath.Join(projectRoot, "tsconfig.json")
-	if _, err := os.Stat(tsconfigPath); err == nil {
-		return false, nil
+	needsAllowJs := projectHasJavaScriptFiles(projectRoot, filter)
+
+	if _, statErr := os.Stat(tsconfigPath); statErr != nil {
+		if !needsAllowJs {
+			return "", false, nil
+		}
+		fmt.Println("tsconfig.json not found, generating minimal configuration for JS/TS project...")
+		if writeErr := writeAstraMapTsConfig(tsconfigPath, filter); writeErr != nil {
+			return "", false, writeErr
+		}
+		fmt.Println("tsconfig.json generation complete")
+		return "", true, nil
 	}
 
-	fmt.Println("tsconfig.json not found, generating minimal configuration for JS/TS project...")
+	if !needsAllowJs {
+		return "", false, nil
+	}
+
+	// Existing tsconfig may lack allowJs; inspect and replace if needed.
+	data, readErr := os.ReadFile(tsconfigPath)
+	if readErr != nil {
+		return "", false, nil
+	}
+	var cfg map[string]interface{}
+	if unmarshalErr := json.Unmarshal(data, &cfg); unmarshalErr != nil {
+		return "", false, nil
+	}
+	if hasAllowJs(cfg) {
+		return "", false, nil
+	}
+
+	// Back up the existing tsconfig and write a complete one.
+	backupPath = tsconfigPath + ".astramap-backup"
+	if removeErr := os.Remove(backupPath); removeErr != nil && !os.IsNotExist(removeErr) {
+		return "", false, fmt.Errorf("remove old tsconfig backup: %w", removeErr)
+	}
+	if renameErr := os.Rename(tsconfigPath, backupPath); renameErr != nil {
+		return "", false, fmt.Errorf("back up tsconfig.json: %w", renameErr)
+	}
+	fmt.Println("Existing tsconfig.json lacks allowJs; generating AstraMap configuration for JS/TS project...")
+	if writeErr := writeAstraMapTsConfig(tsconfigPath, filter); writeErr != nil {
+		_ = os.Rename(backupPath, tsconfigPath)
+		return "", false, writeErr
+	}
+	fmt.Println("tsconfig.json generation complete (original backed up)")
+	return backupPath, true, nil
+}
+
+func projectHasJavaScriptFiles(projectRoot string, filter *astramap.IndexFilter) bool {
+	profile := astramap.BuildProjectProfile(projectRoot, filter, astramap.StageScip)
+	for _, ext := range []string{".js", ".jsx", ".mjs", ".cjs"} {
+		if profile.ExtensionCounts[ext] > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAllowJs(cfg map[string]interface{}) bool {
+	compilerOpts, ok := cfg["compilerOptions"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	allowJs, ok := compilerOpts["allowJs"].(bool)
+	return ok && allowJs
+}
+
+func writeAstraMapTsConfig(tsconfigPath string, filter *astramap.IndexFilter) error {
 	exclude := []string{"node_modules", "dist", ".astramap", "build"}
 	if filter != nil {
 		exclude = append(exclude, filter.Exclude...)
@@ -812,13 +959,12 @@ func ensureTsConfig(projectRoot string, filter *astramap.IndexFilter) (bool, err
 	}
 	data, err := json.MarshalIndent(tsconfig, "", "  ")
 	if err != nil {
-		return false, fmt.Errorf("Failed to generate tsconfig.json: %w", err)
+		return fmt.Errorf("failed to generate tsconfig.json: %w", err)
 	}
 	if err := os.WriteFile(tsconfigPath, append(data, '\n'), 0644); err != nil {
-		return false, fmt.Errorf("Failed to write tsconfig.json: %w", err)
+		return fmt.Errorf("failed to write tsconfig.json: %w", err)
 	}
-	fmt.Println("tsconfig.json generation complete")
-	return true, nil
+	return nil
 }
 
 func validateCompileCommandsJson(compdbPath string) (bool, int, string) {
@@ -914,56 +1060,76 @@ func prepareCompileCommandsJson(compdbPath, projectRoot string, filter *astramap
 }
 
 // autoGenerateScip runs each semantic provider once per detected project unit.
-func autoGenerateScip(projectRoot string, selectedLangs []LangCount, filter *astramap.IndexFilter, reuseExisting bool) ([]string, []string) {
+func autoGenerateScip(projectRoot string, selectedLangs []LangCount, filter *astramap.IndexFilter, offerExisting bool) ([]string, []string, error) {
 	if len(selectedLangs) == 0 {
-		fmt.Println("No known project language detected, using Tree-sitter mode")
-		return nil, nil
+		return nil, nil, fmt.Errorf("no supported project language selected")
 	}
 	var scipPaths []string
 	var generatedPaths []string
 	usedPaths := make(map[string]bool)
+	existingDecisions := make(map[string]bool)
 	languages := langIDs(selectedLangs)
 	for _, unit := range astramap.DetectProjectUnits(projectRoot, languages, filter) {
 		if len(unit.Languages) == 0 {
 			continue
 		}
 		lang := unit.Languages[0]
-		if reuseExisting {
+		if offerExisting {
 			if path, ok := matchingExistingScip(projectRoot, unit); ok {
-				if !usedPaths[path] {
-					fmt.Printf("Using existing SCIP: %s (%s)\n", languageDisplayName(lang), path)
-					scipPaths = append(scipPaths, path)
-					usedPaths[path] = true
+				reuse, decided := existingDecisions[path]
+				if !decided {
+					reuse = confirmScipReuse(path, lang)
+					existingDecisions[path] = reuse
 				}
-				continue
+				if reuse {
+					if !usedPaths[path] {
+						fmt.Printf("Using existing SCIP: %s (%s)\n", languageDisplayName(lang), path)
+						scipPaths = append(scipPaths, path)
+						usedPaths[path] = true
+					}
+					continue
+				}
 			}
 		}
 		provider, providerOK := astramap.SemanticProviderForProjectByID(projectRoot, unit.ProviderID)
-		if !astramap.CanAutoGenerateScipForProject(projectRoot, lang) {
-			continue
+		if !providerOK || !astramap.CanAutoGenerateScipForProject(projectRoot, lang) {
+			return nil, generatedPaths, fmt.Errorf("%s has no certified SCIP provider", languageDisplayName(lang))
 		}
-		if !providerOK || !scipUnitReady(provider.Recipe, unit) {
-			continue
+		if !scipUnitReady(provider.Recipe, unit) {
+			return nil, generatedPaths, fmt.Errorf("%s SCIP prerequisites are missing in %s", languageDisplayName(lang), unit.Root)
+		}
+		if err := ensureUnitToolchains(projectRoot, unit); err != nil {
+			return nil, generatedPaths, err
 		}
 		toolPath, found := findScipTool(lang, projectRoot, unit.Root)
 		if !found {
-			continue
+			return nil, generatedPaths, fmt.Errorf("%s semantic provider is unavailable: %s not found\nInstall: %s",
+				languageDisplayName(lang), provider.Tool, provider.InstallHint)
 		}
 		fmt.Printf("Generating SCIP: %s (%s)\n", languageDisplayName(lang), unit.Root)
 		scipPath, err := runScipGeneration(toolPath, provider, unit.Root, projectRoot, unit.Identity, filter)
 		if err != nil {
-			logWarn("SCIP generation failed: %v, falling back to Tree-sitter", err)
-			continue
+			return nil, generatedPaths, fmt.Errorf("%s SCIP generation failed: %w", languageDisplayName(lang), err)
 		}
 		scipPaths = append(scipPaths, scipPath)
 		generatedPaths = append(generatedPaths, scipPath)
 	}
-	return scipPaths, generatedPaths
+	return scipPaths, generatedPaths, nil
+}
+
+func confirmScipReuse(path, language string) bool {
+	fmt.Printf("Existing SCIP found: %s (%s). Reuse it instead of regenerating? [y/N]: ", languageDisplayName(language), path)
+	var input string
+	if _, err := fmt.Scanln(&input); err != nil {
+		return false
+	}
+	input = strings.ToLower(strings.TrimSpace(input))
+	return input == "y" || input == "yes"
 }
 
 func matchingExistingScip(projectRoot string, unit astramap.ProjectUnit) (string, bool) {
 	path := filepath.Join(unit.Root, "index.scip")
-	languages, err := astramap.ScipIndexLanguages(path)
+	languages, err := astramap.ScipIndexProjectLanguages(path, projectRoot)
 	if err != nil {
 		return "", false
 	}
@@ -979,12 +1145,65 @@ func matchingExistingScip(projectRoot string, unit astramap.ProjectUnit) (string
 	return "", false
 }
 
+func validateScipSelection(paths []string, selected []LangCount) error {
+	wanted := make(map[string]bool, len(selected))
+	for _, item := range selected {
+		wanted[item.Lang] = true
+	}
+	covered := make(map[string]bool, len(wanted))
+	for _, path := range paths {
+		languages, err := astramap.ScipIndexProjectLanguages(path, projectRoot)
+		if err != nil {
+			return fmt.Errorf("inspect SCIP %s: %w", path, err)
+		}
+		for _, language := range languages {
+			normalized, ok := astramap.NormalizeLanguageIDForProject(projectRoot, language)
+			if !ok {
+				return fmt.Errorf("SCIP %s contains unsupported language %q", path, language)
+			}
+			if !wanted[normalized] {
+				return fmt.Errorf("SCIP %s contains unselected language %q", path, normalized)
+			}
+			covered[normalized] = true
+		}
+	}
+	// Languages sharing a SCIP provider are co-indexed: if one is covered,
+	// the provider ran successfully and siblings are implicitly covered even
+	// when the tool omits their documents (e.g. scip-typescript may skip .js
+	// files depending on tsconfig, but javascript shares the typescript provider).
+	providerCovered := make(map[string]bool)
+	for lang := range covered {
+		if provider, ok := astramap.SemanticProviderForProjectLanguage(projectRoot, lang); ok {
+			providerCovered[provider.ID] = true
+		}
+	}
+	for lang := range wanted {
+		if covered[lang] {
+			continue
+		}
+		if provider, ok := astramap.SemanticProviderForProjectLanguage(projectRoot, lang); ok && providerCovered[provider.ID] {
+			covered[lang] = true
+		}
+	}
+	var missing []string
+	for language := range wanted {
+		if !covered[language] {
+			missing = append(missing, language)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("SCIP output does not cover selected languages: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 type indexOptions struct {
 	scipFile      string
 	scipOnly      bool
+	treeSitter    bool
 	refreshScip   bool
 	full          bool
-	treeSitter    bool
 	watch         bool
 	watchInterval time.Duration
 	langFlag      string
@@ -994,19 +1213,18 @@ func indexCmd() {
 	args, watch, watchInterval := extractIndexWatchArgs(os.Args[2:])
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
 	scipFile := fs.String("scip", "", "SCIP index file; leave empty for auto-generation")
-	scipOnly := fs.Bool("scip-only", false, "Import only SCIP, skip Tree-sitter")
+	scipOnly := fs.Bool("scip-only", false, "Import only SCIP, skip optional Syntax Overlay")
+	treeSitter := fs.Bool("tree-sitter", false, "Syntax Overlay only, skip SCIP generation and import")
 	refreshScip := fs.Bool("refresh-scip", false, "Force regenerate and import SCIP index")
-	full := fs.Bool("full", false, "Full refresh high-precision SCIP layer, then execute Tree-sitter incremental scan")
-	treeSitter := fs.Bool("tree-sitter", false, "Run only Tree-sitter")
-	fs.BoolVar(treeSitter, "treesitter-only", false, "Run only Tree-sitter")
+	full := fs.Bool("full", false, "Full refresh high-precision SCIP layer, then execute optional Syntax Overlay")
 	langFlag := fs.String("lang", "", "Language list, comma-separated")
 	_ = fs.Parse(args)
 	runIndex(indexOptions{
 		scipFile:      *scipFile,
 		scipOnly:      *scipOnly,
+		treeSitter:    *treeSitter,
 		refreshScip:   *refreshScip,
 		full:          *full,
-		treeSitter:    *treeSitter,
 		watch:         watch,
 		watchInterval: watchInterval,
 		langFlag:      *langFlag,
@@ -1088,16 +1306,11 @@ func runIndex(opts indexOptions) {
 	var selected []LangCount
 	var detected []LangCount
 	quiet := false
-	plainIncremental := opts.langFlag == "" && opts.scipFile == "" && !opts.scipOnly && !opts.refreshScip && !opts.full
+	plainIncremental := opts.langFlag == "" && opts.scipFile == "" && !opts.scipOnly && !opts.refreshScip && !opts.full && !opts.treeSitter
 	if opts.langFlag == "" {
 		if saved, ok := loadSavedIndexLanguages(projectRoot, db); ok {
 			selected = saved
 			quiet = plainIncremental
-			var added bool
-			selected, added = mergeNewPackageLanguages(projectRoot, filter, selected)
-			if added {
-				quiet = false
-			}
 		}
 	}
 	if len(selected) == 0 {
@@ -1154,18 +1367,30 @@ func runIndex(opts indexOptions) {
 	// Generate or import SCIP indexes.
 	var scipPaths []string
 	var scipAutoPaths []string
-	shouldRefreshScip := opts.scipFile != "" || opts.scipOnly || opts.refreshScip || opts.full || !existingScip
-	if !opts.treeSitter && shouldRefreshScip {
+	shouldRefreshScip := !opts.treeSitter && (opts.scipFile != "" || opts.refreshScip || opts.full || !existingScip)
+	if shouldRefreshScip {
 		if opts.scipFile != "" {
 			scipPaths = []string{opts.scipFile}
 		} else {
-			scipPaths, scipAutoPaths = autoGenerateScip(projectRoot, selected, filter, !opts.refreshScip && !opts.full)
+			offerExisting := !opts.refreshScip && !opts.full
+			var generateErr error
+			scipPaths, scipAutoPaths, generateErr = autoGenerateScip(projectRoot, selected, filter, offerExisting)
+			if generateErr != nil {
+				cleanupOwnedFiles(scipAutoPaths)
+				logError("SCIP dependency check failed: %v", generateErr)
+				os.Exit(1)
+			}
 		}
-	} else if !opts.treeSitter && !quiet {
+	} else if !quiet {
 		fmt.Println("Existing SCIP index detected, skipping full SCIP refresh. Use --refresh-scip to force refresh.")
 	}
 
 	if len(scipPaths) > 0 {
+		if err := validateScipSelection(scipPaths, selected); err != nil {
+			cleanupOwnedFiles(scipAutoPaths)
+			logError("SCIP language validation failed: %v", err)
+			os.Exit(1)
+		}
 		if !quiet {
 			fmt.Printf("Batch importing %d SCIP indexes\n", len(scipPaths))
 		}
@@ -1199,15 +1424,13 @@ func runIndex(opts indexOptions) {
 		} else {
 			stopSpinner("AstraMap incremental indexing complete")
 		}
-	} else if opts.watch {
-		logError("watch requires Tree-sitter incremental scan, cannot be used with --scip-only")
-		os.Exit(1)
 	}
 
-	// Show provenance breakdown: SCIP vs Tree-sitter vs heuristic
-	if !quiet && !noChange {
+	// Show provenance breakdown: SCIP vs Syntax Overlay vs heuristic.
+	// Unconditional on noChange: a fresh SCIP import or a heuristic refresh can
+	// mutate the graph even when the syntax overlay reports zero file changes.
+	if !quiet {
 		nodeStats, edgeStats, _ := astramap.ProvenanceStats(db)
-		fmt.Println("Index build complete!")
 		fmt.Println()
 		fmt.Println("── Index Provenance Stats ──")
 		fmt.Printf("  Nodes (by language): %s\n", formatLangStats(nodeStats))
@@ -1223,54 +1446,37 @@ func runIndex(opts indexOptions) {
 		for _, lc := range selected {
 			langFilter = append(langFilter, lc.Lang)
 		}
-		if err := watchIndexCmd(db, projectRoot, opts.watchInterval, langFilter...); err != nil {
+		if err := watchIndexCmd(db, projectRoot, opts.watchInterval, !opts.scipOnly, langFilter...); err != nil {
 			logError("watch failed: %v", err)
 			os.Exit(1)
 		}
 	}
 }
 
-func mergeNewPackageLanguages(projectRoot string, filter *astramap.IndexFilter, selected []LangCount) ([]LangCount, bool) {
-	selectedIDs := make(map[string]bool, len(selected))
-	for _, language := range selected {
-		selectedIDs[language.Lang] = true
-	}
-	missing := make(map[string]bool)
-	for _, id := range astramap.InstalledLanguagePackageIDsForProject(projectRoot) {
-		if !selectedIDs[id] {
-			missing[id] = true
-		}
-	}
-	if len(missing) == 0 {
-		return selected, false
-	}
-	added := false
-	for _, detected := range detectProjectLanguages(projectRoot, filter) {
-		if missing[detected.Lang] {
-			selected = append(selected, detected)
-			added = true
-		}
-	}
-	return selected, added
-}
-
-func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, langFilter ...string) error {
+func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, applySyntax bool, langFilter ...string) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("failed to initialize file watcher: %w", err)
 	}
 	defer watcher.Close()
 
-	watchFilter, _ := astramap.LoadIndexFilter(projectRoot)
+	watchFilter, filterErr := astramap.LoadIndexFilter(projectRoot)
+	if filterErr != nil {
+		return fmt.Errorf("failed to load index filter: %w", filterErr)
+	}
 	if err := addIndexWatchDirs(watcher, projectRoot, watchFilter); err != nil {
 		return err
 	}
 
-	fmt.Printf("watch started: %s, refreshing at most once every %s\n", projectRoot, interval)
+	fmt.Printf("watch started: %s, refreshing dirty syntax overlays at most once every %s\n", projectRoot, interval)
 
 	dirty := make(map[string]bool)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	allowedLangs := make(map[string]bool, len(langFilter))
+	for _, lang := range langFilter {
+		allowedLangs[lang] = true
+	}
 
 	for {
 		select {
@@ -1301,21 +1507,91 @@ func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, lang
 			}
 			dirty = make(map[string]bool)
 
-			result, err := astramap.SyncChangedFilesAstraMapResult(db, projectRoot, paths, langFilter...)
-			if err != nil {
-				logWarn("watch incremental refresh failed: %v", err)
-				for _, path := range paths {
-					dirty[path] = true
-				}
+			if !applySyntax {
 				continue
 			}
-			if len(result.UpdatedFiles) > 0 {
-				fmt.Printf("watch updated %d files: %s (%s)\n", result.Updated, formatUpdatedFiles(result.UpdatedFiles), time.Now().Format("15:04:05"))
-			} else if result.Pruned || result.PrunedDeleted > 0 {
-				fmt.Printf("watch pruned index records (%s)\n", time.Now().Format("15:04:05"))
+			profile := astramap.BuildProjectProfile(projectRoot, watchFilter, astramap.StageSyntax)
+			changedPaths := make([]string, 0, len(paths))
+			for _, path := range paths {
+				relPath, relErr := filepath.Rel(projectRoot, path)
+				if relErr != nil {
+					relPath = path
+				}
+				selection, supported := astramap.ResolveLanguageWithProfile(profile, path)
+				if !supported || selection.Module == nil {
+					continue
+				}
+				if len(allowedLangs) > 0 && !allowedLangs[selection.ID] {
+					continue
+				}
+				if !watchFilter.Allows(relPath, astramap.StageSyntax) {
+					continue
+				}
+				changed, refreshErr := astramap.SyncDirtySyntaxOverlayWithProfile(db, profile, path)
+				if refreshErr != nil {
+					logWarn("watch overlay refresh failed %s: %v", relPath, refreshErr)
+					for _, p := range paths {
+						dirty[p] = true
+					}
+					changedPaths = nil
+					break
+				}
+				if changed {
+					changedPaths = append(changedPaths, relPath)
+				}
+			}
+			if changedPaths == nil {
+				continue
+			}
+			if len(changedPaths) > 0 {
+				fmt.Printf("watch updated syntax overlay for %d file(s): %s (%s)\n", len(changedPaths), formatUpdatedFiles(changedPaths), time.Now().Format("15:04:05"))
+				_ = astramap.ResolveGoInterfaces(db)
+				_ = astramap.ResolveWebRoutesForFiles(db, projectRoot, changedPaths)
+				if resolveErr := astramap.ResolveCrossFileCallsForFiles(db, projectRoot, changedPaths); resolveErr != nil {
+					logWarn("watch heuristic refresh failed: %v", resolveErr)
+				}
+				if refreshErr := refreshWatchScip(db, projectRoot, watchFilter, profile, langFilter); refreshErr != nil {
+					logWarn("watch SCIP convergence deferred; realtime syntax remains active: %v", refreshErr)
+				}
 			}
 		}
 	}
+}
+
+func refreshWatchScip(db *sqlx.DB, projectRoot string, filter *astramap.IndexFilter, profile astramap.ProjectProfile, languages []string) error {
+	counts := astramap.ProjectLanguageCounts(profile)
+	selected := make([]LangCount, 0, len(counts))
+	allowed := make(map[string]bool, len(languages))
+	for _, language := range languages {
+		allowed[language] = true
+	}
+	for language, count := range counts {
+		if count <= 0 || (len(allowed) > 0 && !allowed[language]) {
+			continue
+		}
+		selected = append(selected, LangCount{Lang: language, Count: count})
+	}
+	sort.Slice(selected, func(i, j int) bool { return selected[i].Lang < selected[j].Lang })
+	if len(selected) == 0 {
+		return nil
+	}
+	paths, owned, err := autoGenerateScip(projectRoot, selected, filter, false)
+	defer cleanupOwnedFiles(owned)
+	if err != nil {
+		return err
+	}
+	if err := validateScipSelection(paths, selected); err != nil {
+		return err
+	}
+	if err := astramap.ImportScipIndexesToAstraMap(db, paths, projectRoot); err != nil {
+		return err
+	}
+	filters := make([]string, 0, len(selected))
+	for _, language := range selected {
+		filters = append(filters, language.Lang)
+	}
+	_, err = astramap.SyncAllFilesAstraMapResult(db, projectRoot, filters...)
+	return err
 }
 
 func formatUpdatedFiles(files []string) string {
@@ -1833,15 +2109,15 @@ func formatLangStats(stats map[string]int) string {
 }
 
 func formatProvStats(stats map[string]int) string {
-	// Display in fixed order: scip → tree-sitter → heuristic → others
+	// Display in fixed order: scip → syntax-package → heuristic → others.
 	var parts []string
-	for _, prov := range []string{"scip", "tree-sitter", "heuristic"} {
+	for _, prov := range []string{"scip", "syntax-package", "heuristic"} {
 		if cnt, ok := stats[prov]; ok {
 			parts = append(parts, fmt.Sprintf("%s=%d", prov, cnt))
 		}
 	}
 	for prov, cnt := range stats {
-		if prov != "scip" && prov != "tree-sitter" && prov != "heuristic" {
+		if prov != "scip" && prov != "syntax-package" && prov != "heuristic" {
 			parts = append(parts, fmt.Sprintf("%s=%d", prov, cnt))
 		}
 	}
@@ -1884,7 +2160,7 @@ func installCmd() {
 	probes := probeInstallTargets()
 
 	// Collect detected IDE names in stable order
-	ideOrder := []string{"Claude Code", "VS Code", "Cursor", "Codex", "Windsurf", "Antigravity"}
+	ideOrder := []string{"Claude Code", "VS Code", "Cursor", "Codex", "Windsurf", "Cline", "Antigravity"}
 	var detectedIDEs []string
 	for _, name := range ideOrder {
 		if probes[name] {
@@ -1938,10 +2214,14 @@ func installCmd() {
 		fmt.Println("  - Cursor       — not selected, skipping")
 	}
 
-	// 3.4 Project-level .mcp.json (always installed)
-	total++
-	if installProjectMcpJson(selfPath, absProj) {
-		success++
+	// 3.4 Project-level .mcp.json
+	if selectedSet["Claude Code"] || selectedSet["VS Code"] || selectedSet["Cursor"] || selectedSet["Codex"] || selectedSet["Windsurf"] || selectedSet["Antigravity"] {
+		total++
+		if installProjectMcpJson(selfPath, absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - Project .mcp.json — not selected, skipping")
 	}
 
 	// 3.5 Codex (MCP + AGENTS.md)
@@ -1954,16 +2234,24 @@ func installCmd() {
 		fmt.Println("  - Codex        — not selected, skipping")
 	}
 
-	// 3.6 Windsurf (.windsurfrules) (always installed as project-level)
-	total++
-	if installWindsurf(absProj) {
-		success++
+	// 3.6 Windsurf (.windsurfrules)
+	if selectedSet["Windsurf"] {
+		total++
+		if installWindsurf(absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - Windsurf     — not selected, skipping")
 	}
 
-	// 3.7 Cline (.clinerules) (always installed as project-level)
-	total++
-	if installCline(absProj) {
-		success++
+	// 3.7 Cline (.clinerules)
+	if selectedSet["Cline"] {
+		total++
+		if installCline(absProj) {
+			success++
+		}
+	} else {
+		fmt.Println("  - Cline        — not selected, skipping")
 	}
 
 	// 3.8 Antigravity (mcp_config.json + AGENTS.md)
@@ -1988,19 +2276,18 @@ func installCmd() {
 
 	// 4. 提示用户构建索引
 	fmt.Println("\nNext Step: Build Code Map Index")
-	fmt.Println("  amap index                    # Quick incremental; only refreshes Tree-sitter dirty files when SCIP exists")
+	fmt.Println("  amap index                    # Quick update; changed files require a current SCIP baseline")
 	fmt.Println("  amap index --lang c           # Specify language")
 	fmt.Println("  amap index --scip index.scip  # Import existing SCIP index file")
 	fmt.Println("  amap index --scip-only        # Import SCIP only")
 	fmt.Println("  amap index --refresh-scip     # Force regenerate and import SCIP")
 	fmt.Println("  amap index --full             # Full refresh SCIP layer, then execute incremental scan")
-	fmt.Println("  amap index --tree-sitter      # Run Tree-sitter only")
 	fmt.Println("  amap watch 10                 # Refresh incrementally at most once every 10 seconds")
 }
 
 func probeInstallTargets() map[string]bool {
 	probes := map[string]bool{}
-	for _, name := range []string{"claude", "code", "cursor", "codex", "windsurf", "gemini"} {
+	for _, name := range []string{"claude", "code", "cursor", "codex", "windsurf", "cline", "gemini"} {
 		_, err := exec.LookPath(name)
 		probes[probeNameFromCommand(name)] = err == nil
 	}
@@ -2023,6 +2310,8 @@ func probeNameFromCommand(name string) string {
 		return "Codex"
 	case "windsurf":
 		return "Windsurf"
+	case "cline":
+		return "Cline"
 	case "gemini":
 		return "Antigravity"
 	default:
@@ -2037,7 +2326,7 @@ func printInstallProbeReport(probes map[string]bool, selectedIDEs []string) {
 	}
 	fmt.Println("Detected IDE Clients:")
 	idx := 0
-	for _, name := range []string{"Claude Code", "VS Code", "Cursor", "Codex", "Windsurf", "Antigravity"} {
+	for _, name := range []string{"Claude Code", "VS Code", "Cursor", "Codex", "Windsurf", "Cline", "Antigravity"} {
 		if probes[name] {
 			idx++
 			if selectedSet[name] {
@@ -2049,8 +2338,8 @@ func printInstallProbeReport(probes map[string]bool, selectedIDEs []string) {
 		}
 		fmt.Printf("     - %s\n", name)
 	}
-	fmt.Println("Workspace Shared Targets (always installed):")
-	fmt.Println("  - .mcp.json / .windsurfrules / .clinerules")
+	fmt.Println("Workspace Shared Targets (installed when any IDE is selected):")
+	fmt.Println("  - .mcp.json")
 }
 
 // resolveIDESelection prompts the user to select which detected IDEs to integrate.
@@ -2112,7 +2401,7 @@ func printInstallVerification(projectPath string) {
 		ok   bool
 	}{
 		{"Claude Code slash command", fileContains(filepath.Join(projectPath, ".claude", "commands", "amap.md"), "allowed-tools: astramap_search")},
-			{"Claude Code tool permissions", fileContains(filepath.Join(projectPath, ".claude", "settings.local.json"), "mcp__astramap__astramap_search")},
+		{"Claude Code tool permissions", fileContains(filepath.Join(projectPath, ".claude", "settings.local.json"), "mcp__astramap__astramap_search")},
 		{"VS Code Copilot rules", fileContains(filepath.Join(projectPath, ".github", "copilot-instructions.md"), "## AstraMap")},
 		{"Cursor MCP", fileContains(filepath.Join(projectPath, ".cursor", "mcp.json"), "\"astramap\"")},
 		{"Cursor rules", fileContains(filepath.Join(projectPath, ".cursor", "rules", "astramap.mdc"), "alwaysApply: true")},
