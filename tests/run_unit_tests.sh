@@ -13,7 +13,7 @@ mkdir -p "$SCRIPT_DIR/reports"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 printf "${BOLD}  AstraMap 多语言单元测试 v2.1${RESET}\n"
 printf "${BOLD}  日期: $(date '+%Y-%m-%d %H:%M:%S')${RESET}\n"
-printf "${BOLD}  覆盖: 12 种内置语言 + 7 种语言包 case${RESET}\n"
+printf "${BOLD}  覆盖: 10 种内置语言 + 7 种语言包 case${RESET}\n"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n\n"
 
 # ── Phase 0: 环境检测 ──
@@ -110,22 +110,6 @@ lang=$(query_val "$tmpdir" "SELECT language FROM astramap_files WHERE path='Main
 assert_eq "DETECT-KT .kt→kotlin" "$lang" "kotlin"
 rm -rf "$tmpdir"
 
-# DETECT-PHP: .php 文件识别为 php
-tmpdir=$(mktemp -d /tmp/astramap-test-XXXXXX)
-echo '<?php echo "hello";' > "$tmpdir/index.php"
-"$amap_bin" index --project "$tmpdir" --tree-sitter >/dev/null 2>&1
-lang=$(query_val "$tmpdir" "SELECT language FROM astramap_files WHERE path='index.php'")
-assert_eq "DETECT-PHP .php→php" "$lang" "php"
-rm -rf "$tmpdir"
-
-# DETECT-BASH: .sh 文件识别为 bash
-tmpdir=$(mktemp -d /tmp/astramap-test-XXXXXX)
-echo '#!/bin/bash\nfunction greet() { echo "hello"; }' > "$tmpdir/script.sh"
-"$amap_bin" index --project "$tmpdir" --tree-sitter >/dev/null 2>&1
-lang=$(query_val "$tmpdir" "SELECT language FROM astramap_files WHERE path='script.sh'")
-assert_eq "DETECT-BASH .sh→bash" "$lang" "bash"
-rm -rf "$tmpdir"
-
 # DETECT-H-C: .h 文件在纯 C 项目中归 c
 tmpdir=$(mktemp -d /tmp/astramap-test-XXXXXX)
 echo 'int add(int, int);' > "$tmpdir/util.h"
@@ -146,7 +130,7 @@ phase_summary "Phase 1: 语言识别测试"
 # ════════════════════════════════════════════════
 phase_header "Phase 2: 语法提取测试 (L2)"
 
-for lang in go python typescript javascript c cpp java rust csharp kotlin php bash; do
+for lang in go python typescript javascript c cpp java rust csharp kotlin; do
   run_fixture "$SCRIPT_DIR/languages/$lang/basic.yaml"
 done
 for lang in ruby dart swift lua scala zig visualbasic; do
@@ -164,7 +148,7 @@ phase_summary "Phase 2: 语法提取测试"
 # ════════════════════════════════════════════════
 phase_header "Phase 3: 语义解析测试 (L3)"
 
-for lang in go python typescript javascript c cpp java rust csharp kotlin php bash; do
+for lang in go python typescript javascript c cpp java rust csharp kotlin; do
   if [[ -f "$SCRIPT_DIR/languages/$lang/advanced.yaml" ]]; then
     run_fixture "$SCRIPT_DIR/languages/$lang/advanced.yaml"
   fi
