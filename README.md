@@ -1,8 +1,8 @@
 # AstraMap - 高精度语义代码地图引擎
 
-> 源码 → SCIP 编译器级索引 + Tree-sitter 按哈希增量补丁 → SQLite 知识图谱 → MCP/HTTP API → AI 工具客户端
+> 源码 → 内置 Tree-sitter 实时层 + SCIP 编译器级最终语义 → SQLite 知识图谱 → MCP/HTTP API → AI 工具客户端
 
-面向 AI 编程代理的代码地图引擎。将源码解析为符号节点与调用边的知识图谱，通过 MCP 和 REST API 提供毫秒级结构化查询，单个静态二进制零配置部署。
+面向 AI 编程代理的代码地图引擎。Core 内置 12 种正式语言的 Tree-sitter 实时解析能力；用户按所选语言安装 SCIP Provider，使实时文件结构最终收敛为确定的跨文件语义图。
 
 ## v0.3 核心能力与极致性能优化
 
@@ -10,10 +10,10 @@
 
 | 能力 | 一句话说明 |
 |------|--------|
-| **🛡️ 生态感知智能过滤** | 自动识别内置与语言包声明的工程根，按生态生成构建产物排除规则；通用规则与语言包规则统一执行 |
+| **🛡️ 生态感知智能过滤** | 由受支持语言的 SCIP Profile 识别工程根并生成构建产物排除规则 |
 | **📋 结构化过滤报告** | `amap index` 输出按规则类型分组的排除报告，含规则 ID、排除原因、覆盖数量，告别黑盒过滤 |
-| **🔁 `amap watch` 持续文件监听** | 独立守护进程增量轮询刷新，源码变更秒级体现，无需手动重新索引 |
-| **⚡ 按哈希增量索引更新** | 跳过未变动文件，仅对变更部分进行 AST 与 SCIP 增量导入 |
+| **🔁 `amap watch` 持续文件监听** | Tree-sitter 先实时提交变化文件，再刷新 SCIP 使跨文件语义最终收敛 |
+| **⚡ 分层索引更新** | Tree-sitter 按文件哈希更新结构事实；SCIP 提供确定的跨文件语义 |
 | **🖥️ 交互式 Dashboard** | D3.js 力导向图与关系拓扑，集成全局探索、追溯依赖和一键架构理解文档 |
 | **🔧 条件编译感知** | C/C++ `#if`/`#ifdef` 预处理守卫自动标注在调用边 metadata，图遍历直达条件分支 |
 | **🎯 多定义合并消歧** | callers/callees/impact/trace 统一做 `ResolveSymbolToIDs` 多符号解析与结果合并去重，消除单符号选择导致的信息丢失 |
@@ -21,6 +21,10 @@
 | **🔗 C/C++ 函数指针与宏调用解析** | 跨文件启发式识别 `.field = &func` 指定初始化、`struct var = { func1, func2 }` 顺序初始化、`XXXRETURN(func)` 宏展开调用、`DECLARE_xxx(func)` 宏隐式函数定义模式 |
 | **🧹 脏文件低开销检测** | status 接口返回 `dirtyCount`，智能判断同步状态，免去频繁全量 hash 开销 |
 | **📄 分页与歧义过滤** | `astramap_files` 分页限制；启发式消歧自动过滤 Python dunder 并选择最窄 span 节点；中文查询单字分词与停用词过滤 |
+| **🏷️ `--tree-sitter` 纯语法模式** | `amap index --tree-sitter` 仅执行内置 Tree-sitter 语法层，跳过 SCIP 生成与导入，适用于无 SCIP Provider 或纯结构浏览场景 |
+| **🛡️ 单文件解析容错** | 单文件 Tree-sitter 解析失败时日志记录并跳过，不中止整个索引遍历；nil tree 优雅降级为空 FileFacts |
+| **🔍 struct/typedef 精确分离** | `kind=struct` 不再混入 `typedef struct` 别名，三种 kind（struct/typedef/type）严格按设计文档区分 |
+| **📐 Impact 重复节点穿透** | BFS 每步查询同 kind+file+name 的所有重复节点 callers，消除 SCIP/语法层双节点导致的遍历断裂 |
 
 ### 2. 性能重构与指标优化
 
@@ -40,9 +44,9 @@
 |------|------|
 | **编译器级语义精度** | 以 SCIP 为主索引，跨文件调用关系由编译器预计算，非启发式猜测。重载消歧、条件编译、宏展开均确定性处理 |
 | **条件编译感知** | C/C++ `#if`/`#ifdef`/`#ifndef` 守卫自动标注到边 metadata，图遍历结果直接暴露条件编译上下文，无需手动追溯 |
-| **自动持续同步** | `amap watch` 文件监听守护 + Tree-sitter 按哈希增量跳过，源码变更自动反映到图谱，无需手动干预 |
+| **严格持续同步** | `amap watch` 先更新内置 Tree-sitter 实时层；旧 SCIP 关系立即失效，随后由 Provider 收敛 |
 | **60-95% Token 节约** | 单次 `astramap_explore` 替代 10+ 次 grep+Read，一次返回源码+调用关系+依赖文件 |
-| **零配置部署** | 单静态二进制（musl 静态链接，无 GLIBC 依赖）内嵌 SQLite + Tree-sitter WASM + D3.js Dashboard，开箱即用 |
+| **完整实时 Core** | 12 种正式语言的 grammar 随 Core 构建，新增、修改、重命名和删除无需等待 SCIP 即时可见 |
 | **理解文档生成** | 一键生成函数/文件/模块/项目级理解文档，含 Mermaid 依赖图、复杂度风险表、架构边界违规检测 |
 
 ## 架构选择：SCIP 为主，Tree-sitter 为辅
@@ -61,10 +65,11 @@ SCIP 由编译器/语言服务器生成，跨文件引用是预计算的确定�
 
 ```
 SCIP（主索引）       → 定义/引用边、跨文件调用、符号消歧  — "谁调谁"
-Tree-sitter（辅助层） → 类型/签名、嵌套归属、源码还原     — "这是什么"
+Tree-sitter（实时层） → 当前文件结构、签名、注释和局部调用 — "现在是什么"
 ```
 
-砍 SCIP 退纯 tree-sitter → 跨文件边归零，`callers/callees/trace/impact` 废掉。砍 tree-sitter 只留 SCIP → 签名/源码没了，但图遍历还能跑。**图的边比节点的装饰属性更重要**，所以 SCIP 为主。
+没有有效 SCIP 语义基线时，Tree-sitter 仍提供实时文件结构，但跨文件调用、重载消歧和实现关系
+明确处于 `semanticDirty`；这些事实只能由 SCIP Provider 收敛，不能由语法启发式冒充。
 
 ## 交互式代码图谱浏览
 
@@ -94,7 +99,7 @@ Dashboard 不是静态截图式代码地图，而是直接运行在同一份 SQL
 
 | | CodeGraph | GitNexus | Graphify | Understand-Anything | **AstraMap** |
 |---|-----------|----------|----------|--------------------|----|
-| **索引源** | Tree-sitter | Tree-sitter + 推导 | Tree-sitter + LLM | Tree-sitter + LLM | **SCIP + Tree-sitter** |
+| **索引源** | Tree-sitter | Tree-sitter + 推导 | Tree-sitter + LLM | Tree-sitter + LLM | **Tree-sitter 实时层 + SCIP 最终语义** |
 | **语义精度** | 启发式 | 符号级推导 | 混合语义 | LLM 语义 | **编译器级** |
 | **C/C++** | 有限 | 基础 | 基础 | 基础 | **C + C++ 完整** |
 | **条件编译** | 无 | 单路径 | 无 | LLM 盲猜 | **边级 metadata 标注** |
@@ -107,58 +112,49 @@ Dashboard 不是静态截图式代码地图，而是直接运行在同一份 SQL
 
 ## 支持语言
 
-Core 内置 **12 种语言**：原有 7 种加 Rust、C#、Kotlin、PHP、Bash。Ruby、Dart、Swift、Lua、Scala、Zig、Visual Basic 通过签名语言包按需安装；安装后进入同一识别、索引、能力和 ProjectUnit 体系。
+Supported Registry 固定为通过 SCIP 门禁的 12 种候选；门禁失败的语言直接删除，不提供实验模式。
 
-| 语言 | 扩展名 | Tree-sitter | 语义 Provider | 能力等级 |
-|------|--------|-------------|---------------|----------|
-| Go | `.go` | `tree-sitter-go` | `scip-go` 自动生成 | `semantic` |
-| Python | `.py` | `tree-sitter-python` | `scip-python` 自动生成 | `semantic` |
-| TypeScript / TSX | `.ts` `.tsx` | `tree-sitter-typescript` | `scip-typescript` 自动生成 | `semantic` |
-| JavaScript / JSX | `.js` `.jsx` `.mjs` `.cjs` | TypeScript/TSX grammar | 与 TypeScript 共享 `scip-typescript` | `semantic` |
-| C | `.c` `.h` | `tree-sitter-c` | 与 C++ 共享 `scip-clang` | `semantic` |
-| C++ | `.cc` `.cpp` `.cxx` `.hpp` `.hxx`，以及 C++ 项目中的 `.h` | `tree-sitter-cpp` | 与 C 共享 `scip-clang` | `semantic` |
-| Java | `.java` | `tree-sitter-java` | `scip-java` 自动生成 | `semantic` |
-| Rust | `.rs` | `tree-sitter-rust` | `rust-analyzer` | `semantic` |
-| C# | `.cs` | `tree-sitter-c-sharp` | `scip-dotnet` | `semantic` |
-| Kotlin | `.kt` `.kts` | `tree-sitter-kotlin` | `scip-java` | `semantic` |
-| Scala（语言包） | `.scala` `.sc` | `tree-sitter-scala` | `scip-java` | `full` |
-| Ruby（语言包） | `.rb` `.rake`、Gemfile/Rakefile/shebang | `tree-sitter-ruby` | `scip-ruby` | `full` |
-| PHP | `.php` `.phtml` | `tree-sitter-php` | `scip-php`（实验） | `semantic` |
-| Dart（语言包） | `.dart` | `tree-sitter-dart` | `scip-dart`（实验） | `semantic` |
-| Visual Basic（语言包） | `.vb` | `tree-sitter-vb-dotnet` | `scip-dotnet`（实验） | `semantic` |
-| Swift（语言包） | `.swift` | `tree-sitter-swift` | — | `local-graph` |
-| Lua（语言包） | `.lua`、shebang | `tree-sitter-lua` | — | `local-graph` |
-| Bash | `.sh` `.bash`、启动文件/shebang | `tree-sitter-bash` | — | `local-graph` |
-| Zig（语言包） | `.zig` | `tree-sitter-zig` | — | `local-graph` |
+| 语言 | 扩展名 | 最终语义 Provider | 内置实时解析 |
+|---|---|---|---|
+| Go | `.go` | `scip-go` | Tree-sitter |
+| TypeScript | `.ts` `.tsx` | `scip-typescript` | Tree-sitter |
+| JavaScript | `.js` `.jsx` `.mjs` `.cjs` | `scip-typescript` | Tree-sitter |
+| Python | `.py` | `scip-python` | Tree-sitter |
+| Java | `.java` | `scip-java` | Tree-sitter |
+| Kotlin | `.kt` `.kts` | `scip-java` | Tree-sitter |
+| Scala | `.scala` `.sc` | `scip-java` | Tree-sitter |
+| C | `.c` `.h` | `scip-clang` | Tree-sitter |
+| C++ | `.cc` `.cpp` `.cxx` `.hpp` `.hxx` | `scip-clang` | Tree-sitter |
+| Rust | `.rs` | `rust-analyzer` | Tree-sitter |
+| C# | `.cs` | `scip-dotnet` | Tree-sitter |
+| Ruby | `.rb` `.rake`、Gemfile/Rakefile/shebang | `scip-ruby` | Tree-sitter |
 
-HTTP/MCP 状态接口同时返回声明能力、实际能力、Provider 和 ProjectUnit。共享 Provider 按项目
-单元执行一次：C/C++ 共享 `scip-clang`，TypeScript/JavaScript 共享 `scip-typescript`，
-Java/Kotlin与已安装的Scala包共享 `scip-java`，C#与已安装的Visual Basic包共享 `scip-dotnet`。
+PHP、Dart、Visual Basic、Bash、Swift、Lua、Zig 不再属于支持语言。
 
-语言包管理：
+外置 Syntax 模块用于覆盖内置实现：
 
 ```bash
-amap language install --trust-key ./trusted-keys.json ./ruby-1.0.0.amaplang
-amap language list
-amap language doctor ruby
-amap language disable ruby
-amap language remove ruby 1.0.0
+amap syntax install --trust-key ./trusted-keys.json ./language-syntax.amaplang
+amap syntax list
+amap syntax doctor ruby
+amap syntax disable ruby
+amap syntax remove ruby 1.0.0
 ```
 
-安装后再次执行`amap index`，已有项目会自动合并实际检测到源码的新语言包。项目级同ID包覆盖
-用户级版本，其他身份、前缀、扩展名或固定文件名冲突会被拒绝并进入状态诊断。
+Syntax Overlay 只能增强 Supported Registry 中已有语言，不能注册语言、扩展名、Provider 或 ProjectUnit。
 
 ## 快速开始
 
 ```bash
 go build -o amap ./cmd/amap    # 构建
 amap install                    # 一键注册 MCP 到 Claude Code / Cursor / VS Code / Codex / Antigravity / Windsurf / Cline
-amap index                      # 快速增量更新（按文件哈希跳过未变更文件）；首次运行自动初始化 SCIP
-amap watch [10]                 # 持续监听源码变更守护进程，检测到变化自动增量索引，无需手动 re-index
+amap index                      # Tree-sitter 实时更新变化文件；复用已有 SCIP 基线
+amap index --tree-sitter        # 仅 Tree-sitter 语法层，跳过 SCIP（适用于无 SCIP Provider 或纯结构浏览场景）
+amap watch [10]                 # 监听源码变化；实时更新后自动尝试 SCIP 收敛
 amap dashboard                  # 启动可视化控制台
 ```
 
-`amap watch` 和 Dashboard 的区别：watch 是轻量级后台守护进程（无 UI），负责文件监听与自动增量索引；Dashboard 是可视化浏览器，负责图谱浏览与理解文档生成。两者可独立运行，也可同时运行。
+`amap watch` 和 Dashboard 的区别：watch 是无 UI 的语义刷新守护进程，会调用所选语言的外部 SCIP Provider；Dashboard 负责图谱浏览与理解文档生成。两者可独立运行，也可同时运行。
 
 首次运行 `amap index` 会自动生成 `.astramap/config.yaml` 示例。需要过滤辅助文件或目录时，编辑该文件后重新运行 `amap index`：
 
@@ -187,9 +183,10 @@ index:
 | `amap serve [--project <path>]` | MCP stdio 服务 |
 | `amap dashboard [--project <path>] [--host <addr>] [--port <port>]` | Web 可视化控制台 |
 | `amap index [选项]` | 快速增量更新一次（按文件哈希跳过未变更文件）；已有 SCIP 时默认不重建 SCIP；输出结构化过滤报告 |
+| `amap index --scip-only` | 仅导入 SCIP，跳过可选 Syntax Overlay |
+| `amap index --tree-sitter` | 仅执行内置 Tree-sitter 语法层，跳过 SCIP 生成与导入 |
 | `amap index --refresh-scip` | 强制重新生成并导入 SCIP |
-| `amap index --full` | 全量刷新 SCIP 层，再执行 Tree-sitter 增量扫描 |
-| `amap index --treesitter-only` | 仅 Tree-sitter 快速扫描，跳过 SCIP |
+| `amap index --full` | 全量刷新 SCIP 层，再强制重建内置 Tree-sitter 实时层 |
 | `amap watch [秒数]` | 持续低频监听守护进程，检测到文件变更自动增量索引（默认 10 秒防抖） |
 | `amap install` | 一键注册 MCP 到 AI 工具（探测式注册，仅写入已安装的客户端） |
 
@@ -259,7 +256,7 @@ Dashboard 同时暴露 REST JSON API：
 
 ```
 源码文件
-    ↓ SCIP 索引（编译器级）+ Tree-sitter AST（按哈希增量补丁）
+    ↓ Tree-sitter 实时层 + SCIP 编译器级最终语义
 SQLite 知识图谱 (.astramap/astramap.db)
     ├── astramap_nodes    符号节点：函数、类、结构体等
     ├── astramap_edges    关系边：calls、contains、imports（含条件编译 metadata）
@@ -270,7 +267,7 @@ SQLite 知识图谱 (.astramap/astramap.db)
     └── HTTP REST API + D3.js Dashboard → 浏览器可视化
 ```
 
-边的来源标识：`scip`（编译器级精度）> `tree-sitter`（AST 解析）> `heuristic`（模式匹配）。同源冲突时 SCIP 边优先。
+边的来源标识：`scip`（编译器级精度）> `syntax-package`（可选结构事实）> `heuristic`（模式匹配）。
 
 C/C++ 调用边额外携带 `metadata` 字段，标注预处理器守卫条件（如 `#ifdef USE_SSL`），图遍历结果直接暴露条件编译上下文。
 
@@ -281,9 +278,11 @@ C/C++ 调用边额外携带 `metadata` 字段，标注预处理器守卫条件�
     ↓
 amap watch（进程级轮询）
     ↓ 自定义间隔（默认 10 秒）
-按文件哈希比较 → 仅处理新增/修改文件
+检测到受支持语言的变化
     ↓
-Tree-sitter 增量解析 → SQLite 图谱更新
+完整刷新并导入所选语言的 SCIP → 失效旧 Syntax Overlay
+    ↓
+按当前 SCIP 内容哈希重建已安装的 Syntax Overlay
     ↓
 MCP/HTTP 查询 → 始终返回最新结果
 ```
@@ -300,21 +299,29 @@ MCP/HTTP 查询 → 始终返回最新结果
 
 ```
 astramap/
-├── cmd/amap/main.go          CLI 入口
+├── cmd/amap/main.go              CLI 入口
 ├── astramap/
-│   ├── schema.go             SQLite DDL
-│   ├── astramap.go           SCIP 导入 + 增量同步
-│   ├── treesitter.go         Tree-sitter 解析 + 跨文件调用启发（歧义过滤 + 最窄 span 选择 + 宏隐式函数定义 + 顺序初始化函数指针）
-│   ├── service.go            共享查询服务层（MCP/REST 共用）+ 脏文件检测 + 分页
-│   ├── query_helpers.go      查询辅助：kind 校验、depth 规范化、符号解析、条件编译标注、批量文件路径、源码缓存
-│   ├── filter.go             索引过滤配置（.astramap/config.yaml）。生态感知过滤：自动识别工程根 → 生成生态排除规则；内置 40+ 通用排除规则（VCS/依赖/缓存/二进制/生成源码）；生成文件头检测；统一 Evaluate 引擎；结构化过滤报告
-│   ├── graph.go              图遍历引擎（BFS/DFS/可达性/耦合）+ 条件编译 metadata 标注
-│   ├── mcp.go                MCP JSON-RPC stdio 服务
-│   ├── server.go             HTTP REST API + Dashboard + 理解文档生成
-│   └── web/                  D3.js 可视化（go:embed）
-├── go.mod                    Go 1.25
-├── build.sh                  Linux 静态构建（CGO + musl）
-└── QUICKSTART.md             2 分钟部署指南
+│   ├── schema.go                 SQLite DDL
+│   ├── astramap.go               SCIP 导入 + 增量同步 + 单文件错误容错
+│   ├── builtin_syntax_engine.go  内置 Tree-sitter 解析引擎
+│   ├── builtin_syntax_modules.go 内置语言 grammar 注册
+│   ├── call_resolution.go        与 grammar 无关的跨文件调用启发
+│   ├── syntax_overlay.go         内置/外置 Tree-sitter 模块统一分派
+│   ├── service.go                共享查询服务层（MCP/REST 共用）+ struct/typedef 搜索分离 + 脏文件检测 + 分页
+│   ├── query_helpers.go          查询辅助：kind 校验、depth 规范化、符号解析、条件编译标注、批量文件路径、源码缓存
+│   ├── filter.go                 索引过滤配置（.astramap/config.yaml）。生态感知过滤：自动识别工程根 → 生成生态排除规则；内置 40+ 通用排除规则；生成文件头检测；统一 Evaluate 引擎；结构化过滤报告
+│   ├── graph.go                  图遍历引擎（BFS/DFS/可达性/耦合）+ 重复节点穿透 + 条件编译 metadata 标注
+│   ├── language_registry.go      语言注册表（Supported Registry 门禁）
+│   ├── language_packages.go      语言包管理
+│   ├── language_install.go       SCIP Provider 安装
+│   ├── language_worker.go        语言工作进程
+│   ├── project_units.go          SCIP ProjectUnit 定义
+│   ├── mcp.go                    MCP JSON-RPC stdio 服务
+│   ├── server.go                 HTTP REST API + Dashboard + 理解文档生成
+│   └── web/                      D3.js 可视化（go:embed）
+├── go.mod                        Go 1.25
+├── build.sh                      Linux 纯 Go 静态构建
+└── QUICKSTART.md                 2 分钟部署指南
 ```
 
 ### 生态感知过滤
@@ -330,7 +337,6 @@ AstraMap 自动识别项目生态并应用对应过滤规则，无需手动配�
 | Gradle | `build.gradle` | `build/` |
 | CMake | `CMakeLists.txt` | `cmake-build-*/` |
 | Python | `pyproject.toml`, `setup.py` | — |
-| Swift（语言包） | `Package.swift` | `.build/` |
 | Bazel | `WORKSPACE`, `MODULE.bazel` | `bazel-*/` |
 
 内置通用规则覆盖：VCS 元数据 (`.git/`, `.svn/`, `.hg/`, `.astramap/`)、第三方依赖 (`node_modules/`, `vendor/`, `Pods/`, `third_party/`)、缓存 (`__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.cache/`)、OS/编辑器垃圾 (`.DS_Store`, `*.swp`, `*~`)、压缩/Source Map (`*.min.js`, `*.js.map`)、生成源码 (`*.pb.go`, `*_pb2.py`, `*.pb.cc`, `*.g.dart`)、二进制文件 (`*.o`, `*.class`, `*.jar`, `*.wasm`, `*.zip`, `*.png`, `*.woff`)，以及文件头含 `Code generated` / `DO NOT EDIT` 的生成文件。
@@ -375,7 +381,7 @@ index:
 
 | 特性 | 说明 |
 |------|------|
-| **🛡️ 生态感知智能过滤** | 自动识别内置工程生态和语言包声明的 ProjectUnit，按项目根动态合并通用与语言专属排除规则 |
+| **🛡️ 生态感知智能过滤** | 自动识别 Supported Registry 声明的 SCIP ProjectUnit，按项目根合并通用与生态规则 |
 | **📋 结构化过滤报告** | `amap index` 输出按规则类型分组的排除报告（规则 ID + 原因 + 数量），过滤行为完全透明 |
 | **🔗 外部调用占位符绑定** | 文件重索引时，被删除节点的入边自动迁移到 `external:` 占位符；新索引的同名函数自动绑定原有外部调用边，跨文件调用链在增量更新后保持连续 |
 
@@ -384,11 +390,10 @@ index:
 | 变更 | 说明 |
 |------|------|
 | **生态感知工程根识别** | `DetectProjectRoots` 扫描 `go.mod`/`package.json`/`Cargo.toml`/`pom.xml`/`build.gradle`/`CMakeLists.txt`/`pyproject.toml`/`Package.swift`/`WORKSPACE`/`MODULE.bazel` 等标记文件，建立工程根映射 |
-| **动态生态排除规则** | `BuildEcosystemRules` 处理内置生态；语言包通过 manifest 声明 ProjectUnit、构建目录和生成文件规则 |
+| **确定性生态排除规则** | `BuildEcosystemRules` 只处理 Core 认证的 SCIP Profile；Syntax Overlay 不能扩展 ProjectUnit 或过滤规则 |
 | **40+ 内置通用排除规则** | 统一规则引擎覆盖 VCS 元数据、第三方依赖（node_modules/vendor/Pods/third_party）、缓存（__pycache__/.pytest_cache/.mypy_cache/.cache/.sass-cache）、OS/编辑器垃圾（.DS_Store/Thumbs.db/*.swp/*~/*.tmp）、压缩/Source Map（*.min.js/*.js.map/*.d.ts.map）、生成源码（*.pb.go/*_pb2.py/*.pb.cc/*.g.dart）、二进制（*.o/*.class/*.jar/*.wasm/*.zip/*.png/*.woff）、模型/字体文件 |
 | **生成文件头检测** | `IsGeneratedByHeader` 扫描文件前 8KB / 100 行，正则匹配 `Code generated.*DO NOT EDIT` / `Generated by.*DO NOT EDIT` / `This file (was )?automatically generated` / `DO NOT EDIT THIS FILE` / `<auto-generated>` 等标记，自动排除生成文件 |
 | **统一过滤评估引擎** | `Evaluate`/`EvaluateDir` 替代旧 `Allows`/`AllowsDir`，内置规则 → 隐藏路径 → 用户 Include → 用户 Exclude 四级优先级；`forceInclude` 可覆盖任何 `Overridable` 规则 |
-| **向后兼容配置解析** | 旧配置中的 `scipExclude`/`treeSitterExclude` 自动合并到 `Exclude`；新增 `advanced.forceInclude` 配置键 |
 | **结构化过滤报告** | `IndexFilterMatchReport` 从三段字符串数组升级为 `[]IndexFilterExcludedEntry`，含 Path/RuleID/Kind/Reason；`printIndexFilterMatchReport` 按 Kind 分组输出，超限折叠 |
 | **外部调用占位符迁移** | `SyncFileAstraMap` 删除旧节点前，将入边目标更新为 `external:<prefix> . . $ <name>.` 占位符；新节点索引后，将 `external:` 占位符边重新绑定到实际节点，增量更新不破坏跨文件调用链 |
 | **增量文件启发式刷新** | `SyncFileAstraMap` 完成后自动执行 `ResolveCrossFileCallsForFiles`，确保单文件增量更新后函数指针/宏调用启发式边即时生效 |
@@ -400,8 +405,14 @@ index:
 | **callers/callees/impact 规范化起点** | MCP 工具在查询前通过 `resolveCanonicalTraceStart` 将输入符号 ID 规范化为主定义 ID，消除 tree-sitter/SCIP 格式差异导致的查询起点歧义 |
 | **消除硬编码目录跳过列表** | 删除 `shouldSkipIndexDir`、`skipDirs`、`shouldSkipWatchDir` 等硬编码列表，全部收敛到 `IndexFilter` 规则引擎 |
 | **配置模板精简** | 示例配置移除 `scipExclude`/`treeSitterExclude`，仅保留 `include`/`exclude`/`advanced.forceInclude` |
+| **`--tree-sitter` CLI 标志** | `amap index --tree-sitter` 仅执行内置 Tree-sitter 语法层，跳过 SCIP 生成与导入；适用于无 SCIP Provider 或纯结构浏览场景 |
+| **单文件解析错误容错** | `SyncAllFilesAstraMapResult` 中单文件解析失败改为日志记录并跳过，不再中止整个索引遍历；Tree-sitter 返回 nil tree 时优雅降级为空 FileFacts |
+| **struct/typedef 搜索精确分离** | `kind=struct` 查询不再混入 `typedef struct` 别名；`normalizeSearchNodeKind` 和 `normalizeTypedefNodeKind` 严格区分 struct、typedef、type 三种 kind |
+| **Impact BFS 重复节点穿透** | `AnalyzeImpact` BFS 每步通过 `GetCallersForAllDuplicates` 查询同 kind+file+name 的所有重复节点 ID 的 callers，消除 SCIP/语法层双节点导致的遍历断裂；`resolveCanonicalTraceStart` 改用入度排序选择 canonical 起点 |
 
 ### v0.2
+
+> 以下为历史版本记录；其中进程内 Tree-sitter、独立语法索引和 CGO 构建路径已在当前架构删除。
 
 **三大特性**：
 
@@ -470,16 +481,16 @@ index:
 
 | 特性 | 说明 |
 |------|------|
-| **SCIP + Tree-sitter 双引擎索引** | SCIP 编译器级索引为主（跨文件调用、符号消歧），Tree-sitter AST 为辅（签名、嵌套归属、源码还原） |
+| **SCIP + Syntax Overlay 分层索引** | SCIP 是语言支持的必要语义基线；签名 Syntax Worker 仅按需补充结构事实 |
 | **SQLite 知识图谱** | nodes/edges/files/FTS5 四类核心结构，WAL 模式单写者，内容哈希去重 |
 | **MCP stdio 服务** | 9 个工具（search/explore/node/callers/callees/impact/trace/status/files），JSON-RPC stdio 协议 |
 | **REST API** | 11 个端点，覆盖搜索、节点详情、调用链追踪、影响分析、区域探索 |
 | **D3.js 交互式 Dashboard** | 探索视界（全局→局部图谱浏览）、依赖关系视图（调用邻域展开） |
-| **12+7 种语言支持** | Core 内置12种，Ruby/Dart/Swift/Lua/Scala/Zig/VB通过版本化签名语言包安装；能力等级由项目Registry统一派生 |
-| **增量索引** | Tree-sitter 按文件哈希跳过未变更文件；`amap index` 快速增量；`amap watch` 持续监听 |
+| **严格 SCIP 语言门禁** | 最多 12 个认证候选；没有可靠 SCIP Provider 的语言不注册、不检测、不索引 |
+| **增量索引** | 安装 Syntax Overlay 后按文件哈希更新；否则源码变化必须刷新 SCIP，禁止低精度降级 |
 | **CLI 诊断工具集** | locate / diff / hotspots / deadcode / cycles / coupling / owners / tree / query |
 | **一键 MCP 注册** | `amap install` 注册到 Claude Code / VS Code / Cursor / Codex |
-| **单二进制部署** | 内嵌 SQLite + Tree-sitter WASM + D3.js Dashboard，零依赖开箱即用 |
+| **内置实时语法层** | 内嵌 SQLite、Dashboard 与正式语言 grammar；外置 Syntax Worker 仅用于实现覆盖 |
 
 ## 许可
 
