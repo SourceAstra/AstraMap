@@ -1,15 +1,15 @@
 # AstraMap 全量测试报告
 
-- **执行时间**: 2026-07-20 19:20:26 CST
+- **执行时间**: 2026-07-20 22:45:57 CST
 - **结论**: **失败**
 
 ## 汇总
 
 | 阶段 | 通过 | 失败 | 未测试 |
 |---|---:|---:|---:|
-| 单元测试 | 465 | 9 | 8 |
-| 集成测试 | 0 | 14 | 3 |
-| **总计** | **465** | **23** | **11** |
+| 单元测试 | 465 | 0 | 3 |
+| 集成测试 | 0 | 12 | 3 |
+| **总计** | **465** | **12** | **6** |
 
 ## 详细结果
 
@@ -179,12 +179,7 @@
 | ✓ | [kotlin] object_declaration: doSomething(kind=method) | 值大于阈值 |
 | ✓ | [kotlin] enum_class: Color(kind=enum) | 值大于阈值 |
 | - | [ruby] language package basic case | 语言包未安装或未激活 |
-| - | [dart] language package basic case | 语言包未安装或未激活 |
-| - | [swift] language package basic case | 语言包未安装或未激活 |
-| - | [lua] language package basic case | 语言包未安装或未激活 |
 | - | [scala] language package basic case | 语言包未安装或未激活 |
-| - | [zig] language package basic case | 语言包未安装或未激活 |
-| - | [visualbasic] language package basic case | 语言包未安装或未激活 |
 | ✓ | [go] cross_file_call: Calculate(kind=function) | 值大于阈值 |
 | ✓ | [go] cross_file_call: Use(kind=function) | 值大于阈值 |
 | ✓ | [go] cross_file_call: Use→Calculate | 值大于阈值 |
@@ -451,10 +446,6 @@
 | ✓ | [multi] csharp_cross_file: Main(kind=method) | 值大于阈值 |
 | ✓ | [multi] kotlin_cross_file: calculate(kind=function) | 值大于阈值 |
 | ✓ | [multi] kotlin_cross_file: process(kind=function) | 值大于阈值 |
-| ✗ | [multi] php_cross_file: calculate(kind=function) | 实际=0；要求>0 |
-| ✗ | [multi] php_cross_file: process(kind=function) | 实际=0；要求>0 |
-| ✗ | [multi] bash_cross_file: calculate(kind=function) | 实际=0；要求>0 |
-| ✗ | [multi] bash_cross_file: process(kind=function) | 实际=0；要求>0 |
 | ✓ | [multi] h_in_pure_c_project: main(kind=function) | 值大于阈值 |
 | ✓ | [multi] h_in_cpp_project: add(kind=function) | 值大于阈值 |
 | ✓ | [multi] h_in_cpp_project: main(kind=function) | 值大于阈值 |
@@ -482,11 +473,6 @@
 | ✓ | [multi] kotlin_interface_implementation: Drawable(kind=interface) | 值大于阈值 |
 | ✓ | [multi] kotlin_interface_implementation: Circle(kind=class) | 值大于阈值 |
 | ✓ | [multi] kotlin_interface_implementation: draw(kind=method) | 值大于阈值 |
-| ✗ | [multi] php_interface_implementation: Printable(kind=interface) | 实际=0；要求>0 |
-| ✗ | [multi] php_interface_implementation: Report(kind=class) | 实际=0；要求>0 |
-| ✗ | [multi] php_interface_implementation: print(kind=method) | 实际=0；要求>0 |
-| ✗ | [multi] bash_function_sourcing: util_log(kind=function) | 实际=0；要求>0 |
-| ✗ | [multi] bash_function_sourcing: run(kind=function) | 实际=0；要求>0 |
 | ✓ | ERR-001 空文件: 0节点 | 实际值匹配预期 |
 | ✓ | ERR-002 纯注释文件: 0节点 | 实际值匹配预期 |
 | ✓ | ERR-003 语法错误: 不崩溃(exit=0) | 实际值匹配预期 |
@@ -507,8 +493,6 @@
 | ✗ | INT-008 Rust 文件索引 | 实际=0；要求>0 |
 | ✗ | INT-009 C# 文件索引 | 实际=0；要求>0 |
 | ✗ | INT-010 Kotlin 文件索引 | 实际=0；要求>0 |
-| ✗ | INT-011 PHP 文件索引 | 实际=0；要求>0 |
-| ✗ | INT-012 Bash 文件索引 | 实际=0；要求>0 |
 | ✗ | SEMA-001 同包跨文件调用 | 实际=0；要求>0 |
 | - | SEMA-002 接口实现关系 | 当前版本可能未提取 implements 边 |
 | ✗ | SEMA-003 命名空间容器 | 实际=0；要求>0 |

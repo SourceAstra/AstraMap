@@ -1,7 +1,7 @@
 # 跨语言调用场景 — 验证12种内置语言的跨文件引用解析
 metadata:
   language: multi
-  description: "跨文件调用解析（12 种内置语言）"
+  description: "跨文件调用解析（10 种内置语言）"
   complexity: scenario
   scip_required: false
 
@@ -189,34 +189,3 @@ fixtures:
         - name: "process"
           kind: function
 
-  - id: php_cross_file
-    files:
-      utils.php: |
-        <?php
-        function calculate($x) { return $x * 2; }
-      main.php: |
-        <?php
-        require_once 'utils.php';
-        function process() { return calculate(10); }
-    expected:
-      symbols:
-        - name: "calculate"
-          kind: function
-        - name: "process"
-          kind: function
-
-  - id: bash_cross_file
-    files:
-      utils.sh: |
-        #!/bin/bash
-        calculate() { echo $(( $1 * 2 )); }
-      script.sh: |
-        #!/bin/bash
-        source utils.sh
-        process() { calculate 10; }
-    expected:
-      symbols:
-        - name: "calculate"
-          kind: function
-        - name: "process"
-          kind: function

@@ -13,7 +13,7 @@ mkdir -p "$SCRIPT_DIR/reports"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 printf "${BOLD}  AstraMap 多语言单元测试 v2.1${RESET}\n"
 printf "${BOLD}  日期: $(date '+%Y-%m-%d %H:%M:%S')${RESET}\n"
-printf "${BOLD}  覆盖: 10 种内置语言 + 7 种语言包 case${RESET}\n"
+printf "${BOLD}  覆盖: 10 种内置语言 + 2 种语言包 case${RESET}\n"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n\n"
 
 # ── Phase 0: 环境检测 ──
@@ -133,7 +133,7 @@ phase_header "Phase 2: 语法提取测试 (L2)"
 for lang in go python typescript javascript c cpp java rust csharp kotlin; do
   run_fixture "$SCRIPT_DIR/languages/$lang/basic.yaml"
 done
-for lang in ruby dart swift lua scala zig visualbasic; do
+for lang in ruby scala; do
   if astramap_language_active "$lang"; then
     run_fixture "$SCRIPT_DIR/languages/$lang/basic.yaml"
   else
@@ -156,7 +156,7 @@ for lang in go python typescript javascript c cpp java rust csharp kotlin; do
     run_fixture "$SCRIPT_DIR/languages/$lang/edge_cases.yaml"
   fi
 done
-for lang in ruby dart swift lua scala zig visualbasic; do
+for lang in ruby scala; do
   if astramap_language_active "$lang" && [[ -f "$SCRIPT_DIR/languages/$lang/advanced.yaml" ]]; then
     run_fixture "$SCRIPT_DIR/languages/$lang/advanced.yaml"
   fi

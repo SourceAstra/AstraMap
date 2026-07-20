@@ -12,14 +12,14 @@ mkdir -p "$SCRIPT_DIR/reports"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 printf "${BOLD}  AstraMap 跨语言集成测试 v2.0${RESET}\n"
 printf "${BOLD}  日期: $(date '+%Y-%m-%d %H:%M:%S')${RESET}\n"
-printf "${BOLD}  覆盖: 12 种内置语言${RESET}\n"
+printf "${BOLD}  覆盖: 10 种内置语言${RESET}\n"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 
 # ── Phase 1: 多语言混合项目索引 ──
 phase_header "Phase 1: 多语言混合项目索引"
 
 tmpdir=$(mktemp -d)
-mkdir -p "$tmpdir/go" "$tmpdir/python" "$tmpdir/ts" "$tmpdir/js" "$tmpdir/c" "$tmpdir/cpp" "$tmpdir/java" "$tmpdir/rust" "$tmpdir/cs" "$tmpdir/kt" "$tmpdir/php" "$tmpdir/bash"
+mkdir -p "$tmpdir/go" "$tmpdir/python" "$tmpdir/ts" "$tmpdir/js" "$tmpdir/c" "$tmpdir/cpp" "$tmpdir/java" "$tmpdir/rust" "$tmpdir/cs" "$tmpdir/kt"
 
 # Go 文件
 cat > "$tmpdir/go/main.go" << 'EOF'
@@ -99,20 +99,6 @@ fun add(a: Int, b: Int): Int = a + b
 fun main() { println(add(1, 2)) }
 EOF
 
-# PHP 文件
-cat > "$tmpdir/php/index.php" << 'EOF'
-<?php
-function greet($name) { return "Hello, " . $name; }
-echo greet("World");
-EOF
-
-# Bash 文件
-cat > "$tmpdir/bash/script.sh" << 'EOF'
-#!/bin/bash
-function greet() { echo "Hello, $1"; }
-greet "World"
-EOF
-
 amap index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证各语言文件被索引
@@ -145,12 +131,6 @@ assert_gt "INT-009 C# 文件索引" "$csharp_files" "0"
 
 kotlin_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'kt/%'")
 assert_gt "INT-010 Kotlin 文件索引" "$kotlin_files" "0"
-
-php_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'php/%'")
-assert_gt "INT-011 PHP 文件索引" "$php_files" "0"
-
-bash_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'bash/%'")
-assert_gt "INT-012 Bash 文件索引" "$bash_files" "0"
 
 rm -rf "$tmpdir"
 

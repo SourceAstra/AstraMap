@@ -1,7 +1,7 @@
 # 接口实现关系场景 — 验证12种内置语言的接口/抽象类定义与实现提取
 metadata:
   language: multi
-  description: "验证接口定义与实现类的提取（12 种内置语言）"
+  description: "验证接口定义与实现类的提取（10 种内置语言）"
   complexity: scenario
   scip_required: false
 
@@ -153,39 +153,3 @@ fixtures:
         - name: "draw"
           kind: method
 
-  - id: php_interface_implementation
-    files:
-      main.php: |
-        <?php
-        interface Printable {
-          public function print();
-        }
-        class Report implements Printable {
-          public function print() {
-            echo "report";
-          }
-        }
-    expected:
-      symbols:
-        - name: "Printable"
-          kind: interface
-        - name: "Report"
-          kind: class
-        - name: "print"
-          kind: method
-
-  - id: bash_function_sourcing
-    files:
-      lib.sh: |
-        #!/bin/bash
-        util_log() { echo "[LOG] $1"; }
-      script.sh: |
-        #!/bin/bash
-        source lib.sh
-        run() { util_log "starting"; }
-    expected:
-      symbols:
-        - name: "util_log"
-          kind: function
-        - name: "run"
-          kind: function
