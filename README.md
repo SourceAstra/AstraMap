@@ -1,120 +1,194 @@
-# AstraMap - 高精度语义代码地图引擎
+# AstraMap — 面向 AI 编程代理的语义代码地图与代码图谱
 
-> 源码 → 内置 Tree-sitter 实时层 + SCIP 编译器级最终语义 → SQLite 知识图谱 → MCP/HTTP API → AI 工具客户端
+**中文** | [English](README_EN.md)
 
-面向 AI 编程代理的代码地图引擎。Core 内置 12 种正式语言的 Tree-sitter 实时解析能力；用户按所选语言安装 SCIP Provider，使实时文件结构最终收敛为确定的跨文件语义图。
+> Semantic Code Map · Code Graph · Code Intelligence · MCP Server
 
-## v0.3 核心能力与极致性能优化
+AstraMap 是一个面向 **Claude Code、Codex、Cursor 及其他 AI 编程代理**的高精度语义代码地图引擎。它融合 **SCIP 编译器级语义**与 **Tree-sitter 实时代码解析**，把整个代码库转换为可查询的节点与关系图，为 AI 提供符号定位、调用链追踪、依赖分析、变更影响分析和低 Token 代码导航能力。
 
-### 1. 核心架构特性
-
-| 能力 | 一句话说明 |
-|------|--------|
-| **🛡️ 生态感知智能过滤** | 由受支持语言的 SCIP Profile 识别工程根并生成构建产物排除规则 |
-| **📋 结构化过滤报告** | `amap index` 输出按规则类型分组的排除报告，含规则 ID、排除原因、覆盖数量，告别黑盒过滤 |
-| **🔁 `amap watch` 持续文件监听** | Tree-sitter 先实时提交变化文件，再刷新 SCIP 使跨文件语义最终收敛 |
-| **⚡ 分层索引更新** | Tree-sitter 按文件哈希更新结构事实；SCIP 提供确定的跨文件语义 |
-| **🖥️ 交互式 Dashboard** | D3.js 力导向图与关系拓扑，集成全局探索、追溯依赖和一键架构理解文档 |
-| **🔧 条件编译感知** | C/C++ `#if`/`#ifdef` 预处理守卫自动标注在调用边 metadata，图遍历直达条件分支 |
-| **🎯 多定义合并消歧** | callers/callees/impact/trace 统一做 `ResolveSymbolToIDs` 多符号解析与结果合并去重，消除单符号选择导致的信息丢失 |
-| **📊 callers 结果分页** | MCP `astramap_callers` 和 REST API 支持 `limit` 参数，超限截断提示，避免大项目结果膨胀 |
-| **🔗 C/C++ 函数指针与宏调用解析** | 跨文件启发式识别 `.field = &func` 指定初始化、`struct var = { func1, func2 }` 顺序初始化、`XXXRETURN(func)` 宏展开调用、`DECLARE_xxx(func)` 宏隐式函数定义模式 |
-| **🧹 脏文件低开销检测** | status 接口返回 `dirtyCount`，智能判断同步状态，免去频繁全量 hash 开销 |
-| **📄 分页与歧义过滤** | `astramap_files` 分页限制；启发式消歧自动过滤 Python dunder 并选择最窄 span 节点；中文查询单字分词与停用词过滤 |
-| **🏷️ `--tree-sitter` 纯语法模式** | `amap index --tree-sitter` 仅执行内置 Tree-sitter 语法层，跳过 SCIP 生成与导入，适用于无 SCIP Provider 或纯结构浏览场景 |
-| **🛡️ 单文件解析容错** | 单文件 Tree-sitter 解析失败时日志记录并跳过，不中止整个索引遍历；nil tree 优雅降级为空 FileFacts |
-| **🔍 struct/typedef 精确分离** | `kind=struct` 不再混入 `typedef struct` 别名，三种 kind（struct/typedef/type）严格按设计文档区分 |
-| **📐 Impact 重复节点穿透** | BFS 每步查询同 kind+file+name 的所有重复节点 callers，消除 SCIP/语法层双节点导致的遍历断裂 |
-
-### 2. 性能重构与指标优化
-
-在 v0.2 版本中，我们对前端 JS/CSS 与后端 Go/SQLite 的交互和计算逻辑进行了重构，主要指标如下：
-- **传输带宽优化**：引入动态 Gzip 压缩，静态资源首屏传输体积由 608KB 降至 130KB。
-- **静态资源强缓存**：为 JS/CSS 响应设置 `immutable` 缓存头，二次加载直接读取本地缓存。
-- **按需加载模块**：`trace.js`（97KB）改为动态懒加载，仅在用户进入依赖分析视图时获取，缩短首屏可交互时间（TTI）。
-- **消除 N+1 数据库查询**：设计并使用 `BatchCanonicalSymbolIDs` 批量查询，合并 callers、callees 接口中对边节点 ID 的循环单条 SQL 检索。`QueryTraceCTE` 条件编译 metadata 标注使用 `BatchNodeFilePaths` 批量获取文件路径，消除逐边单条查询。
-- **文件读取缓存**：在预处理守卫条件匹配中，对节点路径和文件内容使用包级读写锁 Map 缓存，减少 callers/callees 查询时的重复磁盘 I/O。缓存键从路径改为 `(path, modTime, size)` 三元组，文件修改后自动失效；单文件同步/删除时精准清除该文件缓存，不再全量清空。
-- **动画与查找算法优化**：将 Canvas 帧循环以及布局算法中的 $O(N)$ 线性查找 `.find()` 全部替换为 $O(1)$ 的 Map 映射检索，消除大图下的 CPU 计算瓶颈。
-- **交互节流与防抖**：对 resizer 拖拽鼠标事件使用 `requestAnimationFrame` 节流，对 resize 和搜索框 input 增加 debounce 机制；缓存 Canvas 绘制所需的主题颜色属性以减少 `getComputedStyle` 样式重算开销；降低卡片容器模糊半径并移除 overlay 的 blur 属性以减少 GPU 合成开销。
-- **Watcher Timer 泄漏防护**：将 watch 机制中 select 循环的 `time.After` 替换为可重置的 `time.Timer`，提取 `resetTimer` 工具函数统一重置逻辑，规避高频文件变更下的 Goroutine 积压与 `Stop/Reset` 竞态。
-
-## 核心优势
-
-| 优势 | 说明 |
-|------|------|
-| **编译器级语义精度** | 以 SCIP 为主索引，跨文件调用关系由编译器预计算，非启发式猜测。重载消歧、条件编译、宏展开均确定性处理 |
-| **条件编译感知** | C/C++ `#if`/`#ifdef`/`#ifndef` 守卫自动标注到边 metadata，图遍历结果直接暴露条件编译上下文，无需手动追溯 |
-| **严格持续同步** | `amap watch` 先更新内置 Tree-sitter 实时层；旧 SCIP 关系立即失效，随后由 Provider 收敛 |
-| **60-95% Token 节约** | 单次 `astramap_explore` 替代 10+ 次 grep+Read，一次返回源码+调用关系+依赖文件 |
-| **完整实时 Core** | 12 种正式语言的 grammar 随 Core 构建，新增、修改、重命名和删除无需等待 SCIP 即时可见 |
-| **理解文档生成** | 一键生成函数/文件/模块/项目级理解文档，含 Mermaid 依赖图、复杂度风险表、架构边界违规检测 |
-
-## 架构选择：SCIP 为主，Tree-sitter 为辅
-
-当前火热的代码地图——CodeGraph、GitNexus、Graphify、Understand-Anything——几乎都走纯 tree-sitter 路线。AstraMap 反其道而行，原因是一个事实：
-
-**Tree-sitter 是单文件解析器。** 它知道 `api.c` 里有 `foo()`，但不知道 `cli.c:312` 调用了它。纯 tree-sitter 要建跨文件调用图，必须自建名称解析→符号表→引用匹配，每一步都是坑：
-
-- **名称解析**：C 的 `#include` / `#ifdef` / 宏展开——tree-sitter 不做预处理
-- **符号消歧**：同名 `static` 函数在不同编译单元是不同实体
-- **跨文件引用**：需模拟编译器的 include 路径和 `-D` 宏定义，本质是重写半个编译器
-
-SCIP 由编译器/语言服务器生成，跨文件引用是预计算的确定性数据。实测：纯 tree-sitter 对 `firefly_error_code_mapping` 的跨文件调用边为 **0**，SCIP 主索引为 **2,077**。
-
-两者分工明确：
-
-```
-SCIP（主索引）       → 定义/引用边、跨文件调用、符号消歧  — "谁调谁"
-Tree-sitter（实时层） → 当前文件结构、签名、注释和局部调用 — "现在是什么"
+```text
+源代码 → Tree-sitter 实时层 + SCIP 语义层 → SQLite 代码图谱 → MCP / REST API → AI Agent / Dashboard
 ```
 
-没有有效 SCIP 语义基线时，Tree-sitter 仍提供实时文件结构，但跨文件调用、重载消歧和实现关系
-明确处于 `semanticDirty`；这些事实只能由 SCIP Provider 收敛，不能由语法启发式冒充。
+## 为什么需要 AstraMap
 
-## 交互式代码图谱浏览
+AI 编程代理理解大型代码库时，通常依赖 `grep`、文件搜索和反复读取源码。这种方式不仅消耗大量上下文，还容易遗漏跨文件调用、接口实现和间接依赖。
 
-Dashboard 不是静态截图式代码地图，而是直接运行在同一份 SQLite 语义图谱之上的交互式工作台。浏览、定位、追踪、源码预览和理解文档生成共享同一套符号 ID 与调用边，避免在文件树、grep 结果和调用链之间来回切换。
+AstraMap 将代码库预先构建为可查询的 **Semantic Code Graph**：
 
-**持续同步**：`amap watch` 作为独立守护进程监听文件变更，检测到变化自动触发增量刷新，保持图谱始终与磁盘一致。
+| 开发问题 | 传统方式 | AstraMap |
+|---|---|---|
+| 某个函数在哪里定义？ | 搜索名称，再逐个打开文件判断 | `astramap_search` / `astramap_node` |
+| 谁调用了这个函数？ | 多轮 grep，人工排除同名符号 | `astramap_callers` |
+| 修改它会影响什么？ | 手工追踪调用链和模块依赖 | `astramap_impact` / `amap diff` |
+| 两个模块如何关联？ | 阅读多个目录和入口文件 | `astramap_explore` / `astramap_trace` |
+| 项目有哪些复杂度风险？ | 分别运行多个分析工具 | `amap hotspots` / `deadcode` / `cycles` |
+
+AstraMap 的目标不是替代源码，而是为 AI 和开发者提供一张**精确、实时、可追踪的代码导航底图**。
+
+## 核心能力
+
+| 能力 | 说明 |
+|---|---|
+| **语义代码地图** | 将函数、方法、类型、文件和模块组织为节点，将调用、引用、继承、实现和导入组织为关系边 |
+| **编译器级跨文件语义** | 通过 SCIP 获取跨文件引用、调用关系、类型信息和符号消歧，减少基于名称猜测产生的误判 |
+| **实时增量更新** | Tree-sitter 及时反映磁盘上的最新代码；文件变化后按哈希增量更新，不必重复全量扫描 |
+| **MCP Server** | 为 Claude Code、Codex、Cursor 等 MCP 客户端提供结构化代码导航工具 |
+| **调用图与影响分析** | 支持 callers、callees、调用路径、递归影响传播、依赖图和耦合分析 |
+| **代码理解文档** | 生成函数、文件、模块和项目级理解文档，并呈现复杂度、依赖关系和架构风险 |
+| **大型项目过滤** | 自动排除依赖、构建产物、缓存、生成代码、二进制文件和其他非业务源代码 |
+| **C/C++ 条件编译感知** | 将 `#if`、`#ifdef`、`#ifndef` 等守卫信息标注到关系边，保留调用成立的条件上下文 |
+
+## 交互式代码图谱
+
+Dashboard 与 MCP Server 共享同一份 SQLite 语义图谱，搜索、定位、源码预览、调用追踪和理解文档使用统一的符号身份。
 
 ### 探索视界
 
-探索视界面向"先看全局，再钻局部"的代码理解流程：项目、目录、文件、函数都能作为入口，图谱节点与源码预览联动，适合快速识别模块边界、热点文件、核心类型与关键函数。相比线性文件树，它直接暴露结构关系，AI 代理和工程师都能以更少上下文定位真正需要阅读的代码区域。
+从项目、目录、文件或函数进入，先观察全局结构，再逐层深入局部实现。
 
-<img src="pic/探索视界.png">
+<img src="pic/探索视界.png" alt="AstraMap Explore View">
 
 ### 依赖关系
 
-依赖关系视图围绕一个函数展开完整调用邻域：父祖辈调用者、儿孙辈被调函数和兄弟级调用上下文同时可见，深度控制父祖辈与儿孙辈追溯代数。它保留真实调用边，不把下级函数折叠成模糊的"辅助函数列表"，因此能直接回答"谁触发了它""它继续影响谁""同一父调用下还有哪些并行动作"。
+围绕目标函数展开调用邻域，同时查看调用者、被调用者、上游祖先、下游后代及相关节点。
 
-<img src="pic/依赖关系.png">
+<img src="pic/依赖关系.png" alt="AstraMap Dependency Graph">
 
 ### 理解文档
 
-理解文档视图一键生成函数/文件/模块/项目四个粒度的结构化理解文档。函数级文档包含角色推断、调用链摘要、复杂度风险指标（圈复杂度/有效 LOC/嵌套深度/扇入扇出/跨模块调用）和对称性风险检测；文件级文档聚合所有符号角色与 Mermaid 依赖图；模块级文档检测架构边界违规；项目级文档输出全局架构概览与热点模块排名。
+生成函数、文件、模块和项目四个粒度的结构化理解文档，辅助代码阅读、审查、重构和交接。
 
-<img src="pic/理解文档.png">
+<img src="pic/理解文档.png" alt="AstraMap Code Understanding Documents">
 
-## 竞品对比
+## 工作原理
 
-| | CodeGraph | GitNexus | Graphify | Understand-Anything | **AstraMap** |
-|---|-----------|----------|----------|--------------------|----|
-| **索引源** | Tree-sitter | Tree-sitter + 推导 | Tree-sitter + LLM | Tree-sitter + LLM | **Tree-sitter 实时层 + SCIP 最终语义** |
-| **语义精度** | 启发式 | 符号级推导 | 混合语义 | LLM 语义 | **编译器级** |
-| **C/C++** | 有限 | 基础 | 基础 | 基础 | **C + C++ 完整** |
-| **条件编译** | 无 | 单路径 | 无 | LLM 盲猜 | **边级 metadata 标注** |
-| **部署** | npm | 二进制/WASM | Python | npm | **单静态二进制+Web UI** |
-| **MCP** | stdio | stdio | 弱 | 无 | **stdio + REST** |
-| **理解文档** | 无 | 无 | 知识库 | Onboarding | **自动生成+风险检测** |
-| **额外价值** | 纯地图 | 审计+链路 | 知识库 | Onboarding | **地图+治理+文档** |
+AstraMap 采用“**Tree-sitter 实时层 + SCIP 最终语义层**”的双层架构。
 
-与 Sourcegraph 在 SCIP 精度上同源，定位互补：Sourcegraph 是跨仓库企业级云端平台，AstraMap 是单机零依赖的代码地图+治理引擎。差异化在**条件编译边级标注**（调用边直接携带 `#ifdef` 守卫上下文）、**治理一体化**（架构合规/复杂度/死代码共享图谱）和**零基础设施部署**。
+```text
+SCIP 语义层
+  └─ 跨文件调用、定义与引用、类型关系、实现关系、符号消歧
+
+Tree-sitter 实时层
+  └─ 当前文件结构、函数签名、注释、局部调用与增量变更
+
+合并引擎
+  └─ 统一节点身份、来源追踪、冲突处理和增量收敛
+
+SQLite 代码图谱
+  └─ nodes + edges + files + FTS5 全文搜索
+```
+
+```mermaid
+graph LR
+    A[Source Code] --> B[Tree-sitter Real-time Layer]
+    A --> C[SCIP Semantic Providers]
+    B --> D[AstraMap Merge Engine]
+    C --> D
+    D --> E[(SQLite Semantic Code Graph)]
+    E --> F[MCP Server]
+    E --> G[REST API]
+    G --> H[Web Dashboard]
+    F --> I[AI Coding Agents]
+```
+
+Tree-sitter 擅长快速解析当前文件，但单独使用时无法可靠解决复杂的跨文件符号关系。SCIP 由语言工具链生成，能够提供确定性更强的跨文件语义。AstraMap 将两者合并：既保证代码变化能够及时进入地图，也保留编译器级的最终语义精度。
+
+## 快速开始
+
+### 1. 构建 CLI
+
+```bash
+go build -o amap ./cmd/amap
+```
+
+### 2. 为项目建立代码地图
+
+```bash
+./amap index --project /path/to/project
+```
+
+未显式提供 SCIP 索引时，AstraMap 会检测项目语言与可用 Provider；缺少语义工具链时，仍可使用内置 Tree-sitter 实时层完成基础索引。
+
+### 3. 注册 MCP Server
+
+```bash
+./amap install
+```
+
+该命令用于将 AstraMap 注册到支持的 AI 编程工具。也可以直接启动 stdio MCP Server：
+
+```bash
+./amap serve --project /path/to/project
+```
+
+### 4. 启动可视化控制台
+
+```bash
+./amap dashboard --project /path/to/project
+```
+
+### 5. 持续同步代码变化
+
+```bash
+./amap watch 10 --project /path/to/project
+```
+
+常用索引模式：
+
+```bash
+./amap index --tree-sitter     # 仅使用 Tree-sitter 实时层
+./amap index --refresh-scip    # 强制重新生成 SCIP 语义索引
+./amap index --full            # SCIP 全量刷新 + Tree-sitter 同步
+./amap index --scip index.scip # 导入已有 SCIP 文件
+```
+
+首次运行会生成 `.astramap/config.yaml`，用于控制语言、包含路径和排除规则：
+
+```yaml
+index:
+  languages:
+    - go
+  exclude:
+    - "docs/**"
+    - "vendor/**"
+  include:
+    - "src/**"
+```
+
+## AI Agent 使用场景
+
+完成 MCP 注册后，AI Agent 可以通过结构化工具查询代码库，而不是反复扫描所有文件。
+
+| 你可以这样提问 | AstraMap 工具 |
+|---|---|
+| “`handleRequest` 在哪里定义？” | `astramap_search`、`astramap_node` |
+| “谁调用了 `handleRequest`？” | `astramap_callers` |
+| “它内部调用了哪些函数？” | `astramap_callees` |
+| “修改这个函数可能影响哪些模块？” | `astramap_impact` |
+| “认证流程从入口到数据库怎么走？” | `astramap_explore`、`astramap_trace` |
+| “这个项目当前索引是否完整？” | `astramap_status` |
+| “列出 `src/network` 下已索引的文件。” | `astramap_files` |
+
+### MCP 工具
+
+| 工具 | 作用 |
+|---|---|
+| `astramap_search` | 模糊搜索函数、方法、类型及其他符号 |
+| `astramap_explore` | 围绕业务概念或符号探索相关文件、代码和关系 |
+| `astramap_node` | 查看符号定义、签名、位置、源码和关联关系 |
+| `astramap_callers` | 查询直接调用者 |
+| `astramap_callees` | 查询直接被调用者 |
+| `astramap_impact` | 递归分析变更影响范围 |
+| `astramap_trace` | 查找两个符号之间的调用路径 |
+| `astramap_status` | 查看索引覆盖、文件状态和数据来源 |
+| `astramap_files` | 按目录或模式查询已索引文件 |
 
 ## 支持语言
 
-Supported Registry 固定为通过 SCIP 门禁的 12 种候选；门禁失败的语言直接删除，不提供实验模式。
+Core 内置以下 12 种语言的 Tree-sitter 实时解析，并可通过对应的 SCIP Provider 获得更完整的跨文件语义。
 
-| 语言 | 扩展名 | 最终语义 Provider | 内置实时解析 |
+| 语言 | 扩展名 | 语义 Provider | 内置实时解析 |
 |---|---|---|---|
 | Go | `.go` | `scip-go` | Tree-sitter |
 | TypeScript | `.ts` `.tsx` | `scip-typescript` | Tree-sitter |
@@ -125,373 +199,108 @@ Supported Registry 固定为通过 SCIP 门禁的 12 种候选；门禁失败的
 | Scala | `.scala` `.sc` | `scip-java` | Tree-sitter |
 | C | `.c` `.h` | `scip-clang` | Tree-sitter |
 | C++ | `.cc` `.cpp` `.cxx` `.hpp` `.hxx` | `scip-clang` | Tree-sitter |
-| Rust | `.rs` | `rust-analyzer` | Tree-sitter |
+| Rust | `.rs` | `scip-rust` | Tree-sitter |
 | C# | `.cs` | `scip-dotnet` | Tree-sitter |
-| Ruby | `.rb` `.rake`、Gemfile/Rakefile/shebang | `scip-ruby` | Tree-sitter |
+| Ruby | `.rb` `.rake` | `scip-ruby` | Tree-sitter |
 
-PHP、Dart、Visual Basic、Bash、Swift、Lua、Zig 不再属于支持语言。
-
-外置 Syntax 模块用于覆盖内置实现：
+外置 Syntax Overlay 只能覆盖正式语言的内置语法实现，不扩展 Core 的语言注册表、项目单元或语义 Provider 边界。
 
 ```bash
-amap syntax install --trust-key ./trusted-keys.json ./language-syntax.amaplang
-amap syntax list
-amap syntax doctor ruby
-amap syntax disable ruby
-amap syntax remove ruby 1.0.0
+./amap syntax install --trust-key ./trusted-keys.json ./language-syntax.amaplang
+./amap syntax list
+./amap syntax doctor ruby
 ```
 
-Syntax Overlay 只能增强 Supported Registry 中已有语言，不能注册语言、扩展名、Provider 或 ProjectUnit。
-
-## 快速开始
-
-```bash
-go build -o amap ./cmd/amap    # 构建
-amap install                    # 一键注册 MCP 到 Claude Code / Cursor / VS Code / Codex / Antigravity / Windsurf / Cline
-amap index                      # Tree-sitter 实时更新变化文件；复用已有 SCIP 基线
-amap index --tree-sitter        # 仅 Tree-sitter 语法层，跳过 SCIP（适用于无 SCIP Provider 或纯结构浏览场景）
-amap watch [10]                 # 监听源码变化；实时更新后自动尝试 SCIP 收敛
-amap dashboard                  # 启动可视化控制台
-```
-
-`amap watch` 和 Dashboard 的区别：watch 是无 UI 的语义刷新守护进程，会调用所选语言的外部 SCIP Provider；Dashboard 负责图谱浏览与理解文档生成。两者可独立运行，也可同时运行。
-
-首次运行 `amap index` 会自动生成 `.astramap/config.yaml` 示例。需要过滤辅助文件或目录时，编辑该文件后重新运行 `amap index`：
-
-```yaml
-index:
-  languages:
-    - go
-  exclude:
-    - "docs/**"
-    - "vendor/**"
-    - "**/*.pb.go"
-  include:
-    - "src/**"
-```
-
-`exclude` 作用于所有阶段；`include` 为白名单模式，仅索引匹配路径。已索引但后被排除的文件会在下次 `amap index` 时自动清理。
-
-`languages` 会记录上次索引选择。后续普通 `amap index` 会复用该选择并静默执行；显式传 `--lang` 会更新它。
-
-## 命令一览
+## CLI 命令
 
 ### 核心服务
 
 | 命令 | 说明 |
-|------|------|
-| `amap serve [--project <path>]` | MCP stdio 服务 |
-| `amap dashboard [--project <path>] [--host <addr>] [--port <port>]` | Web 可视化控制台 |
-| `amap index [选项]` | 快速增量更新一次（按文件哈希跳过未变更文件）；已有 SCIP 时默认不重建 SCIP；输出结构化过滤报告 |
-| `amap index --scip-only` | 仅导入 SCIP，跳过可选 Syntax Overlay |
-| `amap index --tree-sitter` | 仅执行内置 Tree-sitter 语法层，跳过 SCIP 生成与导入 |
-| `amap index --refresh-scip` | 强制重新生成并导入 SCIP |
-| `amap index --full` | 全量刷新 SCIP 层，再强制重建内置 Tree-sitter 实时层 |
-| `amap watch [秒数]` | 持续低频监听守护进程，检测到文件变更自动增量索引（默认 10 秒防抖） |
-| `amap install` | 一键注册 MCP 到 AI 工具（探测式注册，仅写入已安装的客户端） |
+|---|---|
+| `amap serve` | 启动 MCP stdio Server |
+| `amap dashboard` | 启动 Web Dashboard |
+| `amap index` | 构建或增量更新代码地图 |
+| `amap watch [seconds]` | 监听代码变化并持续同步 |
+| `amap install` | 注册 MCP Server 到 AI 编程工具 |
 
-### 诊断工具
+### 代码导航与质量分析
 
 | 命令 | 说明 |
-|------|------|
-| `amap locate <symbol>` | 符号定位（文件+行号） |
-| `amap diff [--suggest-tests]` | 变更影响分析 |
-| `amap hotspots` | 代码热点 Top 10 |
-| `amap deadcode` | 死代码检测 |
-| `amap cycles` | 循环依赖检测 |
-| `amap coupling [--path=<prefix>]` | Ca/Ce 耦合度分析 |
-| `amap owners <symbol>` | 代码所有权（git blame） |
-| `amap tree <symbol> [--dir=up\|down] [--depth=N]` | 调用拓扑树 |
-| `amap export <symbol> [--format=mermaid]` | 拓扑导出 |
-| `amap query "<SQL>"` | SQL 直接查询 |
-
-## MCP 工具清单
-
-AI 代理可调用以下 9 个工具：
-
-| 工具 | 触发场景 |
-|------|---------|
-| `astramap_search` | "X 在哪定义" / "找一下 Y 函数" |
-| `astramap_explore` | "X 和 Y 是怎么关联的" / 业务流程描述 |
-| `astramap_node` | "X 的源码是什么" / 签名和文档 |
-| `astramap_callers` | "谁调用了 X"（支持 `limit` 分页） |
-| `astramap_callees` | "X 依赖什么" |
-| `astramap_impact` | "改了 X 会影响什么" |
-| `astramap_trace` | "从 A 到 B 的调用链" |
-| `astramap_status` | "索引好了吗" / "图谱是否与磁盘一致" |
-| `astramap_files` | "项目有哪些文件" |
-
-### MCP 增强
-
-| 增强 | 说明 |
-|------|------|
-| **条件编译 metadata** | callers/callees/trace/impact 结果中，C/C++ 调用边自动携带 `metadata` 字段，标注 `#if`/`#ifdef`/`#ifndef` 守卫条件 |
-| **脏文件检测** | `astramap_status` 返回 `dirtyCount` + `dirtyFiles`，AI 代理可判断图谱是否过期 |
-| **文件分页** | `astramap_files` 支持 `limit`/`offset` 参数，大项目分页查询 |
-| **单符号精确解析** | callers/callees/impact/trace 使用 `ResolveSymbolToIDs` 多符号解析，重载/多定义结果自动合并去重 |
-| **搜索 kind 校验** | `astramap_search` 的 `kind` 参数校验，非法值返回错误；新增 `typedef` kind |
-| **callers 分页** | `astramap_callers` 支持 `limit` 参数，超限截断并提示 |
+|---|---|
+| `amap locate <symbol>` | 定位符号定义 |
+| `amap diff [--suggest-tests]` | 分析 Git 变更影响并建议测试范围 |
+| `amap tree <symbol>` | 输出调用拓扑树 |
+| `amap hotspots` | 查找高风险代码热点 |
+| `amap deadcode` | 检测不可达函数和方法 |
+| `amap cycles` | 检测循环依赖 |
+| `amap coupling [--path=...]` | 分析模块传入、传出耦合 |
+| `amap owners <symbol>` | 基于 Git blame 查询代码所有权 |
+| `amap query "<SQL>"` | 直接查询 SQLite 代码图谱 |
 
 ## REST API
 
-Dashboard 同时暴露 REST JSON API：
+Dashboard 同时提供 REST JSON API，适合 IDE、内部平台和自动化系统集成。
 
-| 端点 | 方法 | 参数 | 说明 |
-|------|------|------|------|
-| `/api/astramap/status` | GET | — | 索引状态统计（含脏文件检测） |
-| `/api/astramap/search` | GET | `q`, `kind` | 符号搜索（kind 校验） |
-| `/api/astramap/node/{id}` | GET | 路径 `id` | 节点详情 |
-| `/api/astramap/callers/{id}` | GET | 路径 `id`, `limit` | 上游调用者（含条件编译 metadata，支持分页） |
-| `/api/astramap/callees/{id}` | GET | 路径 `id` | 下游被调用者（含条件编译 metadata） |
-| `/api/astramap/impact/{id}` | GET | `depth` | 影响分析 |
-| `/api/astramap/explore` | GET | `q`, `maxFiles` | 区域探索 |
-| `/api/astramap/trace` | GET | `from`, `to` | 路径追踪（含条件编译 metadata） |
-| `/api/astramap/overview` | GET | — | 模块级聚合图 |
-| `/api/astramap/functions` | GET | — | 函数列表 |
-| `/api/astramap/data` | GET | — | 全图谱数据（节点+边+文件） |
-| `/api/graph/module` | GET | `id` | 模块内依赖图 |
-| `/api/documents/generate` | GET | `type`, `key` | 理解文档生成（type: function/file/module/project） |
+主要端点包括：
 
-## 架构概览
-
-```
-源码文件
-    ↓ Tree-sitter 实时层 + SCIP 编译器级最终语义
-SQLite 知识图谱 (.astramap/astramap.db)
-    ├── astramap_nodes    符号节点：函数、类、结构体等
-    ├── astramap_edges    关系边：calls、contains、imports（含条件编译 metadata）
-    ├── astramap_files    文件跟踪：路径、哈希、语言
-    └── astramap_fts      FTS5 全文搜索
-    ↓
-    ├── MCP stdio JSON-RPC → Claude Code / Cursor / VS Code / Codex / Antigravity
-    └── HTTP REST API + D3.js Dashboard → 浏览器可视化
+```text
+/api/astramap/status
+/api/astramap/search
+/api/astramap/node/{id}
+/api/astramap/callers/{id}
+/api/astramap/callees/{id}
+/api/astramap/impact/{id}
+/api/astramap/explore
+/api/astramap/trace
+/api/astramap/overview
+/api/astramap/functions
+/api/astramap/data
+/api/graph/module
+/api/documents/generate
 ```
 
-边的来源标识：`scip`（编译器级精度）> `syntax-package`（可选结构事实）> `heuristic`（模式匹配）。
+## 生态感知过滤
 
-C/C++ 调用边额外携带 `metadata` 字段，标注预处理器守卫条件（如 `#ifdef USE_SSL`），图遍历结果直接暴露条件编译上下文。
+AstraMap 的原则是：**代码地图只索引手写的、承载业务语义的源代码。**
 
-### 持续同步链路
+系统会识别项目生态并自动排除常见的依赖、缓存、构建产物和生成文件：
 
-```
-源码编辑保存
-    ↓
-amap watch（进程级轮询）
-    ↓ 自定义间隔（默认 10 秒）
-检测到受支持语言的变化
-    ↓
-完整刷新并导入所选语言的 SCIP → 失效旧 Syntax Overlay
-    ↓
-按当前 SCIP 内容哈希重建已安装的 Syntax Overlay
-    ↓
-MCP/HTTP 查询 → 始终返回最新结果
-```
-
-三种模式按需选择：
-
-| 场景 | 推荐方式 | 说明 |
-|------|----------|------|
-| **开发中，需要浏览器图谱** | `amap dashboard` | 可视化图谱浏览与理解文档生成 |
-| **开发中，仅需 MCP 查询** | `amap watch` + `amap serve` | 轻量守护进程，无 UI 开销 |
-| **一次性索引** | `amap index` | 快速增量更新，按哈希跳过未变更文件 |
-
-## 项目结构
-
-```
-astramap/
-├── cmd/amap/main.go              CLI 入口
-├── astramap/
-│   ├── schema.go                 SQLite DDL
-│   ├── astramap.go               SCIP 导入 + 增量同步 + 单文件错误容错
-│   ├── builtin_syntax_engine.go  内置 Tree-sitter 解析引擎
-│   ├── builtin_syntax_modules.go 内置语言 grammar 注册
-│   ├── call_resolution.go        与 grammar 无关的跨文件调用启发
-│   ├── syntax_overlay.go         内置/外置 Tree-sitter 模块统一分派
-│   ├── service.go                共享查询服务层（MCP/REST 共用）+ struct/typedef 搜索分离 + 脏文件检测 + 分页
-│   ├── query_helpers.go          查询辅助：kind 校验、depth 规范化、符号解析、条件编译标注、批量文件路径、源码缓存
-│   ├── filter.go                 索引过滤配置（.astramap/config.yaml）。生态感知过滤：自动识别工程根 → 生成生态排除规则；内置 40+ 通用排除规则；生成文件头检测；统一 Evaluate 引擎；结构化过滤报告
-│   ├── graph.go                  图遍历引擎（BFS/DFS/可达性/耦合）+ 重复节点穿透 + 条件编译 metadata 标注
-│   ├── language_registry.go      语言注册表（Supported Registry 门禁）
-│   ├── language_packages.go      语言包管理
-│   ├── language_install.go       SCIP Provider 安装
-│   ├── language_worker.go        语言工作进程
-│   ├── project_units.go          SCIP ProjectUnit 定义
-│   ├── mcp.go                    MCP JSON-RPC stdio 服务
-│   ├── server.go                 HTTP REST API + Dashboard + 理解文档生成
-│   └── web/                      D3.js 可视化（go:embed）
-├── go.mod                        Go 1.25
-├── build.sh                      Linux 纯 Go 静态构建
-└── QUICKSTART.md                 2 分钟部署指南
-```
-
-### 生态感知过滤
-
-AstraMap 自动识别项目生态并应用对应过滤规则，无需手动配置：
-
-| 生态 | 识别标记 | 自动排除 |
-|------|---------|---------|
-| Go | `go.mod`, `go.work` | — |
-| Node.js | `package.json` | `dist/`, `coverage/` |
+| 生态 | 识别标记 | 典型自动排除 |
+|---|---|---|
+| Go | `go.mod` | `vendor/`、Go 缓存 |
+| Node.js | `package.json` | `node_modules/`、`dist/`、`.next/`、`coverage/` |
 | Rust | `Cargo.toml` | `target/` |
-| Maven | `pom.xml` | `target/` |
-| Gradle | `build.gradle` | `build/` |
-| CMake | `CMakeLists.txt` | `cmake-build-*/` |
-| Python | `pyproject.toml`, `setup.py` | — |
-| Bazel | `WORKSPACE`, `MODULE.bazel` | `bazel-*/` |
+| Maven / Gradle | `pom.xml`、`build.gradle` | `target/`、`.gradle/`、`build/` |
+| CMake | `CMakeLists.txt` | `build/`、`cmake-build-*/` |
+| Python | `pyproject.toml` | `__pycache__/`、`.venv/`、`*.egg-info/` |
+| Bazel | `WORKSPACE` | `bazel-*/` |
 
-内置通用规则覆盖：VCS 元数据 (`.git/`, `.svn/`, `.hg/`, `.astramap/`)、第三方依赖 (`node_modules/`, `vendor/`, `Pods/`, `third_party/`)、缓存 (`__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.cache/`)、OS/编辑器垃圾 (`.DS_Store`, `*.swp`, `*~`)、压缩/Source Map (`*.min.js`, `*.js.map`)、生成源码 (`*.pb.go`, `*_pb2.py`, `*.pb.cc`, `*.g.dart`)、二进制文件 (`*.o`, `*.class`, `*.jar`, `*.wasm`, `*.zip`, `*.png`, `*.woff`)，以及文件头含 `Code generated` / `DO NOT EDIT` 的生成文件。
+内置规则还覆盖版本控制元数据、二进制文件、压缩文件、压缩后的前端资源以及带有 `generated` / `DO NOT EDIT` 标记的生成源码。用户可通过 `.astramap/config.yaml` 使用 include、exclude 和 force-include 覆盖默认行为。
 
-如需覆盖内置规则，在 `.astramap/config.yaml` 中使用 `advanced.forceInclude`：
+## 性能与存储
 
-```yaml
-index:
-  # exclude:
-  #   - "examples/legacy/**"
-  # advanced:
-  #   forceInclude:
-  #     - "src/.domain/**"
-```
+AstraMap 使用 SQLite WAL、FTS5、内存映射、查询缓存和批量节点解析，以支持大型代码库的增量索引与并发读取。
 
-索引数据存放在 `.astramap/`（建议加入 `.gitignore`），可随时 `amap index` 重建。
+| 项目规模 | 索引数据库参考值 | 索引时间参考值 |
+|---|---:|---:|
+| 1 万行 | 2–4 MB | 少于 5 秒 |
+| 10 万行 | 12–20 MB | 10–30 秒 |
+| 50 万行 | 50–100 MB | 1–3 分钟 |
 
-## 性能参考
+> 实际结果取决于语言、符号密度、SCIP Provider、磁盘性能和项目构建环境。建议在正式发布前使用公开基准仓库补充可复现的 benchmark。
 
-| 项目规模 | 索引数据库 | 索引时间 |
-|----------|-----------|---------|
-| 1 万行 | 2-4 MB | < 5 秒 |
-| 10 万行 | 12-20 MB | 10-30 秒 |
-| 50 万行 | 50-100 MB | 1-3 分钟 |
+## 项目定位
 
-## Claude Code `/amap` 斜杠命令
+AstraMap 适合以下场景：
 
-```
-/amap search QuerySearch
-/amap explore "MCP Server 启动流程"
-/amap callers go:astramap/service.go:QuerySearch
-/amap impact go:astramap/service.go:QuerySearch
-/amap trace main QuerySearch
-/amap status
-```
+- 为 AI 编程代理提供代码库级语义上下文
+- 构建代码导航、代码理解和代码问答能力
+- 分析调用图、依赖图和变更影响范围
+- 辅助大型遗留代码阅读、审查、重构和测试设计
+- 将代码图谱能力集成到 IDE、研发平台或多 Agent 系统
 
-## Changelog
-
-### v0.3
-
-**三大特性**：
-
-| 特性 | 说明 |
-|------|------|
-| **🛡️ 生态感知智能过滤** | 自动识别 Supported Registry 声明的 SCIP ProjectUnit，按项目根合并通用与生态规则 |
-| **📋 结构化过滤报告** | `amap index` 输出按规则类型分组的排除报告（规则 ID + 原因 + 数量），过滤行为完全透明 |
-| **🔗 外部调用占位符绑定** | 文件重索引时，被删除节点的入边自动迁移到 `external:` 占位符；新索引的同名函数自动绑定原有外部调用边，跨文件调用链在增量更新后保持连续 |
-
-**完整变更**：
-
-| 变更 | 说明 |
-|------|------|
-| **生态感知工程根识别** | `DetectProjectRoots` 扫描 `go.mod`/`package.json`/`Cargo.toml`/`pom.xml`/`build.gradle`/`CMakeLists.txt`/`pyproject.toml`/`Package.swift`/`WORKSPACE`/`MODULE.bazel` 等标记文件，建立工程根映射 |
-| **确定性生态排除规则** | `BuildEcosystemRules` 只处理 Core 认证的 SCIP Profile；Syntax Overlay 不能扩展 ProjectUnit 或过滤规则 |
-| **40+ 内置通用排除规则** | 统一规则引擎覆盖 VCS 元数据、第三方依赖（node_modules/vendor/Pods/third_party）、缓存（__pycache__/.pytest_cache/.mypy_cache/.cache/.sass-cache）、OS/编辑器垃圾（.DS_Store/Thumbs.db/*.swp/*~/*.tmp）、压缩/Source Map（*.min.js/*.js.map/*.d.ts.map）、生成源码（*.pb.go/*_pb2.py/*.pb.cc/*.g.dart）、二进制（*.o/*.class/*.jar/*.wasm/*.zip/*.png/*.woff）、模型/字体文件 |
-| **生成文件头检测** | `IsGeneratedByHeader` 扫描文件前 8KB / 100 行，正则匹配 `Code generated.*DO NOT EDIT` / `Generated by.*DO NOT EDIT` / `This file (was )?automatically generated` / `DO NOT EDIT THIS FILE` / `<auto-generated>` 等标记，自动排除生成文件 |
-| **统一过滤评估引擎** | `Evaluate`/`EvaluateDir` 替代旧 `Allows`/`AllowsDir`，内置规则 → 隐藏路径 → 用户 Include → 用户 Exclude 四级优先级；`forceInclude` 可覆盖任何 `Overridable` 规则 |
-| **结构化过滤报告** | `IndexFilterMatchReport` 从三段字符串数组升级为 `[]IndexFilterExcludedEntry`，含 Path/RuleID/Kind/Reason；`printIndexFilterMatchReport` 按 Kind 分组输出，超限折叠 |
-| **外部调用占位符迁移** | `SyncFileAstraMap` 删除旧节点前，将入边目标更新为 `external:<prefix> . . $ <name>.` 占位符；新节点索引后，将 `external:` 占位符边重新绑定到实际节点，增量更新不破坏跨文件调用链 |
-| **增量文件启发式刷新** | `SyncFileAstraMap` 完成后自动执行 `ResolveCrossFileCallsForFiles`，确保单文件增量更新后函数指针/宏调用启发式边即时生效 |
-| **WAL 残留锁回收** | 数据库初始化时执行 `PRAGMA wal_checkpoint(TRUNCATE)`，回收上次异常退出残留的 WAL 锁，避免 "database is locked" |
-| **watch 目录过滤统一** | `addIndexWatchDirs` 使用 `IndexFilter.AllowsDir` 替代硬编码 `skipDirs`，watch 行为与索引过滤完全一致 |
-| **文件遍历目录过滤统一** | `SyncAllFilesAstraMapResult` 和 `countFilesByExt`/`projectHasExtensions` 移除硬编码 `skipDirs`，统一走 `IndexFilter.AllowsDir` |
-| **explore 结构关系增强** | `QueryExplore` 对 struct/class/interface 节点额外查询 `contains`/`implements` 边，输出成员归属与实现关系 |
-| **Go typedef 搜索增强** | `QuerySearchPaged` `kind=typedef` 查询自动包含 Go `kind=struct` 节点，支持 Go type alias 检索 |
-| **callers/callees/impact 规范化起点** | MCP 工具在查询前通过 `resolveCanonicalTraceStart` 将输入符号 ID 规范化为主定义 ID，消除 tree-sitter/SCIP 格式差异导致的查询起点歧义 |
-| **消除硬编码目录跳过列表** | 删除 `shouldSkipIndexDir`、`skipDirs`、`shouldSkipWatchDir` 等硬编码列表，全部收敛到 `IndexFilter` 规则引擎 |
-| **配置模板精简** | 示例配置移除 `scipExclude`/`treeSitterExclude`，仅保留 `include`/`exclude`/`advanced.forceInclude` |
-| **`--tree-sitter` CLI 标志** | `amap index --tree-sitter` 仅执行内置 Tree-sitter 语法层，跳过 SCIP 生成与导入；适用于无 SCIP Provider 或纯结构浏览场景 |
-| **单文件解析错误容错** | `SyncAllFilesAstraMapResult` 中单文件解析失败改为日志记录并跳过，不再中止整个索引遍历；Tree-sitter 返回 nil tree 时优雅降级为空 FileFacts |
-| **struct/typedef 搜索精确分离** | `kind=struct` 查询不再混入 `typedef struct` 别名；`normalizeSearchNodeKind` 和 `normalizeTypedefNodeKind` 严格区分 struct、typedef、type 三种 kind |
-| **Impact BFS 重复节点穿透** | `AnalyzeImpact` BFS 每步通过 `GetCallersForAllDuplicates` 查询同 kind+file+name 的所有重复节点 ID 的 callers，消除 SCIP/语法层双节点导致的遍历断裂；`resolveCanonicalTraceStart` 改用入度排序选择 canonical 起点 |
-
-### v0.2
-
-> 以下为历史版本记录；其中进程内 Tree-sitter、独立语法索引和 CGO 构建路径已在当前架构删除。
-
-**三大特性**：
-
-| 特性 | 说明 |
-|------|------|
-| **🔁 `amap watch` 持续文件监听** | 独立守护进程，低频轮询文件变更，检测到变化自动触发增量刷新，保持图谱始终与磁盘一致。无需手动 `amap index`，无需保持 Dashboard 运行 |
-| **⚡ 按哈希增量更新** | Tree-sitter 解析按文件内容哈希跳过未变更文件；SCIP 已有则默认不重建。普通 `amap index` 秒级完成，仅在新增/修改文件时执行解析 |
-| **🖥️ Dashboard 可视化** | D3.js 交互式图谱浏览，探索视界 + 依赖关系 + 理解文档 |
-
-**完整变更**：
-
-| 变更 | 说明 |
-|------|------|
-| **条件编译 metadata 标注** | C/C++ 预处理器守卫（`#if`/`#ifdef`/`#ifndef`）自动标注到调用边 metadata，GetCallers/GetCallees/TracePath/AnalyzeImpact 结果直接暴露条件编译上下文 |
-| **多定义合并查询** | callers/callees/impact/trace 统一使用 `ResolveSymbolToIDs` 多符号解析，重载/多定义结果自动合并去重，消除单符号选择导致的信息丢失 |
-| **TracePath 多起点多终点** | `TracePath` 支持多 from/to ID 集合 BFS，重载符号间路径一次查询全部返回 |
-| **脏文件检测** | `QueryDirtyFiles`/`QueryDirtyFilesWithCount`，status 查询返回 `dirtyCount` + `dirtyFiles`，AI 代理可判断图谱是否与磁盘一致 |
-| **文件列表分页** | `QueryFilesPaged` + MCP `astramap_files` 支持 `limit`/`offset` 参数 |
-| **搜索 kind 校验** | `validateSearchKind` 校验 kind 参数，非法值返回错误（REST 400 / MCP error） |
-| **歧义调用过滤** | 跨文件启发式调用解析过滤 Python dunder 方法（`__xxx__`）和无点号全局函数名的多目标歧义 |
-| **最窄 span 选择** | 跨文件调用解析在多个候选函数中选择行跨度最小的（最精确的）作为调用者 |
-| **节点文件路径模糊匹配** | `QueryNodeBySymbol` 文件参数支持尾部匹配，不再要求精确路径 |
-| **查询辅助提取** | 新增 `query_helpers.go`，集中 kind 校验、depth 规范化、符号解析、条件编译标注等辅助函数 |
-| **索引过滤系统** | `.astramap/config.yaml` 支持 include/exclude/scipExclude/treeSitterExclude 四级过滤，已排除文件自动清理 |
-| **模块级聚合图** | `/api/astramap/overview` 项目级聚合 + `/api/graph/module` 模块内钻取 |
-| **理解文档生成** | `/api/documents/generate` 一键生成函数/文件/模块/项目级理解文档，含 Mermaid 依赖图、复杂度风险表、架构边界违规检测 |
-| **C 语言独立支持** | `tree-sitter-c` 独立绑定，`.h` 文件智能 C/C++ 判定 |
-| **MCP 符号消歧** | callers/callees/impact/trace 支持模糊符号解析，重载/多定义自动合并去重 |
-| **Trace 邻域重构** | 兄弟感知邻域模型，修复跨文件自调用过滤 |
-| **SCIP 边丢失修复** | 全局符号映射修复跨文档引用丢失 |
-| **静态链接构建** | musl 静态编译，无 GLIBC 依赖 |
-| **Dashboard 增强** | `--host` 参数、自动端口探测、LAN IP 显示、后台启动、请求日志 |
-| **install 增强** | 探测式注册（仅写入已安装客户端），支持 Antigravity/Windsurf/Cline，注册核验 |
-| **CLI 精简** | `--project` 全局参数，移除未实现命令 |
-| **Trace API 多定义路径** | REST `/api/astramap/trace` 和 MCP `astramap_trace` 使用 `ResolveSymbolToIDs` 多符号解析 + `TracePath(fromIDs, toIDs)` 多起点多终点 BFS |
-| **Dashboard 头文件降噪** | 图谱查询、模块聚合图、函数列表统一排除 `.h`/`.hpp`/`.hh` 头文件节点，减少 C/C++ 项目噪声 |
-| **函数树目录层级重构** | 依赖分析视图函数树从扁平单层目录改为完整多级目录树，按需展开填充函数按钮，搜索模式扁平化展示 |
-| **函数列表独立懒加载** | 依赖分析视图不再依赖探索视界先完成全局图初始化，独立从 `/api/astramap/functions` 拉取函数列表 |
-| **trace.js 懒加载加固** | Promise 去重防止重复加载、加载失败自动重置状态、缓存版本号破缓存 |
-| **callers 结果分页** | MCP `astramap_callers` 新增 `limit` 参数，REST `/api/astramap/callees/{id}` 新增 `limit` 查询参数，超限截断并提示 |
-| **C/C++ 函数指针调用解析** | 跨文件启发式新增 `.field = &func` 指定初始化模式 + `struct_name var = { func1, func2 }` 顺序初始化模式识别，`->field()` / `.field()` 调用自动解析到函数指针目标 |
-| **C/C++ 宏返回调用解析** | 识别 `XXXRETURN(func)` 模式的宏展开调用，提取内部函数名建立调用边 |
-| **C/C++ typedef 分类修正** | `typedef struct` → `struct`，`typedef enum` → `enum`，纯 `typedef` → `type`；搜索 `kind=struct` 含 `typedef struct`，搜索 `kind=enum` 含 `typedef enum`；`normalizeSearchNodeKind` 按请求 kind 精确归一 |
-| **搜索 kind 新增 typedef/type** | `astramap_search` 的 `kind` 参数新增 `typedef` 和 `type` 值，C/C++ typedef 类型可独立检索；`typedef`/`type` 搜索自动合并两种 kind |
-| **源码缓存按 ModTime 失效** | 文件内容缓存键从路径改为 `(path, modTime, size)` 三元组，文件修改后自动失效，消除条件编译 metadata 标注的脏数据 |
-| **单文件缓存精准失效** | 新增 `InvalidateQueryHelperCacheForFile`，文件同步/删除时仅清除该文件相关缓存，不再全量清空 |
-| **条件编译 metadata 批量标注** | `QueryTraceCTE` 使用 `BatchNodeFilePaths` 批量获取文件路径，消除 N+1 查询；`annotateConditionalMetadataWithFileMap` 支持预传入文件映射 |
-| **Impact depth=0 根符号返回** | `AnalyzeImpact` 在 `depth=0` 时返回根符号自身而非空结果，语义完整 |
-| **Gzip 中间件增强** | 新增 `shouldGzipResponse` 判断逻辑，API 响应和文本类静态资源统一压缩；添加 `Vary: Accept-Encoding` 头 |
-| **Watcher Timer 泄漏防护加固** | 提取 `resetTimer` 工具函数，统一 Timer 重置逻辑，消除 `Stop/Reset` 竞态 |
-| **trace.js O(1) 图索引** | 新增 `traceLinkMap`（边索引）和 `visibleNodeSet`（可见节点集合），公共叶子节点克隆去重从 `Array.some` 改为 `Set.has` |
-| **CSS blur 半径统一收敛** | 所有 `backdrop-filter: blur()` 和 `filter: blur()` 统一引用 `--panel-blur` CSS 变量或降至 4px，减少 GPU 合成开销 |
-| **explore 输出截断** | MCP `astramap_explore` 输出设 60KB 总量预算，单段源码 12KB 上限，超限截断并提示缩小 `maxFiles` 或收窄查询 |
-| **explore 默认 maxFiles 收敛** | `QueryExplore` 默认 `maxFiles` 从 10 降为 3，减少 AI 代理 Token 消耗，用户可显式传参扩大 |
-| **SyncAllFiles 启发式刷新** | 即使文件无变更也执行跨文件启发式调用关系解析，确保函数指针/宏调用等新增启发式边在首次 `amap index` 后生效 |
-| **C/C++ 宏隐式函数定义** | 识别 `DECLARE_xxx(func)` / `xxx_INIT(func)` / `xxx_REGISTER(func)` 等声明式宏模式，自动创建函数节点并标注来源宏名 |
-| **C/C++ `#define` 宏节点** | Tree-sitter 捕获 `preproc_def`/`preproc_function_def` 为 `macro` kind 节点 |
-| **C/C++ 前向声明过滤** | `declaration` 节点仅当含 `parameter_list` 时识别为函数，过滤纯前向声明噪声 |
-| **SCIP C/C++ 签名与文档还原** | SCIP 索引中 C/C++ 节点自动提取首行代码作为签名、前导注释作为 docstring |
-| **Tree-sitter 文档注释提取** | 所有语言节点自动提取前导 `//`/`/* */` 注释作为 docstring，含块注释与空行容忍 |
-| **中文查询分词** | explore/search 支持中文单字分词，过滤中文停用词（的/了/和/是/在…），中英混合查询无缝工作 |
-| **空查询拒绝** | `QuerySearchPaged` 拒绝空字符串查询，避免全表扫描 |
-| **`::` 分隔符规范化** | 边端点显示时正确处理 C++ `namespace::symbol` 格式，不再错误截断 |
-
-### v0.1
-
-| 特性 | 说明 |
-|------|------|
-| **SCIP + Syntax Overlay 分层索引** | SCIP 是语言支持的必要语义基线；签名 Syntax Worker 仅按需补充结构事实 |
-| **SQLite 知识图谱** | nodes/edges/files/FTS5 四类核心结构，WAL 模式单写者，内容哈希去重 |
-| **MCP stdio 服务** | 9 个工具（search/explore/node/callers/callees/impact/trace/status/files），JSON-RPC stdio 协议 |
-| **REST API** | 11 个端点，覆盖搜索、节点详情、调用链追踪、影响分析、区域探索 |
-| **D3.js 交互式 Dashboard** | 探索视界（全局→局部图谱浏览）、依赖关系视图（调用邻域展开） |
-| **严格 SCIP 语言门禁** | 最多 12 个认证候选；没有可靠 SCIP Provider 的语言不注册、不检测、不索引 |
-| **增量索引** | 安装 Syntax Overlay 后按文件哈希更新；否则源码变化必须刷新 SCIP，禁止低精度降级 |
-| **CLI 诊断工具集** | locate / diff / hotspots / deadcode / cycles / coupling / owners / tree / query |
-| **一键 MCP 注册** | `amap install` 注册到 Claude Code / VS Code / Cursor / Codex |
-| **内置实时语法层** | 内嵌 SQLite、Dashboard 与正式语言 grammar；外置 Syntax Worker 仅用于实现覆盖 |
+相关关键词：`semantic code map`、`code graph`、`code intelligence`、`codebase intelligence`、`MCP server`、`AI coding agent`、`call graph`、`dependency graph`、`impact analysis`、`SCIP`、`Tree-sitter`。
 
 ## 许可
 
-© 2025-2026 何志川 — AstraMap v0.3
+© 2025–2026 何志川 · AstraMap v0.3
