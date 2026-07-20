@@ -87,3 +87,138 @@ fixtures:
           kind: class
         - name: "operator+"
           kind: method
+
+  - id: pure_virtual_function
+    files:
+      shapes.cpp: |
+        class Shape {
+        public:
+            virtual double area() const = 0;
+            virtual ~Shape() = default;
+        };
+    expected:
+      symbols:
+        - name: "Shape"
+          kind: class
+        - name: "area"
+          kind: method
+
+  - id: multiple_inheritance
+    files:
+      main.cpp: |
+        class Flyable { public: virtual void fly() = 0; };
+        class Swimmable { public: virtual void swim() = 0; };
+        class Duck : public Flyable, public Swimmable {
+        public:
+            void fly() override {}
+            void swim() override {}
+        };
+    expected:
+      symbols:
+        - name: "Flyable"
+          kind: class
+        - name: "Swimmable"
+          kind: class
+        - name: "Duck"
+          kind: class
+        - name: "fly"
+          kind: method
+        - name: "swim"
+          kind: method
+
+  - id: friend_class
+    files:
+      main.cpp: |
+        class Engine;
+        class Car {
+            friend class Engine;
+            int speed;
+        };
+    expected:
+      symbols:
+        - name: "Engine"
+          kind: class
+        - name: "Car"
+          kind: class
+
+  - id: explicit_constructor
+    files:
+      main.cpp: |
+        class String {
+            char* data;
+        public:
+            explicit String(int size) : data(new char[size]) {}
+        };
+    expected:
+      symbols:
+        - name: "String"
+          kind: class
+
+  - id: default_delete
+    files:
+      main.cpp: |
+        class NonCopyable {
+        public:
+            NonCopyable() = default;
+            NonCopyable(const NonCopyable&) = delete;
+            NonCopyable& operator=(const NonCopyable&) = delete;
+        };
+    expected:
+      symbols:
+        - name: "NonCopyable"
+          kind: class
+
+  - id: nested_class
+    files:
+      main.cpp: |
+        class Outer {
+        public:
+            class Inner {
+            public:
+                void method() {}
+            };
+        };
+    expected:
+      symbols:
+        - name: "Outer"
+          kind: class
+        - name: "Inner"
+          kind: class
+        - name: "method"
+          kind: method
+
+  - id: enum_class
+    files:
+      main.cpp: |
+        enum class Color { Red, Green, Blue };
+        enum class Status : int { OK = 0, Error = 1 };
+    expected:
+      symbols:
+        - name: "Color"
+          kind: enum
+        - name: "Status"
+          kind: enum
+
+  - id: using_alias
+    files:
+      main.cpp: |
+        template<typename T>
+        using Vec = std::vector<T>;
+        using String = std::string;
+    expected:
+      symbols:
+        - name: "Vec"
+          kind: type
+        - name: "String"
+          kind: type
+
+  - id: constexpr_function
+    files:
+      main.cpp: |
+        constexpr int factorial(int n) {
+            return n <= 1 ? 1 : n * factorial(n - 1);
+        }
+    expected:
+      symbols:
+        - name: "factorial"
+          kind: function

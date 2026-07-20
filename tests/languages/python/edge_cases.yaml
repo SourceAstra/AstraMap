@@ -172,3 +172,127 @@ fixtures:
           kind: class
         - name: "on_finalize"
           kind: function
+
+  - id: match_statement
+    files:
+      main.py: |
+        def http_status(code):
+            match code:
+                case 200:
+                    return "OK"
+                case 404:
+                    return "Not Found"
+                case _:
+                    return "Unknown"
+    expected:
+      symbols:
+        - name: "http_status"
+          kind: function
+
+  - id: exception_group
+    files:
+      main.py: |
+        def handle_errors():
+            try:
+                raise ExceptionGroup("group", [ValueError(), TypeError()])
+            except* ValueError:
+                pass
+    expected:
+      symbols:
+        - name: "handle_errors"
+          kind: function
+
+  - id: type_param_generic
+    files:
+      main.py: |
+        from typing import TypeVar, Generic
+        T = TypeVar('T')
+        class Stack(Generic[T]):
+            def push(self, item: T) -> None: pass
+            def pop(self) -> T: pass
+    expected:
+      symbols:
+        - name: "Stack"
+          kind: class
+        - name: "push"
+          kind: method
+        - name: "pop"
+          kind: method
+
+  - id: protocol_definition
+    files:
+      main.py: |
+        from typing import Protocol
+        class Drawable(Protocol):
+            def draw(self) -> None: ...
+        class Circle:
+            def draw(self) -> None: pass
+    expected:
+      symbols:
+        - name: "Drawable"
+          kind: class
+        - name: "Circle"
+          kind: class
+        - name: "draw"
+          kind: method
+
+  - id: singledispatch
+    files:
+      main.py: |
+        from functools import singledispatch
+        @singledispatch
+        def process(arg):
+            return "default"
+        @process.register(int)
+        def _(arg):
+            return "int"
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: enum_definition
+    files:
+      main.py: |
+        from enum import Enum, auto
+        class Color(Enum):
+            RED = auto()
+            GREEN = auto()
+            BLUE = auto()
+    expected:
+      symbols:
+        - name: "Color"
+          kind: class
+
+  - id: namedtuple_definition
+    files:
+      main.py: |
+        from collections import namedtuple
+        Point = namedtuple('Point', ['x', 'y'])
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+
+  - id: async_generator
+    files:
+      main.py: |
+        async def fetch_pages():
+            for i in range(3):
+                yield f"page-{i}"
+    expected:
+      symbols:
+        - name: "fetch_pages"
+          kind: function
+
+  - id: contextlib_contextmanager
+    files:
+      main.py: |
+        from contextlib import contextmanager
+        @contextmanager
+        def managed_resource():
+            yield "resource"
+    expected:
+      symbols:
+        - name: "managed_resource"
+          kind: function

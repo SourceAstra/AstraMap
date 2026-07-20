@@ -89,3 +89,165 @@ fixtures:
         - name: "FetchAsync"
           kind: method
 
+  - id: expression_bodied_member
+    files:
+      Program.cs: |
+        namespace App {
+          class Calculator {
+            public int Add(int a, int b) => a + b;
+            public int Value => 42;
+          }
+        }
+    expected:
+      symbols:
+        - name: "Calculator"
+          kind: class
+        - name: "Add"
+          kind: method
+        - name: "Value"
+          kind: method
+
+  - id: init_only_setter
+    files:
+      Program.cs: |
+        namespace App {
+          class Person {
+            public string Name { get; init; } = "";
+            public int Age { get; init; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Person"
+          kind: class
+
+  - id: interpolated_string
+    files:
+      Program.cs: |
+        namespace App {
+          class StringDemo {
+            public string Format(string name, int age) {
+              return $"Name: {name}, Age: {age}";
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "StringDemo"
+          kind: class
+        - name: "Format"
+          kind: method
+
+  - id: using_statement
+    files:
+      Program.cs: |
+        using System.IO;
+        namespace App {
+          class FileDemo {
+            public string Read(string path) {
+              using var reader = new StreamReader(path);
+              return reader.ReadToEnd();
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "FileDemo"
+          kind: class
+        - name: "Read"
+          kind: method
+
+  - id: local_function
+    files:
+      Program.cs: |
+        namespace App {
+          class LocalFuncDemo {
+            public int Calculate(int a, int b) {
+              int Add(int x, int y) => x + y;
+              return Add(a, b);
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "LocalFuncDemo"
+          kind: class
+        - name: "Calculate"
+          kind: method
+
+  - id: switch_expression
+    files:
+      Program.cs: |
+        namespace App {
+          class SwitchDemo {
+            public string Describe(int code) => code switch {
+              200 => "OK",
+              404 => "Not Found",
+              _ => "Unknown"
+            };
+          }
+        }
+    expected:
+      symbols:
+        - name: "SwitchDemo"
+          kind: class
+        - name: "Describe"
+          kind: method
+
+  - id: null_coalescing
+    files:
+      Program.cs: |
+        namespace App {
+          class NullDemo {
+            public string Get(string? s) => s ?? "default";
+            public string GetOrSet(ref string? s) => s ??= "initialized";
+          }
+        }
+    expected:
+      symbols:
+        - name: "NullDemo"
+          kind: class
+        - name: "Get"
+          kind: method
+        - name: "GetOrSet"
+          kind: method
+
+  - id: nameof_expression
+    files:
+      Program.cs: |
+        namespace App {
+          class NameDemo {
+            public string GetName() => nameof(NameDemo);
+          }
+        }
+    expected:
+      symbols:
+        - name: "NameDemo"
+          kind: class
+        - name: "GetName"
+          kind: method
+
+  - id: stackalloc_span
+    files:
+      Program.cs: |
+        using System;
+        namespace App {
+          class SpanDemo {
+            public int Sum(int[] data) {
+              Span<int> span = stackalloc int[data.Length];
+              int sum = 0;
+              for (int i = 0; i < data.Length; i++) {
+                span[i] = data[i];
+                sum += span[i];
+              }
+              return sum;
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "SpanDemo"
+          kind: class
+        - name: "Sum"
+          kind: method
+

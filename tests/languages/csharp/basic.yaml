@@ -149,3 +149,143 @@ fixtures:
       symbols:
         - name: "Box"
           kind: class
+
+  - id: delegate_definition
+    files:
+      Program.cs: |
+        namespace App {
+          delegate int Operation(int a, int b);
+        }
+    expected:
+      symbols:
+        - name: "Operation"
+          kind: type
+
+  - id: event_declaration
+    files:
+      Program.cs: |
+        namespace App {
+          class Publisher {
+            public event EventHandler? DataChanged;
+            public void Notify() { DataChanged?.Invoke(this, EventArgs.Empty); }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Publisher"
+          kind: class
+        - name: "Notify"
+          kind: method
+
+  - id: indexer_definition
+    files:
+      Program.cs: |
+        namespace App {
+          class Collection {
+            private int[] _items = new int[10];
+            public int this[int index] {
+              get { return _items[index]; }
+              set { _items[index] = value; }
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Collection"
+          kind: class
+
+  - id: partial_class
+    files:
+      Program.cs: |
+        namespace App {
+          partial class Data {
+            public int Id { get; set; }
+          }
+          partial class Data {
+            public string Name { get; set; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Data"
+          kind: class
+
+  - id: abstract_class
+    files:
+      Program.cs: |
+        namespace App {
+          abstract class Animal {
+            public abstract string Speak();
+            public virtual void Move() {}
+          }
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "Speak"
+          kind: method
+        - name: "Move"
+          kind: method
+
+  - id: readonly_property
+    files:
+      Program.cs: |
+        namespace App {
+          class Config {
+            public string Name { get; }
+            public Config(string name) { Name = name; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Config"
+          kind: class
+
+  - id: out_parameter
+    files:
+      Program.cs: |
+        namespace App {
+          class Parser {
+            public bool TryParse(string s, out int result) {
+              result = 0;
+              return int.TryParse(s, out result);
+            }
+          }
+        }
+    expected:
+      symbols:
+        - name: "Parser"
+          kind: class
+        - name: "TryParse"
+          kind: method
+
+  - id: nullable_reference
+    files:
+      Program.cs: |
+        namespace App {
+          class NullableDemo {
+            public string? GetName() { return null; }
+          }
+        }
+    expected:
+      symbols:
+        - name: "NullableDemo"
+          kind: class
+        - name: "GetName"
+          kind: method
+
+  - id: tuple_deconstruction
+    files:
+      Program.cs: |
+        namespace App {
+          class TupleDemo {
+            public (int, string) GetData() { return (1, "test"); }
+          }
+        }
+    expected:
+      symbols:
+        - name: "TupleDemo"
+          kind: class
+        - name: "GetData"
+          kind: method

@@ -79,3 +79,132 @@ fixtures:
           kind: class
         - name: "create"
           kind: method
+
+  - id: reified_generic
+    files:
+      Main.kt: |
+        inline fun <reified T> isInstance(value: Any): Boolean = value is T
+    expected:
+      symbols:
+        - name: "isInstance"
+          kind: function
+
+  - id: infix_function
+    files:
+      Main.kt: |
+        infix fun Int.plus(other: Int): Int = this + other
+    expected:
+      symbols:
+        - name: "plus"
+          kind: function
+
+  - id: operator_overload
+    files:
+      Main.kt: |
+        data class Point(val x: Int, val y: Int) {
+            operator fun plus(other: Point): Point = Point(x + other.x, y + other.y)
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "plus"
+          kind: method
+
+  - id: destructuring_component
+    files:
+      Main.kt: |
+        class Pair(val first: String, val second: Int) {
+            operator fun component1(): String = first
+            operator fun component2(): Int = second
+        }
+    expected:
+      symbols:
+        - name: "Pair"
+          kind: class
+        - name: "component1"
+          kind: method
+        - name: "component2"
+          kind: method
+
+  - id: sealed_interface
+    files:
+      Main.kt: |
+        sealed interface Result
+        class Success(val data: String) : Result
+        class Error(val message: String) : Result
+    expected:
+      symbols:
+        - name: "Result"
+          kind: interface
+        - name: "Success"
+          kind: class
+        - name: "Error"
+          kind: class
+
+  - id: lateinit_property
+    files:
+      Main.kt: |
+        class LateInit {
+            lateinit var name: String
+            fun init(n: String) { name = n }
+        }
+    expected:
+      symbols:
+        - name: "LateInit"
+          kind: class
+        - name: "init"
+          kind: method
+
+  - id: inner_class
+    files:
+      Main.kt: |
+        class Outer {
+            inner class Inner {
+                fun getOuter(): Outer = this@Outer
+            }
+        }
+    expected:
+      symbols:
+        - name: "Outer"
+          kind: class
+        - name: "Inner"
+          kind: class
+        - name: "getOuter"
+          kind: method
+
+  - id: delegated_interface
+    files:
+      Main.kt: |
+        interface Base {
+            fun print()
+        }
+        class BaseImpl(val x: Int) : Base {
+            override fun print() { println(x) }
+        }
+        class Derived(b: Base) : Base by b
+    expected:
+      symbols:
+        - name: "Base"
+          kind: interface
+        - name: "BaseImpl"
+          kind: class
+        - name: "print"
+          kind: method
+        - name: "Derived"
+          kind: class
+
+  - id: contract_function
+    files:
+      Main.kt: |
+        import kotlin.contracts.*
+        inline fun <T> myRun(block: () -> T): T {
+            contract {
+                callsInPlace(block, InvocationKind.EXACTLY_ONCE)
+            }
+            return block()
+        }
+    expected:
+      symbols:
+        - name: "myRun"
+          kind: function

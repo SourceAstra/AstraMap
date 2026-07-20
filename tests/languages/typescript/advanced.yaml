@@ -82,3 +82,92 @@ fixtures:
           kind: method
         - name: "describe"
           kind: method
+
+  - id: async_await_function
+    files:
+      main.ts: |
+        async function fetchData(url: string): Promise<string> {
+          return fetch(url).then(r => r.text());
+        }
+    expected:
+      symbols:
+        - name: "fetchData"
+          kind: function
+
+  - id: type_union_intersection
+    files:
+      main.ts: |
+        type Animal = { name: string };
+        type Dog = Animal & { breed: string };
+        type Pet = Dog | { type: "cat" };
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: type
+        - name: "Dog"
+          kind: type
+        - name: "Pet"
+          kind: type
+
+  - id: interface_extends
+    files:
+      main.ts: |
+        interface Animal { name: string; }
+        interface Dog extends Animal { breed: string; }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: interface
+        - name: "Dog"
+          kind: interface
+
+  - id: class_static_method
+    files:
+      main.ts: |
+        class Utils {
+          static parse(input: string): number {
+            return parseInt(input, 10);
+          }
+        }
+    expected:
+      symbols:
+        - name: "Utils"
+          kind: class
+        - name: "parse"
+          kind: method
+
+  - id: function_overload
+    files:
+      main.ts: |
+        function process(input: string): string;
+        function process(input: number): number;
+        function process(input: any): any {
+          return input;
+        }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: readonly_array
+    files:
+      main.ts: |
+        function sum(numbers: readonly number[]): number {
+          return numbers.reduce((a, b) => a + b, 0);
+        }
+    expected:
+      symbols:
+        - name: "sum"
+          kind: function
+
+  - id: mapped_type_util
+    files:
+      main.ts: |
+        type Readonly<T> = { readonly [K in keyof T]: T[K] };
+        type Required<T> = { [K in keyof T]-?: T[K] };
+    expected:
+      symbols:
+        - name: "Readonly"
+          kind: type
+        - name: "Required"
+          kind: type

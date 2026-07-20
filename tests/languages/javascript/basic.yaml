@@ -123,3 +123,114 @@ fixtures:
       symbols:
         - name: "process"
           kind: function
+
+  - id: generator_function
+    files:
+      main.js: |
+        function* idGenerator() {
+          let id = 0;
+          while (true) yield id++;
+        }
+    expected:
+      symbols:
+        - name: "idGenerator"
+          kind: function
+
+  - id: class_expression
+    files:
+      main.js: |
+        const Rectangle = class {
+          constructor(w, h) { this.w = w; this.h = h; }
+          area() { return this.w * this.h; }
+        };
+    expected:
+      symbols:
+        - name: "Rectangle"
+          kind: class
+        - name: "area"
+          kind: method
+
+  - id: default_export_function
+    files:
+      main.js: |
+        export default function greet(name) {
+          return "Hello, " + name;
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+
+  - id: destructuring_parameters
+    files:
+      main.js: |
+        function display({ name, age }) {
+          console.log(name, age);
+        }
+    expected:
+      symbols:
+        - name: "display"
+          kind: function
+
+  - id: rest_parameters
+    files:
+      main.js: |
+        function sum(...numbers) {
+          return numbers.reduce((a, b) => a + b, 0);
+        }
+    expected:
+      symbols:
+        - name: "sum"
+          kind: function
+
+  - id: iife
+    files:
+      main.js: |
+        (function() {
+          const secret = 42;
+          console.log(secret);
+        })();
+    expected:
+      symbols: []
+
+  - id: getter_setter
+    files:
+      main.js: |
+        class Circle {
+          constructor(r) { this._r = r; }
+          get radius() { return this._r; }
+          set radius(v) { this._r = v; }
+        }
+    expected:
+      symbols:
+        - name: "Circle"
+          kind: class
+        - name: "radius"
+          kind: method
+
+  - id: static_method
+    files:
+      main.js: |
+        class MathUtils {
+          static add(a, b) { return a + b; }
+          static multiply(a, b) { return a * b; }
+        }
+    expected:
+      symbols:
+        - name: "MathUtils"
+          kind: class
+        - name: "add"
+          kind: method
+        - name: "multiply"
+          kind: method
+
+  - id: template_literal_function
+    files:
+      main.js: |
+        function greet(name) {
+          return `Hello, ${name}!`;
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function

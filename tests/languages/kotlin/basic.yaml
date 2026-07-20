@@ -108,3 +108,120 @@ fixtures:
       symbols:
         - name: "Color"
           kind: enum
+
+  - id: extension_function
+    files:
+      Main.kt: |
+        fun String.addExclamation(): String = this + "!"
+        fun Int.double(): Int = this * 2
+    expected:
+      symbols:
+        - name: "addExclamation"
+          kind: function
+        - name: "double"
+          kind: function
+
+  - id: destructuring_declaration
+    files:
+      Main.kt: |
+        data class Point(val x: Int, val y: Int)
+        fun process() {
+            val (a, b) = Point(1, 2)
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+        - name: "process"
+          kind: function
+
+  - id: when_expression
+    files:
+      Main.kt: |
+        fun describe(n: Int): String = when (n) {
+            0 -> "zero"
+            1 -> "one"
+            else -> "other"
+        }
+    expected:
+      symbols:
+        - name: "describe"
+          kind: function
+
+  - id: try_catch_finally
+    files:
+      Main.kt: |
+        fun safeDivide(a: Int, b: Int): Int {
+            return try {
+                a / b
+            } catch (e: ArithmeticException) {
+                0
+            } finally {
+                println("done")
+            }
+        }
+    expected:
+      symbols:
+        - name: "safeDivide"
+          kind: function
+
+  - id: property_getter_setter
+    files:
+      Main.kt: |
+        class Person {
+            var name: String = ""
+                get() = field.uppercase()
+                set(value) { field = value.trim() }
+        }
+    expected:
+      symbols:
+        - name: "Person"
+          kind: class
+
+  - id: lateinit_var
+    files:
+      Main.kt: |
+        class LateInitDemo {
+            lateinit var name: String
+            fun init(n: String) { name = n }
+        }
+    expected:
+      symbols:
+        - name: "LateInitDemo"
+          kind: class
+        - name: "init"
+          kind: method
+
+  - id: inline_class
+    files:
+      Main.kt: |
+        value class UserId(val value: Int)
+    expected:
+      symbols:
+        - name: "UserId"
+          kind: class
+
+  - id: interface_with_property
+    files:
+      Main.kt: |
+        interface Named {
+            val name: String
+        }
+    expected:
+      symbols:
+        - name: "Named"
+          kind: interface
+
+  - id: function_reference
+    files:
+      Main.kt: |
+        fun process(list: List<Int>): List<Int> {
+            return list.filter(::isPositive)
+        }
+        fun isPositive(n: Int): Boolean = n > 0
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+        - name: "isPositive"
+          kind: function

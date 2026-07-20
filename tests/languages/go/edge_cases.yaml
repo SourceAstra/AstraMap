@@ -148,3 +148,111 @@ fixtures:
       symbols:
         - name: "platformSpecific"
           kind: function
+
+  - id: type_assertion
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func cast(v interface{}) int {
+          if i, ok := v.(int); ok {
+            return i
+          }
+          return 0
+        }
+    expected:
+      symbols:
+        - name: "cast"
+          kind: function
+
+  - id: select_statement
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func multiplex(ch1, ch2 chan int) int {
+          select {
+          case v := <-ch1:
+            return v
+          case v := <-ch2:
+            return v
+          }
+        }
+    expected:
+      symbols:
+        - name: "multiplex"
+          kind: function
+
+  - id: labeled_break
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func search() bool {
+        outer:
+          for i := 0; i < 10; i++ {
+            for j := 0; j < 10; j++ {
+              if i*j > 50 {
+                break outer
+              }
+            }
+          }
+          return true
+        }
+    expected:
+      symbols:
+        - name: "search"
+          kind: function
+
+  - id: method_set_interface
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type Stringer interface { String() string }
+        type MyString string
+        func (s MyString) String() string { return string(s) }
+    expected:
+      symbols:
+        - name: "Stringer"
+          kind: interface
+        - name: "MyString"
+          kind: type
+        - name: "String"
+          kind: method
+
+  - id: empty_interface
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func acceptAny(v interface{}) {}
+        func acceptEmpty(v any) {}
+    expected:
+      symbols:
+        - name: "acceptAny"
+          kind: function
+        - name: "acceptEmpty"
+          kind: function
+
+  - id: iota_enum
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type Priority int
+        const (
+          Low Priority = iota
+          Medium
+          High
+        )
+    expected:
+      symbols:
+        - name: "Priority"
+          kind: type
+        - name: "Low"
+          kind: constant
+        - name: "Medium"
+          kind: constant
+        - name: "High"
+          kind: constant

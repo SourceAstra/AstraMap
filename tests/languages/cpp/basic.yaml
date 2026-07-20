@@ -99,3 +99,131 @@ fixtures:
           kind: function
         - name: "min"
           kind: function
+
+  - id: class_constructor
+    files:
+      main.cpp: |
+        class Point {
+        public:
+            Point(int x, int y) : x(x), y(y) {}
+        private:
+            int x, y;
+        };
+    expected:
+      symbols:
+        - name: "Point"
+          kind: class
+
+  - id: destructor
+    files:
+      main.cpp: |
+        class Resource {
+        public:
+            Resource() {}
+            ~Resource() {}
+        };
+    expected:
+      symbols:
+        - name: "Resource"
+          kind: class
+
+  - id: friend_function
+    files:
+      main.cpp: |
+        class Box {
+            int width;
+        public:
+            friend void setWidth(Box& b, int w);
+        };
+        void setWidth(Box& b, int w) { b.width = w; }
+    expected:
+      symbols:
+        - name: "Box"
+          kind: class
+        - name: "setWidth"
+          kind: function
+
+  - id: inline_member_function
+    files:
+      main.cpp: |
+        class Counter {
+            int count;
+        public:
+            int get() const { return count; }
+            void set(int c) { count = c; }
+        };
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: class
+        - name: "get"
+          kind: method
+        - name: "set"
+          kind: method
+
+  - id: const_method
+    files:
+      main.cpp: |
+        class String {
+            char* data;
+        public:
+            size_t length() const { return 0; }
+        };
+    expected:
+      symbols:
+        - name: "String"
+          kind: class
+        - name: "length"
+          kind: method
+
+  - id: virtual_function
+    files:
+      main.cpp: |
+        class Base {
+        public:
+            virtual void draw() = 0;
+            virtual ~Base() {}
+        };
+    expected:
+      symbols:
+        - name: "Base"
+          kind: class
+        - name: "draw"
+          kind: method
+
+  - id: static_member
+    files:
+      main.cpp: |
+        class Config {
+        public:
+            static int getVersion() { return 1; }
+        };
+    expected:
+      symbols:
+        - name: "Config"
+          kind: class
+        - name: "getVersion"
+          kind: method
+
+  - id: reference_parameter
+    files:
+      main.cpp: |
+        void swap(int& a, int& b) {
+            int tmp = a; a = b; b = tmp;
+        }
+    expected:
+      symbols:
+        - name: "swap"
+          kind: function
+
+  - id: lambda_expression
+    files:
+      main.cpp: |
+        int main() {
+            auto add = [](int a, int b) { return a + b; };
+            return add(1, 2);
+        }
+    expected:
+      symbols:
+        - name: "main"
+          kind: function

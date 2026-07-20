@@ -98,3 +98,157 @@ fixtures:
           kind: class
         - name: "process"
           kind: method
+
+  - id: lambda_expression
+    files:
+      Main.java: |
+        import java.util.*;
+        public class Main {
+            public List<Integer> map(List<Integer> list) {
+                return list.stream().map(x -> x * 2).toList();
+            }
+        }
+    expected:
+      symbols:
+        - name: "Main"
+          kind: class
+        - name: "map"
+          kind: method
+
+  - id: try_with_resources
+    files:
+      Main.java: |
+        import java.io.*;
+        public class ResourceDemo {
+            public String read(String path) throws IOException {
+                try (BufferedReader br = new BufferedReader(new FileReader(path))) {
+                    return br.readLine();
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "ResourceDemo"
+          kind: class
+        - name: "read"
+          kind: method
+
+  - id: enum_with_fields
+    files:
+      Main.java: |
+        public enum Priority {
+            LOW(1), MEDIUM(2), HIGH(3);
+            private final int value;
+            Priority(int value) { this.value = value; }
+            public int getValue() { return value; }
+        }
+    expected:
+      symbols:
+        - name: "Priority"
+          kind: enum
+        - name: "getValue"
+          kind: method
+
+  - id: static_import
+    files:
+      Main.java: |
+        import static java.lang.Math.*;
+        public class MathDemo {
+            public double calc() { return max(1, 2) + PI; }
+        }
+    expected:
+      symbols:
+        - name: "MathDemo"
+          kind: class
+        - name: "calc"
+          kind: method
+
+  - id: var_inference
+    files:
+      Main.java: |
+        public class VarDemo {
+            public void demo() {
+                var list = new java.util.ArrayList<String>();
+                var count = 10;
+            }
+        }
+    expected:
+      symbols:
+        - name: "VarDemo"
+          kind: class
+        - name: "demo"
+          kind: method
+
+  - id: switch_expression
+    files:
+      Main.java: |
+        public class SwitchDemo {
+            public String describe(int code) {
+                return switch (code) {
+                    case 200 -> "OK";
+                    case 404 -> "Not Found";
+                    default -> "Unknown";
+                };
+            }
+        }
+    expected:
+      symbols:
+        - name: "SwitchDemo"
+          kind: class
+        - name: "describe"
+          kind: method
+
+  - id: instanceof_pattern
+    files:
+      Main.java: |
+        public class PatternDemo {
+            public String check(Object obj) {
+                if (obj instanceof String s) {
+                    return s.toUpperCase();
+                }
+                return "not string";
+            }
+        }
+    expected:
+      symbols:
+        - name: "PatternDemo"
+          kind: class
+        - name: "check"
+          kind: method
+
+  - id: synchronized_block
+    files:
+      Main.java: |
+        public class SyncDemo {
+            private final Object lock = new Object();
+            public void safe() {
+                synchronized (lock) {
+                    System.out.println("safe");
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "SyncDemo"
+          kind: class
+        - name: "safe"
+          kind: method
+
+  - id: anonymous_class
+    files:
+      Main.java: |
+        public class AnonDemo {
+            public Runnable create() {
+                return new Runnable() {
+                    public void run() {}
+                };
+            }
+        }
+    expected:
+      symbols:
+        - name: "AnonDemo"
+          kind: class
+        - name: "create"
+          kind: method
+        - name: "run"
+          kind: method

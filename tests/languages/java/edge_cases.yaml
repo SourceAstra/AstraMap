@@ -191,3 +191,141 @@ fixtures:
           kind: class
         - name: "asList"
           kind: method
+
+  - id: module_system
+    files:
+      module-info.java: |
+        module com.example.app {
+            requires java.base;
+            exports com.example.app;
+        }
+    expected:
+      symbols: []
+
+  - id: local_class
+    files:
+      Main.java: |
+        public class LocalClassDemo {
+            public void demo() {
+                class Local {
+                    void helper() {}
+                }
+                new Local().helper();
+            }
+        }
+    expected:
+      symbols:
+        - name: "LocalClassDemo"
+          kind: class
+        - name: "demo"
+          kind: method
+        - name: "Local"
+          kind: class
+        - name: "helper"
+          kind: method
+
+  - id: method_reference
+    files:
+      Main.java: |
+        import java.util.*;
+        public class MethodRefDemo {
+            public List<String> upper(List<String> list) {
+                return list.stream().map(String::toUpperCase).toList();
+            }
+        }
+    expected:
+      symbols:
+        - name: "MethodRefDemo"
+          kind: class
+        - name: "upper"
+          kind: method
+
+  - id: volatile_field
+    files:
+      Main.java: |
+        public class VolatileDemo {
+            private volatile boolean flag = false;
+            public void set() { flag = true; }
+        }
+    expected:
+      symbols:
+        - name: "VolatileDemo"
+          kind: class
+        - name: "set"
+          kind: method
+
+  - id: transient_field
+    files:
+      Main.java: |
+        public class TransientDemo {
+            private transient String cache;
+            public String get() { return cache; }
+        }
+    expected:
+      symbols:
+        - name: "TransientDemo"
+          kind: class
+        - name: "get"
+          kind: method
+
+  - id: strictfp_method
+    files:
+      Main.java: |
+        public strictfp class StrictDemo {
+            public double calc() { return 1.0 + 2.0; }
+        }
+    expected:
+      symbols:
+        - name: "StrictDemo"
+          kind: class
+        - name: "calc"
+          kind: method
+
+  - id: native_method
+    files:
+      Main.java: |
+        public class NativeDemo {
+            public native void doSomething();
+        }
+    expected:
+      symbols:
+        - name: "NativeDemo"
+          kind: class
+        - name: "doSomething"
+          kind: method
+
+  - id: assert_statement
+    files:
+      Main.java: |
+        public class AssertDemo {
+            public void check(int x) {
+                assert x > 0 : "x must be positive";
+            }
+        }
+    expected:
+      symbols:
+        - name: "AssertDemo"
+          kind: class
+        - name: "check"
+          kind: method
+
+  - id: yield_in_switch
+    files:
+      Main.java: |
+        public class YieldDemo {
+            public int value(String s) {
+                return switch (s) {
+                    case "a" -> 1;
+                    case "b" -> 2;
+                    default -> {
+                        yield -1;
+                    }
+                };
+            }
+        }
+    expected:
+      symbols:
+        - name: "YieldDemo"
+          kind: class
+        - name: "value"
+          kind: method

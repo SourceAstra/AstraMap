@@ -77,3 +77,93 @@ fixtures:
           kind: type
         - name: "create_handle"
           kind: function
+
+  - id: recursive_function
+    files:
+      main.c: |
+        int fib(int n) {
+            if (n <= 1) return n;
+            return fib(n - 1) + fib(n - 2);
+        }
+    expected:
+      symbols:
+        - name: "fib"
+          kind: function
+
+  - id: struct_initializer
+    files:
+      main.c: |
+        struct Point { int x; int y; };
+        struct Point make_point(int x, int y) {
+            struct Point p = { .x = x, .y = y };
+            return p;
+        }
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+        - name: "make_point"
+          kind: function
+
+  - id: goto_label
+    files:
+      main.c: |
+        int divide(int a, int b) {
+            if (b == 0) goto error;
+            return a / b;
+        error:
+            return 0;
+        }
+    expected:
+      symbols:
+        - name: "divide"
+          kind: function
+
+  - id: switch_case
+    files:
+      main.c: |
+        int status_code(int code) {
+            switch (code) {
+                case 200: return 0;
+                case 404: return 1;
+                default: return -1;
+            }
+        }
+    expected:
+      symbols:
+        - name: "status_code"
+          kind: function
+
+  - id: nested_struct
+    files:
+      main.c: |
+        struct Outer {
+            struct Inner { int value; } inner;
+        };
+    expected:
+      symbols:
+        - name: "Outer"
+          kind: struct
+
+  - id: typedef_function_pointer
+    files:
+      main.c: |
+        typedef int (*Comparator)(const void*, const void*);
+        typedef void (*Callback)(int);
+    expected:
+      symbols:
+        - name: "Comparator"
+          kind: type
+        - name: "Callback"
+          kind: type
+
+  - id: inline_static_function
+    files:
+      main.c: |
+        static inline int max(int a, int b) {
+            return a > b ? a : b;
+        }
+    expected:
+      symbols:
+        - name: "max"
+          kind: function

@@ -121,3 +121,144 @@ fixtures:
       symbols:
         - name: "Item"
           kind: class
+
+  - id: enum_declaration
+    files:
+      Status.java: |
+        public enum Status {
+            PENDING, ACTIVE, COMPLETED
+        }
+    expected:
+      symbols:
+        - name: "Status"
+          kind: enum
+
+  - id: annotation_definition
+    files:
+      Logged.java: |
+        import java.lang.annotation.*;
+        @Retention(RetentionPolicy.RUNTIME)
+        @Target(ElementType.METHOD)
+        public @interface Logged {
+            String value() default "";
+        }
+    expected:
+      symbols:
+        - name: "Logged"
+          kind: interface
+
+  - id: generic_method
+    files:
+      Utils.java: |
+        public class Utils {
+            public static <T> T identity(T value) { return value; }
+            public static <T extends Comparable<T>> T max(T a, T b) {
+                return a.compareTo(b) > 0 ? a : b;
+            }
+        }
+    expected:
+      symbols:
+        - name: "Utils"
+          kind: class
+        - name: "identity"
+          kind: method
+        - name: "max"
+          kind: method
+
+  - id: varargs_method
+    files:
+      MathUtils.java: |
+        public class MathUtils {
+            public static int sum(int... numbers) {
+                int total = 0;
+                for (int n : numbers) total += n;
+                return total;
+            }
+        }
+    expected:
+      symbols:
+        - name: "MathUtils"
+          kind: class
+        - name: "sum"
+          kind: method
+
+  - id: synchronized_method
+    files:
+      Counter.java: |
+        public class Counter {
+            private int count = 0;
+            public synchronized void increment() { count++; }
+            public synchronized int get() { return count; }
+        }
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: class
+        - name: "increment"
+          kind: method
+        - name: "get"
+          kind: method
+
+  - id: final_class
+    files:
+      Config.java: |
+        public final class Config {
+            public static final String VERSION = "1.0";
+        }
+    expected:
+      symbols:
+        - name: "Config"
+          kind: class
+
+  - id: package_private_class
+    files:
+      Internal.java: |
+        class Internal {
+            void helper() {}
+        }
+    expected:
+      symbols:
+        - name: "Internal"
+          kind: class
+        - name: "helper"
+          kind: method
+
+  - id: interface_with_default
+    files:
+      Printer.java: |
+        public interface Printer {
+            void print(String msg);
+            default void println(String msg) { print(msg + "\n"); }
+        }
+    expected:
+      symbols:
+        - name: "Printer"
+          kind: interface
+        - name: "print"
+          kind: method
+        - name: "println"
+          kind: method
+
+  - id: nested_class
+    files:
+      Outer.java: |
+        public class Outer {
+            public static class Inner {
+                public void method() {}
+            }
+            private class PrivateInner {
+                void helper() {}
+            }
+        }
+    expected:
+      symbols:
+        - name: "Outer"
+          kind: class
+        - name: "Inner"
+          kind: class
+        - name: "method"
+          kind: method
+        - name: "PrivateInner"
+          kind: class
+        - name: "helper"
+          kind: method

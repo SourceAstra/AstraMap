@@ -77,3 +77,61 @@ fixtures:
       symbols:
         - name: "Sum"
           kind: function
+
+  - id: map_type
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type Cache map[string]int
+    expected:
+      symbols:
+        - name: "Cache"
+          kind: type
+
+  - id: channel_usage
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func sender(ch chan<- int) { ch <- 42 }
+        func receiver(ch <-chan int) int { return <-ch }
+    expected:
+      symbols:
+        - name: "sender"
+          kind: function
+        - name: "receiver"
+          kind: function
+
+  - id: init_function
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        var globalVal int
+        func init() { globalVal = 1 }
+    expected:
+      symbols:
+        - name: "init"
+          kind: function
+
+  - id: method_value_expression
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type Greeter struct{}
+        func (g Greeter) Say(name string) string { return "Hello " + name }
+        func main() {
+          g := Greeter{}
+          f := g.Say
+          _ = f("world")
+        }
+    expected:
+      symbols:
+        - name: "Greeter"
+          kind: struct
+        - name: "Say"
+          kind: method
+        - name: "main"
+          kind: function

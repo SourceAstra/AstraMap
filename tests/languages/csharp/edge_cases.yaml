@@ -173,3 +173,153 @@ fixtures:
           kind: class
         - name: "Reverse"
           kind: method
+
+  - id: unsafe_pointer
+    files:
+      Program.cs: |
+        namespace App {
+            public unsafe class UnsafeDemo {
+                public int* GetPointer(int[] arr) {
+                    fixed (int* p = arr) {
+                        return p;
+                    }
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "UnsafeDemo"
+          kind: class
+        - name: "GetPointer"
+          kind: method
+
+  - id: implicit_operator
+    files:
+      Program.cs: |
+        namespace App {
+            public class Length {
+                public int Value { get; }
+                public Length(int v) { Value = v; }
+                public static implicit operator Length(int v) => new Length(v);
+                public static explicit operator int(Length l) => l.Value;
+            }
+        }
+    expected:
+      symbols:
+        - name: "Length"
+          kind: class
+
+  - id: operator_overload
+    files:
+      Program.cs: |
+        namespace App {
+            public class Vector {
+                public int X { get; set; }
+                public int Y { get; set; }
+                public static Vector operator +(Vector a, Vector b) => new Vector { X = a.X + b.X, Y = a.Y + b.Y };
+            }
+        }
+    expected:
+      symbols:
+        - name: "Vector"
+          kind: class
+
+  - id: extension_method
+    files:
+      Program.cs: |
+        namespace App {
+            public static class StringExtensions {
+                public static bool IsNullOrEmpty(this string? s) => string.IsNullOrEmpty(s);
+            }
+        }
+    expected:
+      symbols:
+        - name: "StringExtensions"
+          kind: class
+        - name: "IsNullOrEmpty"
+          kind: method
+
+  - id: attribute_usage
+    files:
+      Program.cs: |
+        using System;
+        namespace App {
+            [AttributeUsage(AttributeTargets.Method)]
+            public class LogAttribute : Attribute { }
+        }
+    expected:
+      symbols:
+        - name: "LogAttribute"
+          kind: class
+
+  - id: yield_return
+    files:
+      Program.cs: |
+        namespace App {
+            public class YieldDemo {
+                public System.Collections.Generic.IEnumerable<int> GetNumbers() {
+                    yield return 1;
+                    yield return 2;
+                    yield return 3;
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "YieldDemo"
+          kind: class
+        - name: "GetNumbers"
+          kind: method
+
+  - id: checked_unchecked
+    files:
+      Program.cs: |
+        namespace App {
+            public class CheckedDemo {
+                public int CheckedAdd(int a, int b) => checked(a + b);
+                public int UncheckedAdd(int a, int b) => unchecked(a + b);
+            }
+        }
+    expected:
+      symbols:
+        - name: "CheckedDemo"
+          kind: class
+        - name: "CheckedAdd"
+          kind: method
+        - name: "UncheckedAdd"
+          kind: method
+
+  - id: default_interface_method
+    files:
+      Program.cs: |
+        namespace App {
+            public interface ILogger {
+                void Log(string msg);
+                void LogError(string msg) => Log("ERROR: " + msg);
+            }
+        }
+    expected:
+      symbols:
+        - name: "ILogger"
+          kind: interface
+        - name: "Log"
+          kind: method
+        - name: "LogError"
+          kind: method
+
+  - id: generic_math
+    files:
+      Program.cs: |
+        namespace App {
+            public static class MathUtils {
+                public static T Sum<T>(T a, T b) where T : System.Numerics.IAdditionOperators<T, T, T> {
+                    return a + b;
+                }
+            }
+        }
+    expected:
+      symbols:
+        - name: "MathUtils"
+          kind: class
+        - name: "Sum"
+          kind: method

@@ -143,3 +143,102 @@ fixtures:
           kind: method
         - name: "meow"
           kind: method
+
+  - id: lambda_expression
+    files:
+      main.py: |
+        square = lambda x: x * x
+        def main():
+            return square(5)
+    expected:
+      symbols:
+        - name: "main"
+          kind: function
+
+  - id: list_comprehension
+    files:
+      main.py: |
+        def process():
+            return [x * 2 for x in range(10) if x % 2 == 0]
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: try_except_block
+    files:
+      main.py: |
+        def safe_divide(a, b):
+            try:
+                return a / b
+            except ZeroDivisionError:
+                return 0
+    expected:
+      symbols:
+        - name: "safe_divide"
+          kind: function
+
+  - id: with_statement
+    files:
+      main.py: |
+        def read_file(path):
+            with open(path) as f:
+                return f.read()
+    expected:
+      symbols:
+        - name: "read_file"
+          kind: function
+
+  - id: f_string_usage
+    files:
+      main.py: |
+        def greet(name):
+            return f"Hello, {name}!"
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+
+  - id: global_nonlocal
+    files:
+      main.py: |
+        counter = 0
+        def increment():
+            global counter
+            counter += 1
+        def outer():
+            x = 0
+            def inner():
+                nonlocal x
+                x += 1
+            return inner
+    expected:
+      symbols:
+        - name: "increment"
+          kind: function
+        - name: "outer"
+          kind: function
+        - name: "inner"
+          kind: function
+
+  - id: type_hinting
+    files:
+      main.py: |
+        from typing import List, Dict, Optional
+        def process(items: List[int]) -> Optional[Dict[str, int]]:
+            return None
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: walrus_operator
+    files:
+      main.py: |
+        def demo():
+            if (n := len("hello")) > 3:
+                return n
+    expected:
+      symbols:
+        - name: "demo"
+          kind: function

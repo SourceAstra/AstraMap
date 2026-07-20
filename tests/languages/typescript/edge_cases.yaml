@@ -125,3 +125,121 @@ fixtures:
       symbols:
         - name: "Dictionary"
           kind: interface
+
+  - id: utility_types
+    files:
+      main.ts: |
+        type PickName = Pick<{ name: string; age: number }, "name">;
+        type OmitAge = Omit<{ name: string; age: number }, "age">;
+        type ExtractString = Extract<string | number, string>;
+        type ExcludeNumber = Exclude<string | number, number>;
+    expected:
+      symbols:
+        - name: "PickName"
+          kind: type
+        - name: "OmitAge"
+          kind: type
+        - name: "ExtractString"
+          kind: type
+        - name: "ExcludeNumber"
+          kind: type
+
+  - id: recursive_type
+    files:
+      main.ts: |
+        type JSONValue = string | number | boolean | null | JSONObject | JSONArray;
+        interface JSONObject { [key: string]: JSONValue }
+        interface JSONArray extends Array<JSONValue> {}
+    expected:
+      symbols:
+        - name: "JSONValue"
+          kind: type
+        - name: "JSONObject"
+          kind: interface
+        - name: "JSONArray"
+          kind: interface
+
+  - id: branded_type
+    files:
+      main.ts: |
+        type UserID = string & { __brand: "UserID" };
+        type OrderID = string & { __brand: "OrderID" };
+    expected:
+      symbols:
+        - name: "UserID"
+          kind: type
+        - name: "OrderID"
+          kind: type
+
+  - id: enum_with_const
+    files:
+      main.ts: |
+        const enum Direction {
+          Up = 1,
+          Down = 2,
+          Left = 3,
+          Right = 4
+        }
+    expected:
+      symbols:
+        - name: "Direction"
+          kind: enum
+
+  - id: abstract_class_method
+    files:
+      main.ts: |
+        abstract class Animal {
+          abstract speak(): string;
+          move(): void {}
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: class
+        - name: "speak"
+          kind: method
+        - name: "move"
+          kind: method
+
+  - id: import_type
+    files:
+      main.ts: |
+        import type { SomeType } from "./types";
+        function process(t: SomeType): void {}
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: this_parameter
+    files:
+      main.ts: |
+        function greet(this: { name: string }) {
+          return `Hello, ${this.name}`;
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+
+  - id: conditional_type_extract
+    files:
+      main.ts: |
+        type Flatten<T> = T extends Array<infer U> ? U : T;
+        type Str = Flatten<string[]>;
+    expected:
+      symbols:
+        - name: "Flatten"
+          kind: type
+        - name: "Str"
+          kind: type
+
+  - id: keyof_typeof
+    files:
+      main.ts: |
+        const config = { host: "localhost", port: 3000 };
+        type ConfigKeys = keyof typeof config;
+    expected:
+      symbols:
+        - name: "ConfigKeys"
+          kind: type

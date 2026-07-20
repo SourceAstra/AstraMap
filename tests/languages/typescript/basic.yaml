@@ -136,3 +136,109 @@ fixtures:
       symbols:
         - name: "abs"
           kind: function
+
+  - id: arrow_function_call
+    files:
+      index.ts: |
+        const add = (a: number, b: number) => a + b;
+        const result = add(1, 2);
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: type_alias
+    files:
+      index.ts: |
+        type UserID = string;
+        type Point = { x: number; y: number };
+    expected:
+      symbols:
+        - name: "UserID"
+          kind: type
+        - name: "Point"
+          kind: type
+
+  - id: enum_declaration
+    files:
+      index.ts: |
+        enum Status {
+          Pending = 0,
+          Active = 1,
+          Completed = 2
+        }
+    expected:
+      symbols:
+        - name: "Status"
+          kind: enum
+
+  - id: const_let_declaration
+    files:
+      index.ts: |
+        const PI = 3.14159;
+        let counter = 0;
+    expected:
+      symbols: []
+
+  - id: getter_setter
+    files:
+      index.ts: |
+        class Person {
+          private _age: number = 0;
+          get age(): number { return this._age; }
+          set age(value: number) { this._age = value; }
+        }
+    expected:
+      symbols:
+        - name: "Person"
+          kind: class
+        - name: "age"
+          kind: method
+
+  - id: destructuring_assignment
+    files:
+      index.ts: |
+        interface Config { host: string; port: number }
+        function setup(cfg: Config) {
+          const { host, port } = cfg;
+        }
+    expected:
+      symbols:
+        - name: "Config"
+          kind: interface
+        - name: "setup"
+          kind: function
+
+  - id: rest_parameters
+    files:
+      index.ts: |
+        function sum(...numbers: number[]): number {
+          return numbers.reduce((a, b) => a + b, 0);
+        }
+    expected:
+      symbols:
+        - name: "sum"
+          kind: function
+
+  - id: optional_parameters
+    files:
+      index.ts: |
+        function greet(name: string, greeting?: string): string {
+          return `${greeting || "Hello"}, ${name}`;
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+
+  - id: tuple_type
+    files:
+      index.ts: |
+        type Point2D = [number, number];
+        type NameAge = [string, number];
+    expected:
+      symbols:
+        - name: "Point2D"
+          kind: type
+        - name: "NameAge"
+          kind: type

@@ -112,3 +112,109 @@ fixtures:
       symbols:
         - name: "Node"
           kind: struct
+
+  - id: union_definition
+    files:
+      main.c: |
+        union Data {
+            int i;
+            float f;
+            char c;
+        };
+    expected:
+      symbols:
+        - name: "Data"
+          kind: struct
+
+  - id: static_function
+    files:
+      main.c: |
+        static int helper(int x) { return x * 2; }
+        int main() { return helper(5); }
+    expected:
+      symbols:
+        - name: "helper"
+          kind: function
+        - name: "main"
+          kind: function
+
+  - id: extern_declaration
+    files:
+      main.c: |
+        extern int global_count;
+        extern void external_func(void);
+        int main() { return 0; }
+    expected:
+      symbols:
+        - name: "main"
+          kind: function
+
+  - id: const_qualifier
+    files:
+      main.c: |
+        const int MAX = 100;
+        int get_max() { return MAX; }
+    expected:
+      symbols:
+        - name: "get_max"
+          kind: function
+
+  - id: volatile_variable
+    files:
+      main.c: |
+        volatile int sensor_value;
+        int read_sensor() { return sensor_value; }
+    expected:
+      symbols:
+        - name: "read_sensor"
+          kind: function
+
+  - id: function_pointer
+    files:
+      main.c: |
+        int apply(int (*op)(int, int), int a, int b) {
+            return op(a, b);
+        }
+    expected:
+      symbols:
+        - name: "apply"
+          kind: function
+
+  - id: bit_field
+    files:
+      main.c: |
+        struct Flags {
+            unsigned int flag1 : 1;
+            unsigned int flag2 : 1;
+            unsigned int reserved : 6;
+        };
+    expected:
+      symbols:
+        - name: "Flags"
+          kind: struct
+
+  - id: array_parameter
+    files:
+      main.c: |
+        int sum(int arr[], int n) {
+            int total = 0;
+            for (int i = 0; i < n; i++) total += arr[i];
+            return total;
+        }
+    expected:
+      symbols:
+        - name: "sum"
+          kind: function
+
+  - id: do_while_loop
+    files:
+      main.c: |
+        int factorial(int n) {
+            int result = 1;
+            do { result *= n--; } while (n > 1);
+            return result;
+        }
+    expected:
+      symbols:
+        - name: "factorial"
+          kind: function

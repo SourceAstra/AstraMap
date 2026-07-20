@@ -141,3 +141,126 @@ fixtures:
       symbols:
         - name: "greet"
           kind: function
+
+  - id: optional_chaining
+    files:
+      main.js: |
+        function getNested(obj) {
+          return obj?.a?.b?.c ?? "default";
+        }
+    expected:
+      symbols:
+        - name: "getNested"
+          kind: function
+
+  - id: nullish_coalescing
+    files:
+      main.js: |
+        function config(opts) {
+          const timeout = opts.timeout ?? 5000;
+          const retries = opts.retries ?? 3;
+          return { timeout, retries };
+        }
+    expected:
+      symbols:
+        - name: "config"
+          kind: function
+
+  - id: logical_assignment
+    files:
+      main.js: |
+        function updateCache(cache, key, value) {
+          cache[key] ??= value;
+          return cache[key];
+        }
+    expected:
+      symbols:
+        - name: "updateCache"
+          kind: function
+
+  - id: private_class_fields
+    files:
+      main.js: |
+        class Counter {
+          #count = 0;
+          increment() { return ++this.#count; }
+          get #formatted() { return `count: ${this.#count}`; }
+        }
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: class
+        - name: "increment"
+          kind: method
+
+  - id: top_level_await
+    files:
+      main.js: |
+        const data = await fetch("/api").then(r => r.json());
+        export default data;
+    expected:
+      symbols: []
+
+  - id: import_meta
+    files:
+      main.js: |
+        function getBaseUrl() {
+          return new URL("./assets", import.meta.url).href;
+        }
+    expected:
+      symbols:
+        - name: "getBaseUrl"
+          kind: function
+
+  - id: array_groupby
+    files:
+      main.js: |
+        function groupByType(items) {
+          return Object.groupBy(items, ({ type }) => type);
+        }
+    expected:
+      symbols:
+        - name: "groupByType"
+          kind: function
+
+  - id: atomics_usage
+    files:
+      main.js: |
+        const buffer = new SharedArrayBuffer(1024);
+        const view = new Int32Array(buffer);
+        function atomicAdd(index, value) {
+          return Atomics.add(view, index, value);
+        }
+    expected:
+      symbols:
+        - name: "atomicAdd"
+          kind: function
+
+  - id: finalization_registry
+    files:
+      main.js: |
+        const registry = new FinalizationRegistry((heldValue) => {
+          console.log("cleaned up", heldValue);
+        });
+        function register(obj, value) {
+          registry.register(obj, value);
+        }
+    expected:
+      symbols:
+        - name: "register"
+          kind: function
+
+  - id: error_cause
+    files:
+      main.js: |
+        function fetchWithRetry(url) {
+          try {
+            return fetch(url);
+          } catch (e) {
+            throw new Error("Fetch failed", { cause: e });
+          }
+        }
+    expected:
+      symbols:
+        - name: "fetchWithRetry"
+          kind: function

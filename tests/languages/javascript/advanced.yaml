@@ -83,3 +83,125 @@ fixtures:
           kind: class
         - name: "run"
           kind: method
+
+  - id: promise_chain
+    files:
+      main.js: |
+        function fetchData(url) {
+          return fetch(url).then(r => r.json()).catch(e => console.error(e));
+        }
+    expected:
+      symbols:
+        - name: "fetchData"
+          kind: function
+
+  - id: async_await_class
+    files:
+      main.js: |
+        class DataLoader {
+          async load(url) { return await fetch(url); }
+        }
+    expected:
+      symbols:
+        - name: "DataLoader"
+          kind: class
+        - name: "load"
+          kind: method
+
+  - id: module_reexport
+    files:
+      index.js: |
+        export { foo } from './foo';
+        export { default as bar } from './bar';
+      foo.js: |
+        export function foo() { return "foo"; }
+      bar.js: |
+        export default function bar() { return "bar"; }
+    expected:
+      symbols:
+        - name: "foo"
+          kind: function
+        - name: "bar"
+          kind: function
+
+  - id: symbol_property
+    files:
+      main.js: |
+        const _private = Symbol('private');
+        class Secret {
+          [_private]() { return 42; }
+        }
+    expected:
+      symbols:
+        - name: "Secret"
+          kind: class
+
+  - id: proxy_handler
+    files:
+      main.js: |
+        const handler = {
+          get(target, prop) { return target[prop]; },
+          set(target, prop, value) { target[prop] = value; return true; }
+        };
+    expected:
+      symbols:
+        - name: "handler"
+          kind: variable
+
+  - id: weakref_usage
+    files:
+      main.js: |
+        const cache = new WeakMap();
+        function memoize(obj, value) {
+          cache.set(obj, value);
+          return cache.get(obj);
+        }
+    expected:
+      symbols:
+        - name: "memoize"
+          kind: function
+
+  - id: iterator_protocol
+    files:
+      main.js: |
+        class Range {
+          constructor(start, end) { this.start = start; this.end = end; }
+          [Symbol.iterator]() {
+            let i = this.start;
+            return { next() { return { value: i, done: i++ >= this.end }; } };
+          }
+        }
+    expected:
+      symbols:
+        - name: "Range"
+          kind: class
+
+  - id: decorator_like
+    files:
+      main.js: |
+        function readonly(target, key, descriptor) {
+          descriptor.writable = false;
+          return descriptor;
+        }
+        class Example {
+          @readonly
+          name = "test";
+        }
+    expected:
+      symbols:
+        - name: "readonly"
+          kind: function
+        - name: "Example"
+          kind: class
+
+  - id: dynamic_import
+    files:
+      main.js: |
+        async function loadModule() {
+          const { foo } = await import('./foo');
+          return foo();
+        }
+    expected:
+      symbols:
+        - name: "loadModule"
+          kind: function

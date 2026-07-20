@@ -141,3 +141,162 @@ fixtures:
         - name: "identity"
           kind: function
 
+  - id: trait_definition
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Drawable {
+            fn draw(&self);
+        }
+    expected:
+      symbols:
+        - name: "Drawable"
+          kind: interface
+
+  - id: const_item
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        const MAX_SIZE: usize = 1024;
+        static VERSION: &str = "1.0.0";
+    expected:
+      symbols:
+        - name: "MAX_SIZE"
+          kind: constant
+        - name: "VERSION"
+          kind: variable
+
+  - id: type_alias
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        type UserID = u64;
+        type Result<T> = std::result::Result<T, String>;
+    expected:
+      symbols:
+        - name: "UserID"
+          kind: type
+        - name: "Result"
+          kind: type
+
+  - id: closure_expression
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn main() {
+            let add = |a: i32, b: i32| a + b;
+            let _ = add(1, 2);
+        }
+    expected:
+      symbols:
+        - name: "main"
+          kind: function
+
+  - id: tuple_struct
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct Point(f64, f64);
+        struct Color(u8, u8, u8);
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+        - name: "Color"
+          kind: struct
+
+  - id: unit_type_function
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn do_something() {
+            println!("done");
+        }
+    expected:
+      symbols:
+        - name: "do_something"
+          kind: function
+
+  - id: match_expression
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn describe(n: i32) -> &'static str {
+            match n {
+                0 => "zero",
+                1 => "one",
+                _ => "other",
+            }
+        }
+    expected:
+      symbols:
+        - name: "describe"
+          kind: function
+
+  - id: if_let_expression
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn process(opt: Option<i32>) -> i32 {
+            if let Some(v) = opt {
+                return v;
+            }
+            0
+        }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: while_let_expression
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn drain(mut iter: std::vec::IntoIter<i32>) -> i32 {
+            let mut sum = 0;
+            while let Some(v) = iter.next() {
+                sum += v;
+            }
+            sum
+        }
+    expected:
+      symbols:
+        - name: "drain"
+          kind: function
+

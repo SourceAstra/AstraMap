@@ -93,3 +93,193 @@ fixtures:
       symbols:
         - name: "say_hello"
           kind: macro
+
+  - id: trait_with_default
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Greeter {
+            fn greet(&self);
+            fn default_greet() { println!("hello"); }
+        }
+    expected:
+      symbols:
+        - name: "Greeter"
+          kind: interface
+        - name: "greet"
+          kind: method
+        - name: "default_greet"
+          kind: method
+
+  - id: associated_type
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Container {
+            type Item;
+            fn get(&self) -> Self::Item;
+        }
+    expected:
+      symbols:
+        - name: "Container"
+          kind: interface
+        - name: "get"
+          kind: method
+
+  - id: where_clause
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn process<T>(item: T) -> T
+        where
+            T: Clone + std::fmt::Debug,
+        {
+            item.clone()
+        }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: enum_with_data
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        enum Message {
+            Quit,
+            Move { x: i32, y: i32 },
+            Write(String),
+        }
+    expected:
+      symbols:
+        - name: "Message"
+          kind: enum
+
+  - id: impl_trait_return
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Animal { fn speak(&self); }
+        struct Dog;
+        impl Animal for Dog {
+            fn speak(&self) { println!("woof"); }
+        }
+        fn make_animal() -> impl Animal {
+            Dog
+        }
+    expected:
+      symbols:
+        - name: "Animal"
+          kind: interface
+        - name: "Dog"
+          kind: struct
+        - name: "speak"
+          kind: method
+        - name: "make_animal"
+          kind: function
+
+  - id: reference_counted
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::rc::Rc;
+        struct Data { value: i32 }
+        fn share() -> Rc<Data> {
+            Rc::new(Data { value: 42 })
+        }
+    expected:
+      symbols:
+        - name: "Data"
+          kind: struct
+        - name: "share"
+          kind: function
+
+  - id: mutex_guard
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::sync::Mutex;
+        struct Counter { value: Mutex<i32> }
+        impl Counter {
+            fn increment(&self) {
+                let mut v = self.value.lock().unwrap();
+                *v += 1;
+            }
+        }
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: struct
+        - name: "increment"
+          kind: method
+
+  - id: iterator_trait
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        struct Range { start: i32, end: i32 }
+        impl Iterator for Range {
+            type Item = i32;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.start < self.end {
+                    let v = self.start;
+                    self.start += 1;
+                    return Some(v);
+                }
+                None
+            }
+        }
+    expected:
+      symbols:
+        - name: "Range"
+          kind: struct
+        - name: "next"
+          kind: method
+
+  - id: box_heap
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn alloc() -> Box<i32> {
+            Box::new(42)
+        }
+    expected:
+      symbols:
+        - name: "alloc"
+          kind: function

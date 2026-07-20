@@ -118,3 +118,112 @@ fixtures:
           kind: class
         - name: "name"
           kind: method
+
+  - id: value_class
+    files:
+      Main.kt: |
+        value class UserId(val value: Int)
+    expected:
+      symbols:
+        - name: "UserId"
+          kind: class
+
+  - id: data_object
+    files:
+      Main.kt: |
+        data object SingletonData
+    expected:
+      symbols:
+        - name: "SingletonData"
+          kind: class
+
+  - id: context_receiver
+    files:
+      Main.kt: |
+        interface LoggingContext {
+            fun log(msg: String)
+        }
+        context(LoggingContext)
+        fun doWork() {
+            log("working")
+        }
+    expected:
+      symbols:
+        - name: "LoggingContext"
+          kind: interface
+        - name: "doWork"
+          kind: function
+
+  - id: type_projection
+    files:
+      Main.kt: |
+        fun copyTo(dest: Array<in Any>, src: Array<out Any>) {}
+    expected:
+      symbols:
+        - name: "copyTo"
+          kind: function
+
+  - id: sam_conversion
+    files:
+      Main.kt: |
+        fun interface Runnable {
+            fun run()
+        }
+        fun execute(r: Runnable) { r.run() }
+    expected:
+      symbols:
+        - name: "Runnable"
+          kind: interface
+        - name: "execute"
+          kind: function
+
+  - id: coroutine_context
+    files:
+      Main.kt: |
+        import kotlinx.coroutines.*
+        fun customContext(): CoroutineContext = Dispatchers.Default + Job()
+    expected:
+      symbols:
+        - name: "customContext"
+          kind: function
+
+  - id: channel_usage
+    files:
+      Main.kt: |
+        import kotlinx.coroutines.*
+        import kotlinx.coroutines.channels.*
+        suspend fun producer(ch: SendChannel<Int>) {
+            for (i in 1..5) ch.send(i)
+        }
+    expected:
+      symbols:
+        - name: "producer"
+          kind: function
+
+  - id: function_type_alias
+    files:
+      Main.kt: |
+        typealias Handler = (Int, String) -> Unit
+        fun process(handler: Handler) { handler(1, "test") }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: property_delegation_custom
+    files:
+      Main.kt: |
+        import kotlin.reflect.KProperty
+        class ObservableProperty<T>(var value: T) {
+            operator fun getValue(thisRef: Any?, property: KProperty<*>): T = value
+            operator fun setValue(thisRef: Any?, property: KProperty<*>, newValue: T) { value = newValue }
+        }
+        class Person {
+            var name: String by ObservableProperty("")
+        }
+    expected:
+      symbols:
+        - name: "ObservableProperty"
+          kind: class
+        - name: "Person"
+          kind: class

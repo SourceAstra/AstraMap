@@ -198,3 +198,190 @@ fixtures:
           kind: struct
         - name: "fmt"
           kind: method
+
+  - id: async_trait
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait AsyncTask {
+            async fn run(&self);
+        }
+        struct Worker;
+        impl AsyncTask for Worker {
+            async fn run(&self) {}
+        }
+    expected:
+      symbols:
+        - name: "AsyncTask"
+          kind: interface
+        - name: "run"
+          kind: method
+        - name: "Worker"
+          kind: struct
+
+  - id: generic_associated_type
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        trait Container {
+            type Item;
+            fn get(&self) -> Self::Item;
+        }
+        struct Box<T>(T);
+        impl<T> Container for Box<T> {
+            type Item = T;
+            fn get(&self) -> T { self.0.clone() }
+        }
+    expected:
+      symbols:
+        - name: "Container"
+          kind: interface
+        - name: "get"
+          kind: method
+        - name: "Box"
+          kind: struct
+
+  - id: pin_unpin
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::pin::Pin;
+        struct SelfReferential { data: String }
+        fn process(p: Pin<&mut SelfReferential>) {
+            println!("{}", p.data);
+        }
+    expected:
+      symbols:
+        - name: "SelfReferential"
+          kind: struct
+        - name: "process"
+          kind: function
+
+  - id: cow_borrowed
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::borrow::Cow;
+        fn greet(name: Cow<'_, str>) -> String {
+            format!("Hello, {}", name)
+        }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+
+  - id: maybe_uninit
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::mem::MaybeUninit;
+        fn create() -> MaybeUninit<i32> {
+            MaybeUninit::uninit()
+        }
+    expected:
+      symbols:
+        - name: "create"
+          kind: function
+
+  - id: cell_refcell
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::cell::Cell;
+        use std::cell::RefCell;
+        struct Counter { value: Cell<i32>, cache: RefCell<Vec<i32>> }
+        impl Counter {
+            fn increment(&self) { self.value.set(self.value.get() + 1); }
+        }
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: struct
+        - name: "increment"
+          kind: method
+
+  - id: arc_rwlock
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        use std::sync::Arc;
+        use std::sync::RwLock;
+        struct Data { value: Arc<RwLock<i32>> }
+        impl Data {
+            fn read(&self) -> i32 { *self.value.read().unwrap() }
+        }
+    expected:
+      symbols:
+        - name: "Data"
+          kind: struct
+        - name: "read"
+          kind: method
+
+  - id: iterator_adaptor
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn process() -> Vec<i32> {
+            (1..10)
+                .map(|x| x * 2)
+                .filter(|x| x % 3 == 0)
+                .collect()
+        }
+    expected:
+      symbols:
+        - name: "process"
+          kind: function
+
+  - id: result_question_mark
+    files:
+      Cargo.toml: |
+        [package]
+        name = "test"
+        version = "0.1.0"
+        edition = "2021"
+      src/main.rs: |
+        fn may_fail(x: i32) -> Result<i32, String> {
+            if x > 0 { Ok(x) } else { Err("negative".to_string()) }
+        }
+        fn wrapper(x: i32) -> Result<i32, String> {
+            let v = may_fail(x)?;
+            Ok(v * 2)
+        }
+    expected:
+      symbols:
+        - name: "may_fail"
+          kind: function
+        - name: "wrapper"
+          kind: function

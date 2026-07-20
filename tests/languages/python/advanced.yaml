@@ -85,3 +85,84 @@ fixtures:
           kind: method
         - name: "__exit__"
           kind: method
+
+  - id: mixin_pattern
+    files:
+      model.py: |
+        class TimestampMixin:
+            def created_at(self):
+                return "now"
+        class User(TimestampMixin):
+            def name(self):
+                return "user"
+    expected:
+      symbols:
+        - name: "TimestampMixin"
+          kind: class
+        - name: "User"
+          kind: class
+        - name: "created_at"
+          kind: method
+        - name: "name"
+          kind: method
+
+  - id: property_setter
+    files:
+      model.py: |
+        class Temperature:
+            def __init__(self):
+                self._c = 0
+            @property
+            def celsius(self):
+                return self._c
+            @celsius.setter
+            def celsius(self, value):
+                self._c = value
+    expected:
+      symbols:
+        - name: "Temperature"
+          kind: class
+        - name: "celsius"
+          kind: method
+
+  - id: classmethod_factory
+    files:
+      model.py: |
+        class Vehicle:
+            def __init__(self, brand):
+                self.brand = brand
+            @classmethod
+            def from_json(cls, data):
+                return cls(data["brand"])
+    expected:
+      symbols:
+        - name: "Vehicle"
+          kind: class
+        - name: "from_json"
+          kind: method
+
+  - id: nested_function
+    files:
+      main.py: |
+        def outer():
+            def inner():
+                return 42
+            return inner()
+    expected:
+      symbols:
+        - name: "outer"
+          kind: function
+        - name: "inner"
+          kind: function
+
+  - id: partial_function
+    files:
+      main.py: |
+        from functools import partial
+        def add(a, b):
+            return a + b
+        add_five = partial(add, 5)
+    expected:
+      symbols:
+        - name: "add"
+          kind: function

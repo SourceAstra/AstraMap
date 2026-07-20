@@ -147,3 +147,77 @@ fixtures:
       calls:
         - caller: "Use"
           callee: "Calculate"
+
+  - id: type_alias
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        type IntSlice []int
+        type StringMap map[string]int
+    expected:
+      symbols:
+        - name: "IntSlice"
+          kind: type
+        - name: "StringMap"
+          kind: type
+
+  - id: constant_declaration
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        const MaxSize = 100
+        const Pi = 3.14159
+    expected:
+      symbols:
+        - name: "MaxSize"
+          kind: constant
+        - name: "Pi"
+          kind: constant
+
+  - id: variable_declaration
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        var GlobalCounter int
+        var GlobalMap = make(map[string]int)
+    expected:
+      symbols:
+        - name: "GlobalCounter"
+          kind: variable
+        - name: "GlobalMap"
+          kind: variable
+
+  - id: package_level_function_call
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        import "fmt"
+        func greet(name string) { fmt.Println(name) }
+        func main() { greet("world") }
+    expected:
+      symbols:
+        - name: "greet"
+          kind: function
+        - name: "main"
+          kind: function
+      calls:
+        - caller: "main"
+          callee: "greet"
+
+  - id: nested_function_literal
+    files:
+      go.mod: "module test\n"
+      main.go: |
+        package main
+        func outer() {
+          inner := func(x int) int { return x * 2 }
+          _ = inner(5)
+        }
+    expected:
+      symbols:
+        - name: "outer"
+          kind: function

@@ -128,3 +128,124 @@ fixtures:
           kind: function
         - name: "main"
           kind: function
+
+  - id: bit_manipulation_macro
+    files:
+      main.c: |
+        #define SET_BIT(x, n) ((x) |= (1U << (n)))
+        #define CLEAR_BIT(x, n) ((x) &= ~(1U << (n)))
+        #define TOGGLE_BIT(x, n) ((x) ^= (1U << (n)))
+    expected:
+      symbols: []
+
+  - id: compound_literal
+    files:
+      main.c: |
+        struct Point { int x; int y; };
+        struct Point p = (struct Point){ .x = 1, .y = 2 };
+    expected:
+      symbols:
+        - name: "Point"
+          kind: struct
+
+  - id: designated_initializer_array
+    files:
+      main.c: |
+        int arr[] = { [0] = 1, [1] = 2, [5] = 10 };
+    expected:
+      symbols: []
+
+  - id: packed_struct
+    files:
+      main.c: |
+        struct __attribute__((packed)) Header {
+            unsigned char type;
+            unsigned short length;
+        };
+    expected:
+      symbols:
+        - name: "Header"
+          kind: struct
+
+  - id: atomic_operations
+    files:
+      main.c: |
+        #include <stdatomic.h>
+        _Atomic int counter = 0;
+        int increment() {
+            return atomic_fetch_add(&counter, 1);
+        }
+    expected:
+      symbols:
+        - name: "increment"
+          kind: function
+
+  - id: aligned_allocation
+    files:
+      main.c: |
+        #include <stdlib.h>
+        void* aligned_alloc(size_t alignment, size_t size);
+        int* create_aligned() {
+            return (int*)aligned_alloc(64, 1024);
+        }
+    expected:
+      symbols:
+        - name: "create_aligned"
+          kind: function
+
+  - id: va_list_function
+    files:
+      main.c: |
+        #include <stdarg.h>
+        #include <stdio.h>
+        int sum(int count, ...) {
+            va_list args;
+            int total = 0;
+            va_start(args, count);
+            for (int i = 0; i < count; i++) {
+                total += va_arg(args, int);
+            }
+            va_end(args);
+            return total;
+        }
+    expected:
+      symbols:
+        - name: "sum"
+          kind: function
+
+  - id: pragma_directive
+    files:
+      main.c: |
+        #pragma once
+        #pragma pack(push, 1)
+        struct Packed { char a; int b; };
+        #pragma pack(pop)
+    expected:
+      symbols:
+        - name: "Packed"
+          kind: struct
+
+  - id: complex_numbers
+    files:
+      main.c: |
+        #include <complex.h>
+        double complex calc(double complex a, double complex b) {
+            return a + b;
+        }
+    expected:
+      symbols:
+        - name: "calc"
+          kind: function
+
+  - id: restrict_pointer
+    files:
+      main.c: |
+        int dot_product(int *restrict a, int *restrict b, int n) {
+            int sum = 0;
+            for (int i = 0; i < n; i++) sum += a[i] * b[i];
+            return sum;
+        }
+    expected:
+      symbols:
+        - name: "dot_product"
+          kind: function

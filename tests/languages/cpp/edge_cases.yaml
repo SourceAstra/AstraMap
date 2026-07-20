@@ -159,3 +159,117 @@ fixtures:
       symbols:
         - name: "FileGuard"
           kind: class
+
+  - id: decltype_auto
+    files:
+      main.cpp: |
+        template<typename T, typename U>
+        auto add(T a, U b) -> decltype(a + b) {
+            return a + b;
+        }
+    expected:
+      symbols:
+        - name: "add"
+          kind: function
+
+  - id: noexcept_specifier
+    files:
+      main.cpp: |
+        class SafeString {
+            char* data;
+        public:
+            SafeString() noexcept : data(nullptr) {}
+            SafeString(SafeString&& other) noexcept : data(other.data) { other.data = nullptr; }
+            void swap(SafeString& other) noexcept;
+        };
+    expected:
+      symbols:
+        - name: "SafeString"
+          kind: class
+        - name: "swap"
+          kind: method
+
+  - id: alignas_specifier
+    files:
+      main.cpp: |
+        struct alignas(64) CacheLine {
+            int data[16];
+        };
+    expected:
+      symbols:
+        - name: "CacheLine"
+          kind: struct
+
+  - id: thread_local_storage
+    files:
+      main.cpp: |
+        thread_local int counter = 0;
+        void increment() { ++counter; }
+    expected:
+      symbols:
+        - name: "increment"
+          kind: function
+
+  - id: mutable_member
+    files:
+      main.cpp: |
+        class Counter {
+            mutable int count;
+        public:
+            int get() const { return ++count; }
+        };
+    expected:
+      symbols:
+        - name: "Counter"
+          kind: class
+        - name: "get"
+          kind: method
+
+  - id: bitset_operations
+    files:
+      main.cpp: |
+        #include <bitset>
+        std::bitset<8> flags;
+        void setFlag(size_t i) { flags.set(i); }
+    expected:
+      symbols:
+        - name: "setFlag"
+          kind: function
+
+  - id: placement_new
+    files:
+      main.cpp: |
+        #include <new>
+        char buffer[sizeof(int)];
+        void* place() { return new (buffer) int(42); }
+    expected:
+      symbols:
+        - name: "place"
+          kind: function
+
+  - id: function_try_block
+    files:
+      main.cpp: |
+        class Resource {
+        public:
+            Resource() try {} catch (...) {}
+        };
+    expected:
+      symbols:
+        - name: "Resource"
+          kind: class
+
+  - id: extern_template
+    files:
+      main.cpp: |
+        template<typename T>
+        class Container {
+            T* data;
+        public:
+            Container() : data(nullptr) {}
+        };
+        extern template class Container<int>;
+    expected:
+      symbols:
+        - name: "Container"
+          kind: class
