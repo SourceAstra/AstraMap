@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS astramap_nodes (
     visibility     TEXT,                -- public/private/protected
     return_type    TEXT,                -- 返回类型
     is_exported    INTEGER DEFAULT 0,
-    provenance     TEXT DEFAULT 'tree-sitter',
+    provenance     TEXT DEFAULT 'scip',
     updated_at     INTEGER NOT NULL
 );
 
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS astramap_edges (
     source     TEXT NOT NULL,
     target     TEXT NOT NULL,
     kind       TEXT NOT NULL,           -- calls/contains/imports/extends/...
-    provenance TEXT DEFAULT 'scip',     -- scip/tree-sitter/heuristic
+    provenance TEXT DEFAULT 'scip',     -- scip/syntax-package/heuristic
     line       INTEGER,
     col        INTEGER,
     metadata   TEXT DEFAULT ''          -- JSON
@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS astramap_edges (
 CREATE TABLE IF NOT EXISTS astramap_files (
     path         TEXT PRIMARY KEY,
     content_hash TEXT NOT NULL,
+	semantic_hash TEXT DEFAULT '',
+	syntax_hash   TEXT DEFAULT '',
     language     TEXT NOT NULL,
     size         INTEGER NOT NULL,
     modified_at  INTEGER NOT NULL,
@@ -124,11 +126,21 @@ func InitAstraMapSchema(db *sqlx.DB) error {
 	// 迁移：将已有 edges 中的 NULL metadata 规约为空字符串
 	_, _ = db.Exec("UPDATE astramap_edges SET metadata = '' WHERE metadata IS NULL")
 	_, _ = db.Exec("ALTER TABLE astramap_files ADD COLUMN modified_at_ns INTEGER DEFAULT 0")
-	_, _ = db.Exec("ALTER TABLE astramap_nodes ADD COLUMN provenance TEXT DEFAULT 'tree-sitter'")
+	_, _ = db.Exec("ALTER TABLE astramap_files ADD COLUMN semantic_hash TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE astramap_files ADD COLUMN syntax_hash TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE astramap_nodes ADD COLUMN provenance TEXT DEFAULT 'scip'")
 	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'scip' WHERE id LIKE 'scip%'")
 	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'scip' WHERE id IN (SELECT source FROM astramap_edges WHERE provenance = 'scip') OR id IN (SELECT target FROM astramap_edges WHERE provenance = 'scip')")
 	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'heuristic' WHERE id LIKE 'route:%'")
-	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'tree-sitter' WHERE provenance IS NULL OR provenance = ''")
+	_, _ = db.Exec("UPDATE astramap_nodes SET provenance = 'scip' WHERE provenance IS NULL OR provenance = ''")
+	_, _ = db.Exec("DELETE FROM astramap_edges WHERE provenance = 'tree-sitter'")
+	_, _ = db.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE provenance = 'tree-sitter') OR target IN (SELECT id FROM astramap_nodes WHERE provenance = 'tree-sitter')")
+	_, _ = db.Exec("DELETE FROM astramap_nodes WHERE provenance = 'tree-sitter'")
+	_, _ = db.Exec("UPDATE astramap_files SET semantic_hash = content_hash WHERE semantic_hash = '' AND EXISTS (SELECT 1 FROM astramap_nodes WHERE file_path = astramap_files.path AND provenance = 'scip')")
+	_, _ = db.Exec("UPDATE astramap_files SET syntax_hash = content_hash WHERE syntax_hash = '' AND EXISTS (SELECT 1 FROM astramap_nodes WHERE file_path = astramap_files.path AND provenance = 'syntax-package')")
+	_, _ = db.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE language IN ('php','dart','visualbasic','bash','swift','lua','zig')) OR target IN (SELECT id FROM astramap_nodes WHERE language IN ('php','dart','visualbasic','bash','swift','lua','zig'))")
+	_, _ = db.Exec("DELETE FROM astramap_nodes WHERE language IN ('php','dart','visualbasic','bash','swift','lua','zig')")
+	_, _ = db.Exec("DELETE FROM astramap_files WHERE language IN ('php','dart','visualbasic','bash','swift','lua','zig')")
 	_, _ = db.Exec("DROP INDEX IF EXISTS idx_am_edges_unique")
 	_, _ = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_am_edges_unique ON astramap_edges(source, target, kind, provenance, line)")
 

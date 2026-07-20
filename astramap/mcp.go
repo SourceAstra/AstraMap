@@ -528,15 +528,15 @@ func handleMcpToolCall(db *sqlx.DB, projectRoot string, id interface{}, call Too
 				"indexedEdges":                  status.EdgeCount,
 				"dirtyCount":                    status.DirtyCount,
 				"dirtyFiles":                    status.DirtyFiles,
+				"semanticDirtyCount":            status.SemanticDirtyCount,
+				"semanticDirtyFiles":            status.SemanticDirtyFiles,
 				"supportedLanguages":            SupportedLanguageIDsForProject(projectRoot),
 				"languageCapabilities":          SupportedLanguageCapabilitiesForProject(projectRoot),
 				"declaredLanguageCapabilities":  SupportedLanguageCapabilitiesForProject(projectRoot),
 				"effectiveLanguageCapabilities": EffectiveLanguageCapabilitiesForProject(db, projectRoot),
 				"semanticProviders":             SemanticProviderSpecsForProject(projectRoot),
 				"projectUnits":                  DetectProjectUnits(projectRoot, SupportedLanguageIDsForProject(projectRoot), filter),
-				"builtinLanguages":              languageRuntime.BuiltinLanguages,
-				"installedLanguages":            languageRuntime.InstalledLanguages,
-				"effectiveLanguages":            languageRuntime.EffectiveLanguages,
+				"syntaxOverlays":                languageRuntime.SyntaxOverlays,
 				"languagePackageDiagnostics":    languageRuntime.Diagnostics,
 			}
 			data, _ := json.MarshalIndent(res, "", "  ")

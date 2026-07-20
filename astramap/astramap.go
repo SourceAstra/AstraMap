@@ -34,6 +34,10 @@ func logInfo(format string, v ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[INFO] "+format+"\n", v...)
 }
 
+func logWarn(format string, v ...interface{}) {
+	fmt.Fprintf(os.Stderr, "[WARN] "+format+"\n", v...)
+}
+
 func logError(format string, v ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[ERROR] "+format+"\n", v...)
 }
@@ -74,6 +78,8 @@ type AstraMapEdge struct {
 type AstraMapFile struct {
 	Path         string `db:"path" json:"path"`
 	ContentHash  string `db:"content_hash" json:"contentHash"`
+	SemanticHash string `db:"semantic_hash" json:"semanticHash"`
+	SyntaxHash   string `db:"syntax_hash" json:"syntaxHash"`
 	Language     string `db:"language" json:"language"`
 	Size         int64  `db:"size" json:"size"`
 	ModifiedAt   int64  `db:"modified_at" json:"modifiedAt"`
@@ -90,16 +96,29 @@ func ValidateScipIndexFile(scipPath string) error {
 	return err
 }
 
-func ScipIndexLanguages(scipPath string) ([]string, error) {
+// ScipIndexProjectLanguages resolves provider-level SCIP language labels to
+// AstraMap language IDs from each document path. This is required for providers
+// such as scip-clang, which labels both C and C++ documents as "cpp".
+func ScipIndexProjectLanguages(scipPath, projectRoot string) ([]string, error) {
 	index, err := readScipIndexFile(scipPath)
 	if err != nil {
 		return nil, err
 	}
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("load project filter: %w", err)
+	}
+	profile := BuildProjectProfile(projectRoot, filter, StageScip)
 	languages := make(map[string]bool)
 	for _, document := range index.Documents {
-		if language := strings.ToLower(strings.TrimSpace(document.Language)); language != "" {
-			languages[language] = true
+		if !filter.Allows(document.RelativePath, StageScip) {
+			continue
 		}
+		language := normalizeLanguage(profile, document.Language, document.RelativePath)
+		if language == "unknown" {
+			return nil, fmt.Errorf("SCIP document %s declares an unsupported language %q", document.RelativePath, document.Language)
+		}
+		languages[language] = true
 	}
 	result := make([]string, 0, len(languages))
 	for language := range languages {
@@ -208,6 +227,9 @@ func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot st
 			continue
 		}
 		docLang := normalizeLanguage(profile, doc.Language, relPath)
+		if docLang == "unknown" {
+			return fmt.Errorf("SCIP document %s declares an unsupported language %q", relPath, doc.Language)
+		}
 		fileLanguages[relPath] = docLang
 
 		// Sort occurrences to compute precise function end_line
@@ -395,7 +417,13 @@ func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot st
 	}
 	defer tx.Rollback()
 
-	// Replace symmetrically by provenance, leaving recoverable Tree-sitter nodes untouched.
+	// A new semantic baseline invalidates every prior Syntax Overlay. The caller
+	// may rebuild overlays only after this transaction commits.
+	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'syntax-package'")
+	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE provenance = 'syntax-package'")
+	_, _ = tx.Exec("UPDATE astramap_files SET semantic_hash = '', syntax_hash = ''")
+
+	// Replace the semantic layer symmetrically by provenance.
 	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'scip'")
 	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE provenance = 'scip' AND kind != 'external'")
 
@@ -434,10 +462,12 @@ func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot st
 	}
 
 	fileStmt, err := tx.Preparex(`
-		INSERT INTO astramap_files (path, content_hash, language, size, modified_at, indexed_at, node_count, errors)
-		VALUES (?, ?, ?, ?, ?, ?, ?, '')
+		INSERT INTO astramap_files (path, content_hash, semantic_hash, syntax_hash, language, size, modified_at, modified_at_ns, indexed_at, node_count, errors)
+		VALUES (?, ?, ?, '', ?, ?, ?, 0, ?, ?, '')
 		ON CONFLICT(path) DO UPDATE SET
 			content_hash=excluded.content_hash,
+			semantic_hash=excluded.semantic_hash,
+			syntax_hash='',
 			language=excluded.language,
 			size=excluded.size,
 			modified_at=excluded.modified_at,
@@ -459,7 +489,7 @@ func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot st
 			size = stat.Size()
 			modifiedAt = stat.ModTime().Unix()
 		}
-		_, _ = fileStmt.Exec(relPath, contentHash, lang, size, modifiedAt, now, fileNodeCounts[relPath])
+		_, _ = fileStmt.Exec(relPath, contentHash, contentHash, lang, size, modifiedAt, now, fileNodeCounts[relPath])
 	}
 
 	// Insert external: placeholder nodes (FK constraint requires edge targets to exist in nodes table)
@@ -513,29 +543,30 @@ func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot st
 	}
 
 	InvalidateOverviewCache()
-	logInfo("ImportScipIndexesToAstraMap: Successfully imported %d nodes, %d call edges", len(nodes), len(edges))
+	langFiles := make(map[string]int)
+	for _, lang := range fileLanguages {
+		langFiles[lang]++
+	}
+	logInfo("ImportScipIndexesToAstraMap: Imported %d files, %d nodes, %d call edges", len(fileLanguages), len(nodes), len(edges))
+	logInfo("ImportScipIndexesToAstraMap:   by language: %s", formatLanguageCounts(langFiles))
 	return nil
 }
 
-// ===== Watcher & Incremental Sync =====
-
-// SyncFileAstraMap incrementally syncs a single file, filtering via hash dirty states, and provides transactional batch writes
-func SyncFileAstraMap(db *sqlx.DB, projectRoot, filePath string) (bool, error) {
-	profile := BuildProjectProfile(projectRoot, nil, StageTreeSitter)
-	changed, err := syncFileAstraMapWithProfile(db, profile, filePath)
-	if err != nil || !changed {
-		return changed, err
+// formatLanguageCounts renders a language->count map as a stable, sorted "lang=n" list.
+func formatLanguageCounts(counts map[string]int) string {
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
 	}
-	relPath := filePath
-	if filepath.IsAbs(relPath) {
-		relPath, _ = filepath.Rel(projectRoot, relPath)
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, counts[k]))
 	}
-	relPath = filepath.ToSlash(relPath)
-	if err := ResolveCrossFileCallsForFiles(db, projectRoot, []string{relPath}); err != nil {
-		return true, fmt.Errorf("resolve cross-file calls for %s: %w", relPath, err)
-	}
-	return true, nil
+	return strings.Join(parts, ", ")
 }
+
+// ===== Watcher & Incremental Sync =====
 
 func syncFileAstraMapWithProfile(db *sqlx.DB, profile ProjectProfile, filePath string) (bool, error) {
 	projectRoot := profile.ProjectRoot
@@ -548,47 +579,68 @@ func syncFileAstraMapWithProfile(db *sqlx.DB, profile ProjectProfile, filePath s
 	if err != nil {
 		relPath = filePath
 	}
+	relPath = filepath.ToSlash(relPath)
 
 	stat, err := os.Stat(absPath)
 	if err != nil {
-		_, _ = db.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
-		_, _ = db.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
-		_, _ = db.Exec("DELETE FROM astramap_files WHERE path = ?", relPath)
-		InvalidateQueryHelperCacheForFile(relPath)
-		return true, nil
+		return removeFileAstraMapRecords(db, relPath)
+	}
+	selection, supported := ResolveLanguageWithProfile(profile, absPath)
+	if !supported || selection.Module == nil {
+		return false, nil
 	}
 
 	mtimeNS := stat.ModTime().UnixNano()
 	var existing fileIndexFingerprint
-	if err := db.Get(&existing, "SELECT content_hash, size, modified_at_ns FROM astramap_files WHERE path = ?", relPath); err == nil {
-		if existing.ModifiedAtNS > 0 && existing.Size == stat.Size() && existing.ModifiedAtNS == mtimeNS {
-			return false, nil
-		}
+	hasExisting := db.Get(&existing, "SELECT content_hash, semantic_hash, syntax_hash, size, modified_at_ns FROM astramap_files WHERE path = ?", relPath) == nil
+	if hasExisting && existing.SyntaxHash != "" && existing.ModifiedAtNS > 0 && existing.Size == stat.Size() && existing.ModifiedAtNS == mtimeNS {
+		return false, nil
 	}
 
 	contentHash, err := hashFile(absPath)
 	if err != nil {
 		return false, err
 	}
-	if existing.ContentHash == contentHash {
-		overlayChanged, overlayErr := ensureTreeSitterOverlay(db, profile, relPath, absPath)
-		if overlayErr != nil {
-			return false, overlayErr
-		}
-		if existing.ModifiedAtNS == 0 || existing.Size != stat.Size() || existing.ModifiedAtNS != mtimeNS {
-			_, _ = db.Exec("UPDATE astramap_files SET size = ?, modified_at = ?, modified_at_ns = ?, indexed_at = ? WHERE path = ?",
-				stat.Size(), stat.ModTime().Unix(), mtimeNS, time.Now().Unix(), relPath)
-		}
-		return overlayChanged, nil
+	if hasExisting && existing.SyntaxHash == contentHash {
+		_, _ = db.Exec("UPDATE astramap_files SET size = ?, modified_at = ?, modified_at_ns = ?, indexed_at = ? WHERE path = ?",
+			stat.Size(), stat.ModTime().Unix(), mtimeNS, time.Now().Unix(), relPath)
+		return false, nil
+	}
+	return SyncDirtySyntaxOverlayWithProfile(db, profile, absPath)
+}
+
+// SyncDirtySyntaxOverlayWithProfile refreshes one file's realtime syntax layer
+// and invalidates SCIP facts when their source hash no longer matches.
+func SyncDirtySyntaxOverlayWithProfile(db *sqlx.DB, profile ProjectProfile, filePath string) (bool, error) {
+	projectRoot := profile.ProjectRoot
+	absPath := filePath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(projectRoot, filePath)
 	}
 
-	nodes, edges, _, err := ParseFileIncrementalWithProfile(profile, relPath)
+	relPath, err := filepath.Rel(projectRoot, absPath)
+	if err != nil {
+		relPath = filePath
+	}
+	relPath = filepath.ToSlash(relPath)
+
+	stat, err := os.Stat(absPath)
+	if err != nil {
+		return removeFileAstraMapRecords(db, relPath)
+	}
+
+	selection, supported := ResolveLanguageWithProfile(profile, absPath)
+	if !supported || selection.Module == nil {
+		return false, nil
+	}
+
+	nodes, edges, contentHash, err := ParseFileIncrementalWithProfile(profile, relPath)
 	if err != nil {
 		return false, err
 	}
-	if err := reuseExistingIncrementalIDs(db, relPath, nodes, edges); err != nil {
-		return false, err
-	}
+	var semanticHash string
+	hasSemantic := db.Get(&semanticHash, "SELECT semantic_hash FROM astramap_files WHERE path = ?", relPath) == nil
+	invalidateSemantic := hasSemantic && semanticHash != "" && semanticHash != contentHash
 
 	tx, err := db.Beginx()
 	if err != nil {
@@ -596,277 +648,89 @@ func syncFileAstraMapWithProfile(db *sqlx.DB, profile ProjectProfile, filePath s
 	}
 	defer tx.Rollback()
 
-	// Find nodes about to be deleted to update incoming calls to external placeholders
-	var deletedNodes []struct {
-		ID       string `db:"id"`
-		Name     string `db:"name"`
-		Language string `db:"language"`
-		Kind     string `db:"kind"`
-	}
-	_ = tx.Select(&deletedNodes, "SELECT id, name, language, kind FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
-	for _, dn := range deletedNodes {
-		if dn.Kind == "function" || dn.Kind == "method" {
-			prefix := languageIDPrefixForProfile(profile, dn.Language)
-			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, dn.Name)
-			_, _ = tx.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND provenance != 'heuristic'", extID, dn.ID)
-		}
-	}
-
-	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
-	_, _ = tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
-
-	nodeStmt, err := tx.Preparex(`
-		INSERT INTO astramap_nodes (
-			id, kind, name, qualified_name, file_path, language,
-			start_line, end_line, start_column, end_column,
-			signature, docstring, visibility, return_type, is_exported, provenance, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			kind=excluded.kind,
-			name=excluded.name,
-			qualified_name=excluded.qualified_name,
-			start_line=excluded.start_line,
-			end_line=excluded.end_line,
-			signature=excluded.signature,
-			docstring=excluded.docstring,
-			provenance=excluded.provenance,
-			updated_at=excluded.updated_at
-	`)
-	if err != nil {
+	if err := replaceSyntaxOverlayTx(tx, relPath, contentHash, stat, selection.ID, nodes, edges, invalidateSemantic); err != nil {
 		return false, err
 	}
-	defer nodeStmt.Close()
-
-	for _, n := range nodes {
-		_, err = nodeStmt.Exec(
-			n.ID, n.Kind, n.Name, n.QualifiedName, n.FilePath, n.Language,
-			n.StartLine, n.EndLine, n.StartColumn, n.EndColumn,
-			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, "tree-sitter", n.UpdatedAt,
-		)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	externalSeen := make(map[string]bool)
-	for _, e := range edges {
-		if !strings.HasPrefix(e.Target, "external:") || externalSeen[e.Target] {
-			continue
-		}
-		externalSeen[e.Target] = true
-		name := externalSymbolName(e.Target)
-		_, _ = tx.Exec(`INSERT OR IGNORE INTO astramap_nodes
-			(id, kind, name, qualified_name, file_path, language, is_exported, provenance, updated_at)
-			VALUES (?, 'external', ?, ?, '', '', 0, 'tree-sitter', ?)`,
-			e.Target, name, name, time.Now().Unix())
-	}
-
-	edgeStmt, err := tx.Preparex(`
-		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, line, col, metadata)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return false, err
-	}
-	defer edgeStmt.Close()
-
-	for _, e := range edges {
-		_, err = edgeStmt.Exec(e.Source, e.Target, e.Kind, e.Provenance, e.Line, e.Col, e.Metadata)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	selection, _ := ResolveLanguageWithProfile(profile, absPath)
-	language := selection.ID
-	if len(nodes) > 0 {
-		language = nodes[0].Language
-	}
-	if language == "" {
-		language = "unknown"
-	}
-	_, _ = tx.Exec(`
-			INSERT INTO astramap_files (path, content_hash, language, size, modified_at, modified_at_ns, indexed_at, node_count, errors)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(path) DO UPDATE SET
-				content_hash=excluded.content_hash,
-				language=excluded.language,
-				size=excluded.size,
-				modified_at=excluded.modified_at,
-				modified_at_ns=excluded.modified_at_ns,
-				indexed_at=excluded.indexed_at,
-				node_count=excluded.node_count
-		`, relPath, contentHash, language, stat.Size(), stat.ModTime().Unix(), mtimeNS, time.Now().Unix(), len(nodes), "")
 
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 
-	// Bind existing external calls to the newly indexed functions/methods
-	for _, n := range nodes {
-		if n.Kind == "function" || n.Kind == "method" {
-			prefix := languageIDPrefixForProfile(profile, n.Language)
-			extID := fmt.Sprintf("external:%s . . $ %s.", prefix, n.Name)
-			_, _ = db.Exec("UPDATE astramap_edges SET target = ? WHERE target = ? AND kind = 'calls'", n.ID, extID)
-		}
-	}
-
 	InvalidateQueryHelperCacheForFile(relPath)
+	InvalidateOverviewCache()
 	return true, nil
 }
 
-func reuseExistingIncrementalIDs(db *sqlx.DB, relPath string, nodes []*AstraMapNode, edges []*AstraMapEdge) error {
-	if len(nodes) == 0 {
-		return nil
-	}
-	var existing []*AstraMapNode
-	if err := db.Select(&existing, `
-		SELECT *
-		FROM astramap_nodes
-		WHERE file_path = ?
-		ORDER BY
-			CASE
-				WHEN id LIKE 'cxx . . $%' OR id LIKE 'scip:%' OR id LIKE 'go:%' THEN 0
-				WHEN id NOT LIKE '%:%::%' THEN 1
-				ELSE 2
-			END,
-			start_line,
-			id
-	`, relPath); err != nil {
-		return err
-	}
-	if len(existing) == 0 {
-		return reuseExistingExternalIDs(db, edges)
-	}
-
-	byKey := make(map[string]string, len(existing))
-	for _, n := range existing {
-		for _, key := range nodeMatchKeys(n) {
-			if _, exists := byKey[key]; !exists {
-				byKey[key] = n.ID
-			}
-		}
-	}
-
-	remap := make(map[string]string)
-	for _, n := range nodes {
-		for _, key := range nodeMatchKeys(n) {
-			if id, exists := byKey[key]; exists {
-				remap[n.ID] = id
-				n.ID = id
-				break
-			}
-		}
-	}
-	for _, e := range edges {
-		if id, exists := remap[e.Source]; exists {
-			e.Source = id
-		}
-		if id, exists := remap[e.Target]; exists {
-			e.Target = id
-		}
-	}
-	return reuseExistingExternalIDs(db, edges)
-}
-
-func nodeMatchKeys(n *AstraMapNode) []string {
-	if n == nil {
-		return nil
-	}
-	kind := n.Kind
-	if kind == "method" {
-		kind = "function"
-	}
-	qname := strings.TrimSpace(n.QualifiedName)
-	name := strings.TrimSpace(n.Name)
-	keys := []string{}
-	if qname != "" {
-		keys = append(keys, kind+"\x00"+qname)
-	}
-	if name != "" {
-		keys = append(keys, kind+"\x00"+name)
-	}
-	return keys
-}
-
-func reuseExistingExternalIDs(db *sqlx.DB, edges []*AstraMapEdge) error {
-	if len(edges) == 0 {
-		return nil
-	}
-	names := make(map[string]string)
-	for _, e := range edges {
-		if strings.HasPrefix(e.Target, "external:") {
-			name := externalSymbolName(e.Target)
-			if name != "" {
-				names[name] = e.Target
-			}
-		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-
-	for name, currentID := range names {
-		var existingID string
-		err := db.Get(&existingID, `
-			SELECT id
-			FROM astramap_nodes
-			WHERE (kind = 'external' OR id LIKE 'external:%')
-			  AND (name = ? OR qualified_name = ? OR id LIKE ?)
-			ORDER BY
-				CASE WHEN id LIKE '%(%).%' THEN 0 ELSE 1 END,
-				id
-			LIMIT 1
-		`, name, name, "%$ "+name+"%")
-		if err != nil || existingID == "" || existingID == currentID {
-			continue
-		}
-		for _, e := range edges {
-			if e.Target == currentID {
-				e.Target = existingID
-			}
-		}
-	}
-	return nil
-}
-
-func ensureTreeSitterOverlay(db *sqlx.DB, profile ProjectProfile, relPath, absPath string) (bool, error) {
-	selection, _ := ResolveLanguageWithProfile(profile, absPath)
-	lang := selection.ID
-	prefix := languageIDPrefixForProfile(profile, lang)
-	if prefix == "unknown" {
-		return false, nil
-	}
-	var existingTS int
-	if err := db.Get(&existingTS, "SELECT COUNT(*) FROM astramap_nodes WHERE file_path = ? AND id LIKE ?", relPath, prefix+":"+relPath+"::%"); err != nil {
-		return false, err
-	}
-	if existingTS > 0 {
-		return false, nil
-	}
-
-	nodes, _, _, err := ParseFileIncrementalWithProfile(profile, relPath)
-	if err != nil {
-		return false, err
-	}
-	if len(nodes) == 0 {
-		return false, nil
-	}
-
-	var existingNames []string
-	if err := db.Select(&existingNames, "SELECT DISTINCT name FROM astramap_nodes WHERE file_path = ?", relPath); err != nil {
-		return false, err
-	}
-	conflicts := make(map[string]bool, len(existingNames))
-	for _, name := range existingNames {
-		conflicts[name] = true
-	}
-
+func removeFileAstraMapRecords(db *sqlx.DB, relPath string) (bool, error) {
 	tx, err := db.Beginx()
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		"DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR source = ? OR target = ?",
+		relPath, relPath, "file:"+relPath, "file:"+relPath,
+	); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec("DELETE FROM astramap_files WHERE path = ?", relPath); err != nil {
+		return false, err
+	}
+	if err := cleanupOrphanExternalNodesTx(tx); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+
+	InvalidateQueryHelperCacheForFile(relPath)
+	InvalidateOverviewCache()
+	return true, nil
+}
+
+func replaceSyntaxOverlayTx(tx *sqlx.Tx, relPath, contentHash string, stat os.FileInfo, language string, nodes []*AstraMapNode, edges []*AstraMapEdge, invalidateSemantic bool) error {
+	fileNodeID := "file:" + relPath
+	if invalidateSemantic {
+		if _, err := tx.Exec(
+			"DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND provenance = 'scip') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND provenance = 'scip')",
+			relPath, relPath,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND provenance = 'scip'", relPath); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(
+		"DELETE FROM astramap_edges WHERE provenance = 'syntax-package' AND (source = ? OR target = ? OR source IN (SELECT id FROM astramap_nodes WHERE file_path = ?) OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ?))",
+		fileNodeID, fileNodeID, relPath, relPath,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM astramap_nodes WHERE provenance = 'syntax-package' AND file_path = ?", relPath); err != nil {
+		return err
+	}
+
+	type semanticNode struct {
+		ID        string `db:"id"`
+		Kind      string `db:"kind"`
+		Name      string `db:"name"`
+		StartLine int    `db:"start_line"`
+	}
+	var semanticNodes []semanticNode
+	if err := tx.Select(&semanticNodes, "SELECT id, kind, name, start_line FROM astramap_nodes WHERE file_path = ? AND provenance = 'scip'", relPath); err != nil {
+		return err
+	}
+	semanticByLocation := make(map[string][]semanticNode, len(semanticNodes))
+	for _, node := range semanticNodes {
+		key := fmt.Sprintf("%s\x00%s\x00%d", node.Kind, node.Name, node.StartLine)
+		semanticByLocation[key] = append(semanticByLocation[key], node)
+	}
+	remappedIDs := make(map[string]string)
 
 	nodeStmt, err := tx.Preparex(`
 		INSERT OR IGNORE INTO astramap_nodes (
@@ -876,38 +740,95 @@ func ensureTreeSitterOverlay(db *sqlx.DB, profile ProjectProfile, relPath, absPa
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer nodeStmt.Close()
 
-	inserted := 0
 	for _, n := range nodes {
-		if conflicts[n.Name] {
+		key := fmt.Sprintf("%s\x00%s\x00%d", n.Kind, n.Name, n.StartLine)
+		if matches := semanticByLocation[key]; len(matches) == 1 {
+			remappedIDs[n.ID] = matches[0].ID
+			if _, err := tx.Exec(`
+				UPDATE astramap_nodes
+				SET signature = CASE WHEN signature = '' THEN ? ELSE signature END,
+					docstring = CASE WHEN docstring = '' THEN ? ELSE docstring END,
+					end_line = CASE WHEN end_line < ? THEN ? ELSE end_line END
+				WHERE id = ?`, n.Signature, n.Docstring, n.EndLine, n.EndLine, matches[0].ID); err != nil {
+				return err
+			}
 			continue
 		}
-		res, err := nodeStmt.Exec(
+		if _, err := nodeStmt.Exec(
 			n.ID, n.Kind, n.Name, n.QualifiedName, n.FilePath, n.Language,
 			n.StartLine, n.EndLine, n.StartColumn, n.EndColumn,
-			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, "tree-sitter", n.UpdatedAt,
-		)
-		if err != nil {
-			return false, err
-		}
-		if rows, rowErr := res.RowsAffected(); rowErr == nil && rows > 0 {
-			inserted++
+			n.Signature, n.Docstring, n.Visibility, n.ReturnType, n.IsExported, "syntax-package", n.UpdatedAt,
+		); err != nil {
+			return err
 		}
 	}
-	if inserted == 0 {
-		return false, nil
+
+	edgeStmt, err := tx.Preparex(`
+		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, line, col, metadata)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
+	defer edgeStmt.Close()
+
+	for _, e := range edges {
+		source, target := e.Source, e.Target
+		if mapped := remappedIDs[source]; mapped != "" {
+			source = mapped
+		}
+		if mapped := remappedIDs[target]; mapped != "" {
+			target = mapped
+		}
+		if _, err := edgeStmt.Exec(source, target, e.Kind, e.Provenance, e.Line, e.Col, e.Metadata); err != nil {
+			return err
+		}
 	}
-	return true, nil
+	if err := cleanupOrphanExternalNodesTx(tx); err != nil {
+		return err
+	}
+
+	fileStmt, err := tx.Preparex(`
+		INSERT INTO astramap_files (path, content_hash, semantic_hash, syntax_hash, language, size, modified_at, modified_at_ns, indexed_at, node_count, errors)
+		VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, '')
+		ON CONFLICT(path) DO UPDATE SET
+			content_hash=excluded.content_hash,
+			syntax_hash=excluded.syntax_hash,
+			language=excluded.language,
+			size=excluded.size,
+			modified_at=excluded.modified_at,
+			modified_at_ns=excluded.modified_at_ns,
+			indexed_at=excluded.indexed_at,
+			node_count=excluded.node_count,
+			errors=''
+	`)
+	if err != nil {
+		return err
+	}
+	defer fileStmt.Close()
+
+	_, err = fileStmt.Exec(relPath, contentHash, contentHash, language, stat.Size(), stat.ModTime().Unix(), stat.ModTime().UnixNano(), time.Now().Unix(), len(nodes))
+	return err
+}
+
+func cleanupOrphanExternalNodesTx(tx *sqlx.Tx) error {
+	_, err := tx.Exec(`
+		DELETE FROM astramap_nodes
+		WHERE kind = 'external'
+		  AND id NOT IN (SELECT source FROM astramap_edges)
+		  AND id NOT IN (SELECT target FROM astramap_edges)
+	`)
+	return err
 }
 
 type fileIndexFingerprint struct {
 	ContentHash  string `db:"content_hash"`
+	SemanticHash string `db:"semantic_hash"`
+	SyntaxHash   string `db:"syntax_hash"`
 	Size         int64  `db:"size"`
 	ModifiedAtNS int64  `db:"modified_at_ns"`
 }
@@ -1014,16 +935,16 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 	if err != nil {
 		return result, fmt.Errorf("failed to read AstraMap config: %w", err)
 	}
-	profile := BuildProjectProfile(projectRoot, filter, StageTreeSitter)
+	profile := BuildProjectProfile(projectRoot, filter, StageSyntax)
 	pruned, err := PruneExcludedFiles(db, filter)
 	if err != nil {
 		return result, err
 	}
 	result.Pruned = pruned
 
-	prunedDeleted, err := PruneDeletedFiles(db, projectRoot)
-	if err != nil {
-		logError("PruneDeletedFiles failed: %v", err)
+	prunedDeleted, pruneDeletedErr := PruneDeletedFiles(db, projectRoot)
+	if pruneDeletedErr != nil {
+		logError("PruneDeletedFiles failed: %v", pruneDeletedErr)
 	} else if prunedDeleted > 0 {
 		result.PrunedDeleted = prunedDeleted
 		logInfo("PruneDeletedFiles: Cleaned up residual records for %d deleted files", prunedDeleted)
@@ -1034,37 +955,41 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 	scanned := 0
 	updated := 0
 	updatedFiles := make([]string, 0)
-	err = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		relPath, _ := filepath.Rel(projectRoot, path)
-		if info.IsDir() {
-			if !filter.AllowsDir(relPath, StageTreeSitter) {
-				return filepath.SkipDir
+	if hasSyntaxOverlay(profile, languages) {
+		err = filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			relPath, _ := filepath.Rel(projectRoot, path)
+			if info.IsDir() {
+				if !filter.AllowsDir(relPath, StageSyntax) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			selection, supported := ResolveLanguageWithProfile(profile, path)
+			if !supported || selection.Module == nil || (len(languages) > 0 && !languages[selection.ID]) {
+				return nil
+			}
+			if !filter.Allows(relPath, StageSyntax) {
+				return nil
+			}
+
+			scanned++
+
+			changed, syncErr := syncFileAstraMapWithProfile(db, profile, path)
+			if syncErr != nil {
+				logWarn("skip file due to parse error: %s: %v", relPath, syncErr)
+				return nil
+			}
+			if changed {
+				updated++
+				updatedFiles = append(updatedFiles, relPath)
 			}
 			return nil
-		}
-
-		if !IsLanguageFile(profile, path, languages) {
-			return nil
-		}
-		if !filter.Allows(relPath, StageTreeSitter) {
-			return nil
-		}
-
-		scanned++
-
-		changed, syncErr := syncFileAstraMapWithProfile(db, profile, path)
-		if syncErr != nil {
-			return syncErr
-		}
-		if changed {
-			updated++
-			updatedFiles = append(updatedFiles, relPath)
-		}
-		return nil
-	})
+		})
+	}
 	result.Scanned = scanned
 	result.Updated = updated
 	result.UpdatedFiles = updatedFiles
@@ -1089,86 +1014,17 @@ func SyncAllFilesAstraMapResult(db *sqlx.DB, projectRoot string, langFilter ...s
 	return result, err
 }
 
-func SyncChangedFilesAstraMapResult(db *sqlx.DB, projectRoot string, paths []string, langFilter ...string) (SyncAllFilesResult, error) {
-	result := SyncAllFilesResult{}
-	if len(paths) == 0 {
-		return result, nil
+func hasSyntaxOverlay(profile ProjectProfile, languages map[string]bool) bool {
+	registry := profile.registry
+	if registry == nil {
+		registry = languageRegistryForProject(profile.ProjectRoot)
 	}
-
-	filter, err := LoadIndexFilter(projectRoot)
-	if err != nil {
-		return result, fmt.Errorf("failed to read AstraMap config: %w", err)
-	}
-	profile := BuildProjectProfile(projectRoot, filter, StageTreeSitter)
-
-	languages := languageFilterSet(profile, langFilter)
-	seen := make(map[string]bool)
-	for _, rawPath := range paths {
-		if rawPath == "" {
-			continue
-		}
-		absPath := rawPath
-		if !filepath.IsAbs(absPath) {
-			absPath = filepath.Join(projectRoot, rawPath)
-		}
-		relPath, relErr := filepath.Rel(projectRoot, absPath)
-		if relErr != nil {
-			continue
-		}
-		relPath = filepath.ToSlash(relPath)
-		if seen[relPath] {
-			continue
-		}
-		seen[relPath] = true
-
-		info, statErr := os.Stat(absPath)
-		if statErr == nil && info.IsDir() {
-			if !filter.AllowsDir(relPath, StageTreeSitter) {
-				continue
-			}
-			result.PrunedDeleted += pruneDeletedUnderPath(db, projectRoot, relPath)
-			continue
-		}
-
-		if statErr != nil {
-			result.PrunedDeleted += pruneDeletedUnderPath(db, projectRoot, relPath)
-			continue
-		}
-		if !IsLanguageFile(profile, absPath, languages) {
-			continue
-		}
-
-		if statErr == nil && !filter.Allows(relPath, StageTreeSitter) {
-			if removed, removeErr := removeIndexedFile(db, relPath); removeErr != nil {
-				return result, removeErr
-			} else if removed {
-				result.Pruned = true
-			}
-			continue
-		}
-
-		result.Scanned++
-		changed, err := syncFileAstraMapWithProfile(db, profile, absPath)
-		if err != nil {
-			return result, err
-		}
-		if changed {
-			result.Updated++
-			result.UpdatedFiles = append(result.UpdatedFiles, relPath)
+	for id, spec := range registry.languages {
+		if spec.module != nil && (len(languages) == 0 || languages[id]) {
+			return true
 		}
 	}
-
-	if result.Updated == 0 && !result.Pruned && result.PrunedDeleted == 0 {
-		return result, nil
-	}
-
-	_ = ResolveGoInterfaces(db)
-	_ = ResolveWebRoutesForFiles(db, projectRoot, result.UpdatedFiles)
-	if err := ResolveCrossFileCallsForFiles(db, projectRoot, result.UpdatedFiles); err != nil {
-		return result, fmt.Errorf("resolve cross-file calls: %w", err)
-	}
-	InvalidateOverviewCache()
-	return result, nil
+	return false
 }
 
 func languageFilterSet(profile ProjectProfile, filters []string) map[string]bool {
@@ -1185,54 +1041,6 @@ func languageFilterSet(profile ProjectProfile, filters []string) map[string]bool
 	return result
 }
 
-func pruneDeletedUnderPath(db *sqlx.DB, projectRoot, relPath string) int {
-	var files []string
-	if err := db.Select(&files, "SELECT path FROM astramap_files WHERE path = ? OR path LIKE ?", relPath, strings.TrimRight(relPath, "/")+"/%"); err != nil {
-		return 0
-	}
-	pruned := 0
-	for _, filePath := range files {
-		if _, err := os.Stat(filepath.Join(projectRoot, filePath)); err == nil {
-			continue
-		}
-		if removed, err := removeIndexedFile(db, filePath); err == nil && removed {
-			pruned++
-		}
-	}
-	return pruned
-}
-
-func removeIndexedFile(db *sqlx.DB, relPath string) (bool, error) {
-	res, err := db.Exec("DELETE FROM astramap_edges WHERE source IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%') OR target IN (SELECT id FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%')", relPath, relPath)
-	if err != nil {
-		return false, err
-	}
-	affected := int64(0)
-	if res != nil {
-		affected, _ = res.RowsAffected()
-	}
-	res, err = db.Exec("DELETE FROM astramap_nodes WHERE file_path = ? AND id NOT LIKE 'external%'", relPath)
-	if err != nil {
-		return false, err
-	}
-	if res != nil {
-		if rows, rowErr := res.RowsAffected(); rowErr == nil {
-			affected += rows
-		}
-	}
-	res, err = db.Exec("DELETE FROM astramap_files WHERE path = ?", relPath)
-	if err != nil {
-		return false, err
-	}
-	if res != nil {
-		if rows, rowErr := res.RowsAffected(); rowErr == nil {
-			affected += rows
-		}
-	}
-	InvalidateQueryHelperCacheForFile(relPath)
-	return affected > 0, nil
-}
-
 func PruneExcludedFiles(db *sqlx.DB, filter *IndexFilter) (bool, error) {
 	var files []string
 	if err := db.Select(&files, "SELECT path FROM astramap_files"); err != nil {
@@ -1247,7 +1055,7 @@ func PruneExcludedFiles(db *sqlx.DB, filter *IndexFilter) (bool, error) {
 
 	pruned := false
 	for _, filePath := range files {
-		if filter.Allows(filePath, StageTreeSitter) {
+		if filter.Allows(filePath, StageSyntax) {
 			continue
 		}
 
@@ -1349,16 +1157,17 @@ func EffectiveLanguageCapabilitiesForProject(db *sqlx.DB, projectRoot string) []
 		spec := registry.languages[id]
 		state := CapabilityState{
 			Language: spec.ID, DeclaredLevel: capabilityLevel(spec.Capabilities),
-			EffectiveLevel: capabilityLevel(syntaxCapabilities), GrammarStatus: "ready",
-			ProviderStatus: "not-applicable",
+			EffectiveLevel: "unavailable", SyntaxStatus: "missing",
+			ProviderStatus: "not-configured",
 		}
-		if spec.Semantic != nil {
-			state.ProviderStatus = "not-configured"
-			_ = db.Get(&state.Artifacts, "SELECT CASE WHEN EXISTS (SELECT 1 FROM astramap_nodes WHERE language = ? AND provenance = 'scip') THEN 1 ELSE 0 END", spec.ID)
-			if state.Artifacts > 0 {
-				state.EffectiveLevel = state.DeclaredLevel
-				state.ProviderStatus = "imported"
-			}
+		if spec.module != nil {
+			state.SyntaxStatus = "ready"
+			state.EffectiveLevel = "syntax"
+		}
+		_ = db.Get(&state.Artifacts, "SELECT CASE WHEN EXISTS (SELECT 1 FROM astramap_nodes WHERE language = ? AND provenance = 'scip') THEN 1 ELSE 0 END", spec.ID)
+		if state.Artifacts > 0 {
+			state.EffectiveLevel = state.DeclaredLevel
+			state.ProviderStatus = "imported"
 		}
 		result = append(result, state)
 	}
@@ -1458,7 +1267,13 @@ func ResolveGoInterfaces(db *sqlx.DB) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	var implementsEdges int
+	_ = db.Get(&implementsEdges, `SELECT COUNT(*) FROM astramap_edges WHERE provenance = 'heuristic' AND kind = 'implements'`)
+	logInfo("ResolveGoInterfaces: resolved %d heuristic implements edges", implementsEdges)
+	return nil
 }
 
 // ResolveWebRoutes Web route reflection handler: scans route bindings and establishes edges from routes to controller Handlers
@@ -1579,7 +1394,13 @@ func resolveWebRoutes(db *sqlx.DB, projectRoot string, files []string) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	var routeNodes int
+	_ = db.Get(&routeNodes, `SELECT COUNT(*) FROM astramap_nodes WHERE kind = 'route'`)
+	logInfo("ResolveWebRoutes: resolved %d heuristic route nodes", routeNodes)
+	return nil
 }
 
 // ===== SCIP Helper Functions =====
@@ -1745,7 +1566,34 @@ func normalizeCScipNode(node *AstraMapNode, _ string, sourceLines []string) {
 	if node.Signature == "" && node.StartLine > 0 && len(sourceLines) >= node.StartLine {
 		node.Signature = strings.TrimSpace(sourceLines[node.StartLine-1])
 	}
+	if node.Kind == "macro" {
+		node.Name = extractCMacroName(node.Name, node.Signature)
+		node.QualifiedName = node.Name
+	}
 	node.Kind = normalizeCDeclarationKind(node.Kind, node.Signature)
+}
+
+// extractCMacroName recovers the real macro identifier from a #define signature.
+// scip-clang emits position-based names like "file.h:3:10`!" which are useless
+// as public identifiers. The actual macro name is the first token after #define.
+func extractCMacroName(syntheticName, signature string) string {
+	if !strings.ContainsRune(syntheticName, '`') && !strings.ContainsRune(syntheticName, ':') {
+		return syntheticName
+	}
+	sig := strings.TrimSpace(signature)
+	if !strings.HasPrefix(sig, "#define") {
+		return syntheticName
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(sig, "#define"))
+	// The macro name is the first identifier token; stop at '(' for function-like macros.
+	i := 0
+	for i < len(rest) && (rest[i] == '_' || (rest[i] >= 'a' && rest[i] <= 'z') || (rest[i] >= 'A' && rest[i] <= 'Z') || (rest[i] >= '0' && rest[i] <= '9')) {
+		i++
+	}
+	if i == 0 {
+		return syntheticName
+	}
+	return rest[:i]
 }
 
 func normalizeCDeclarationKind(kind, signature string) string {

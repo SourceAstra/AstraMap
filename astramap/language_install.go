@@ -39,13 +39,12 @@ type LanguageInstallOptions struct {
 }
 
 type LanguagePackageInfo struct {
-	ID          string   `json:"id"`
-	Version     string   `json:"version"`
-	DisplayName string   `json:"displayName"`
-	Enabled     bool     `json:"enabled"`
-	Scope       string   `json:"scope"`
-	Source      string   `json:"source"`
-	Languages   []string `json:"languages,omitempty"`
+	ID          string `json:"id"`
+	Version     string `json:"version"`
+	DisplayName string `json:"displayName"`
+	Enabled     bool   `json:"enabled"`
+	Scope       string `json:"scope"`
+	Source      string `json:"source"`
 }
 
 type languageCatalog struct {
@@ -142,7 +141,7 @@ func InstallLanguagePackage(source string, options LanguageInstallOptions) (Lang
 	if err != nil {
 		return LanguagePackageInfo{}, err
 	}
-	if err := validateLanguageActivation(root, options.ProjectRoot, manifest); err != nil {
+	if err := validateLanguageActivation(manifest); err != nil {
 		return LanguagePackageInfo{}, err
 	}
 	if err := probeLanguageWorker(installedManifest, executable); err != nil {
@@ -198,7 +197,7 @@ func EnableLanguagePackage(id, version string, options LanguageInstallOptions) e
 	if manifest.ID != id || manifest.Version != version {
 		return fmt.Errorf("language package coordinate mismatch: %s@%s", id, version)
 	}
-	if err := validateLanguageActivation(root, options.ProjectRoot, manifest); err != nil {
+	if err := validateLanguageActivation(manifest); err != nil {
 		return err
 	}
 	if err := probeLanguageWorker(manifest, executable); err != nil {
@@ -585,58 +584,16 @@ func loadTrustedLanguageKeys(root, extraPath string) (map[string]ed25519.PublicK
 	return result, nil
 }
 
-func validateLanguageActivation(root, projectRoot string, manifest languageprotocol.Manifest) error {
-	registry := &languageRegistrySnapshot{
-		languages: make(map[string]*LanguageSpec), aliases: make(map[string]string),
-		extensions: make(map[string]string), filenames: make(map[string]string),
+func validateLanguageActivation(manifest languageprotocol.Manifest) error {
+	spec := languageByID[normalizeLanguageID(manifest.ID)]
+	if spec == nil || spec.ID != manifest.ID {
+		return fmt.Errorf("syntax overlay targets unsupported language: %s", manifest.ID)
 	}
-	for i := range builtinLanguages {
-		if err := registry.add(cloneLanguageSpec(&builtinLanguages[i])); err != nil {
-			return err
-		}
-	}
-	userRoot := userLanguageRoot()
-	if filepath.Clean(root) != filepath.Clean(userRoot) {
-		if err := addActiveLanguagePackages(registry, userRoot, "user", ""); err != nil {
-			return err
-		}
-		if existing := registry.languages[manifest.ID]; existing != nil && existing.module != nil {
-			registry.remove(manifest.ID)
-		}
-	}
-	if err := addActiveLanguagePackages(registry, root, projectRoot, manifest.ID); err != nil {
-		return err
-	}
-	return registry.add(languageSpecFromManifest(manifest, &manifestOnlyLanguageModule{manifest: manifest}, "pending"))
-}
-
-func addActiveLanguagePackages(registry *languageRegistrySnapshot, root, source, replacedID string) error {
-	active, err := readOrCreateActiveLanguageSet(root)
-	if err != nil {
-		return err
-	}
-	for id, version := range active.Packages {
-		if id == replacedID {
-			continue
-		}
-		installed, executable, loadErr := loadInstalledManifest(filepath.Join(root, "packages", id, version))
-		if loadErr != nil {
-			return loadErr
-		}
-		if err := registry.add(languageSpecFromManifest(installed, pooledProcessLanguageModule(installed, executable), "validation:"+source)); err != nil {
-			return err
-		}
+	if manifest.IDPrefix != spec.IDPrefix || manifest.QualifiedSeparator != spec.QualifiedSeparator {
+		return fmt.Errorf("syntax overlay identity does not match supported language: %s", manifest.ID)
 	}
 	return nil
 }
-
-type manifestOnlyLanguageModule struct{ manifest languageprotocol.Manifest }
-
-func (m *manifestOnlyLanguageModule) Manifest() languageprotocol.Manifest { return m.manifest }
-func (m *manifestOnlyLanguageModule) Parse(languageprotocol.ParseRequest) (languageprotocol.FileFacts, error) {
-	return languageprotocol.FileFacts{}, fmt.Errorf("manifest-only language module cannot parse")
-}
-func (m *manifestOnlyLanguageModule) Close() error { return nil }
 
 func resolveLanguagePackageSource(source string, options LanguageInstallOptions) (resolvedLanguagePackage, error) {
 	if strings.Contains(source, "://") || strings.HasSuffix(strings.ToLower(source), ".amaplang") || strings.ContainsAny(source, `/\\`) {

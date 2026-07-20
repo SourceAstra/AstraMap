@@ -14,10 +14,10 @@ import (
 type IndexStage string
 
 const (
-	StageDetect     IndexStage = "detect"
-	StageScip       IndexStage = "scip"
-	StageTreeSitter IndexStage = "tree-sitter"
-	StageHeuristic  IndexStage = "heuristic"
+	StageDetect    IndexStage = "detect"
+	StageScip      IndexStage = "scip"
+	StageSyntax    IndexStage = "syntax-package"
+	StageHeuristic IndexStage = "heuristic"
 )
 
 // ===== Exclude Rule Types =====
@@ -256,7 +256,7 @@ func (f *IndexFilter) AllowsDir(relPath string, stage IndexStage) bool {
 
 type ProjectRoot struct {
 	Path      string // Path relative to the project root
-	Ecosystem string // "go", "node", "rust", "maven", "gradle", "dotnet", "cmake", "python", "swift", "bazel"
+	Ecosystem string // "go", "node", "rust", "maven", "gradle", "dotnet", "cmake", "python", "bazel", or a certified profile ID
 }
 
 var rootMarkers = map[string]string{
@@ -271,7 +271,6 @@ var rootMarkers = map[string]string{
 	"CMakeLists.txt":   "cmake",
 	"pyproject.toml":   "python",
 	"setup.py":         "python",
-	"composer.json":    "php",
 	"WORKSPACE":        "bazel",
 	"WORKSPACE.bazel":  "bazel",
 	"MODULE.bazel":     "bazel",
@@ -500,9 +499,6 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 		return nil, err
 	}
 
-	// Backward compatibility: scipExclude / treeSitterExclude in old config are merged into Exclude
-	// (These fields are written directly to Exclude in addIndexPattern)
-
 	// Load .gitignore
 	gitIgnorePath := filepath.Join(projectRoot, ".gitignore")
 	if gitIgnoreFile, err := os.Open(gitIgnorePath); err == nil {
@@ -523,42 +519,6 @@ func LoadIndexFilter(projectRoot string) (*IndexFilter, error) {
 	// Ecosystem-aware
 	roots := DetectProjectRoots(projectRoot)
 	filter.ecosystemRules = BuildEcosystemRules(roots)
-	for _, spec := range languageRegistryForProject(projectRoot).languages {
-		if spec.module == nil {
-			continue
-		}
-		manifest := spec.module.Manifest()
-		if len(manifest.Filter.Files) > 0 {
-			filter.ecosystemRules = append(filter.ecosystemRules, ExcludeRule{
-				ID: "package." + spec.ID + ".files", Description: spec.DisplayName + " generated files",
-				Ecosystem: spec.ID, Match: append([]string(nil), manifest.Filter.Files...),
-				Kind: ExcludeGeneratedSource, Confidence: 100, Overridable: true,
-			})
-		}
-		for _, root := range roots {
-			if root.Ecosystem != spec.ID {
-				continue
-			}
-			prefix := root.Path
-			if prefix != "" {
-				prefix += "/"
-			}
-			var patterns []string
-			for _, directory := range manifest.Filter.Directories {
-				directory = strings.Trim(strings.TrimSpace(directory), "/")
-				if directory != "" {
-					patterns = append(patterns, prefix+directory+"/**")
-				}
-			}
-			if len(patterns) > 0 {
-				filter.ecosystemRules = append(filter.ecosystemRules, ExcludeRule{
-					ID:          "package." + spec.ID + ".directories@" + root.Path,
-					Description: spec.DisplayName + " project outputs", Ecosystem: spec.ID,
-					Match: patterns, Kind: ExcludeBuildArtifact, Confidence: 100, Overridable: true,
-				})
-			}
-		}
-	}
 
 	return filter, nil
 }
@@ -653,9 +613,7 @@ func BuildIndexFilterMatchReport(projectRoot string, filter *IndexFilter) (*Inde
 // ===== Internal Helper Functions =====
 
 func isValidConfigKey(normalized string) bool {
-	return normalized == "include" || normalized == "exclude" ||
-		normalized == "scipexclude" || normalized == "treesitterexclude" ||
-		normalized == "forceinclude"
+	return normalized == "include" || normalized == "exclude" || normalized == "forceinclude"
 }
 
 func stripConfigComment(line string) string {
@@ -693,9 +651,6 @@ func addIndexPattern(filter *IndexFilter, key, value string) {
 	case "include":
 		filter.Include = append(filter.Include, normalizeFilterPath(value))
 	case "exclude":
-		filter.Exclude = append(filter.Exclude, normalizeFilterPath(value))
-	case "scipexclude", "treesitterexclude":
-		// 向后兼容：合并到 Exclude
 		filter.Exclude = append(filter.Exclude, normalizeFilterPath(value))
 	case "forceinclude":
 		filter.ForceInclude = append(filter.ForceInclude, normalizeFilterPath(value))

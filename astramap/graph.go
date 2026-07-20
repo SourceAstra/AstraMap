@@ -68,6 +68,51 @@ func GetCallees(db *sqlx.DB, symbolID string) ([]*AstraMapEdge, error) {
 	return edges, err
 }
 
+// duplicateNodeIDs returns all node IDs that share the same kind, file_path, and name
+// as the given node. This handles the case where SCIP and syntax-package layers
+// produce separate nodes for the same logical symbol.
+func duplicateNodeIDs(db *sqlx.DB, nodeID string) []string {
+	var node AstraMapNode
+	if err := db.Get(&node, "SELECT id, kind, name, file_path FROM astramap_nodes WHERE id = ? LIMIT 1", nodeID); err != nil {
+		return []string{nodeID}
+	}
+	var ids []string
+	if err := db.Select(&ids, "SELECT id FROM astramap_nodes WHERE kind = ? AND file_path = ? AND name = ?", node.Kind, node.FilePath, node.Name); err != nil || len(ids) == 0 {
+		return []string{nodeID}
+	}
+	return ids
+}
+
+// GetCallersForAllDuplicates finds callers for a node and all its duplicate IDs,
+// deduplicating results by source node ID.
+func GetCallersForAllDuplicates(db *sqlx.DB, nodeID string) ([]*AstraMapEdge, error) {
+	allIDs := duplicateNodeIDs(db, nodeID)
+	if len(allIDs) == 1 {
+		return GetCallers(db, allIDs[0])
+	}
+	query, args, err := sqlx.In("SELECT "+edgeCols+" FROM astramap_edges WHERE target IN (?) AND kind = 'calls' ORDER BY source, line, id", allIDs)
+	if err != nil {
+		return GetCallers(db, nodeID)
+	}
+	query = db.Rebind(query)
+	var edges []*AstraMapEdge
+	if err := db.Select(&edges, query, args...); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(edges))
+	deduped := make([]*AstraMapEdge, 0, len(edges))
+	for _, edge := range edges {
+		if !seen[edge.Source] {
+			seen[edge.Source] = true
+			deduped = append(deduped, edge)
+		}
+	}
+	for _, edge := range deduped {
+		annotateConditionalMetadata(db, edge)
+	}
+	return deduped, nil
+}
+
 // AnalyzeImpact performs change impact analysis: recursively traces all upstream callers and calculates the impact factor
 func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, error) {
 	maxDepth = normalizeImpactDepth(maxDepth)
@@ -96,7 +141,7 @@ func AnalyzeImpact(db *sqlx.DB, symbolID string, maxDepth int) (*ImpactResult, e
 			continue
 		}
 
-		callers, err := GetCallers(db, curr)
+		callers, err := GetCallersForAllDuplicates(db, curr)
 		if err != nil {
 			return nil, err
 		}

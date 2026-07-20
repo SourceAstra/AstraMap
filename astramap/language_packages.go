@@ -34,15 +34,12 @@ type languageRegistrySnapshot struct {
 	aliases     map[string]string
 	extensions  map[string]string
 	filenames   map[string]string
-	activeCount int
 	diagnostics []string
 }
 
 type LanguageRuntimeSummary struct {
-	BuiltinLanguages   int      `json:"builtinLanguages"`
-	InstalledLanguages int      `json:"installedLanguages"`
-	EffectiveLanguages int      `json:"effectiveLanguages"`
-	Diagnostics        []string `json:"diagnostics,omitempty"`
+	SyntaxOverlays int      `json:"syntaxOverlays"`
+	Diagnostics    []string `json:"diagnostics,omitempty"`
 }
 
 type activeLanguageSet struct {
@@ -82,16 +79,11 @@ func cloneLanguageSpec(source *LanguageSpec) *LanguageSpec {
 	result.Aliases = append([]string(nil), source.Aliases...)
 	result.Toolchain = cloneToolchain(source.Toolchain)
 	result.projectManifests = append([]string(nil), source.projectManifests...)
-	if source.packageSemantic != nil {
-		semantic := *source.packageSemantic
-		semantic.Args = append([]string(nil), source.packageSemantic.Args...)
-		result.packageSemantic = &semantic
-	}
 	return &result
 }
 
 func (r *languageRegistrySnapshot) add(spec *LanguageSpec) error {
-	if spec == nil || spec.ID == "" || spec.IDPrefix == "" || (spec.grammar == nil && spec.module == nil) {
+	if spec == nil || spec.ID == "" || spec.IDPrefix == "" || spec.Semantic == nil {
 		return fmt.Errorf("invalid language module specification")
 	}
 	if owner := r.languages[spec.ID]; owner != nil {
@@ -143,31 +135,6 @@ func (r *languageRegistrySnapshot) add(spec *LanguageSpec) error {
 		r.filenames[strings.ToLower(name)] = spec.ID
 	}
 	return nil
-}
-
-func (r *languageRegistrySnapshot) remove(id string) {
-	spec := r.languages[id]
-	if spec == nil {
-		return
-	}
-	delete(r.languages, id)
-	for _, alias := range spec.Aliases {
-		key := strings.ToLower(strings.TrimSpace(alias))
-		if r.aliases[key] == id {
-			delete(r.aliases, key)
-		}
-	}
-	for _, ext := range spec.Extensions {
-		if r.extensions[ext] == id {
-			delete(r.extensions, ext)
-		}
-	}
-	for _, name := range spec.Filenames {
-		key := strings.ToLower(name)
-		if r.filenames[key] == id {
-			delete(r.filenames, key)
-		}
-	}
 }
 
 func (spec *LanguageSpec) sourceName() string {
@@ -253,7 +220,6 @@ func (r *languageRegistrySnapshot) loadActive(root string, overridePackage bool)
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		r.activeCount++
 		version := active.Packages[id]
 		packageDir := filepath.Join(root, "packages", id, version)
 		manifest, artifactPath, loadErr := loadInstalledManifest(packageDir)
@@ -261,85 +227,36 @@ func (r *languageRegistrySnapshot) loadActive(root string, overridePackage bool)
 			r.diagnostics = append(r.diagnostics, loadErr.Error())
 			continue
 		}
-		module := pooledProcessLanguageModule(manifest, artifactPath)
-		spec := languageSpecFromManifest(manifest, module, packageDir)
-		var replaced *LanguageSpec
-		if existing := r.languages[spec.ID]; overridePackage && existing != nil && existing.module != nil {
-			replaced = existing
-			r.remove(spec.ID)
+		existing := r.languages[manifest.ID]
+		if existing == nil {
+			r.diagnostics = append(r.diagnostics, fmt.Sprintf("syntax overlay %q targets an unsupported language", manifest.ID))
+			continue
 		}
-		if addErr := r.add(spec); addErr != nil {
-			if replaced != nil {
-				_ = r.add(replaced)
-			}
-			r.diagnostics = append(r.diagnostics, addErr.Error())
+		if existing.module != nil && existing.source != "" && !overridePackage {
+			r.diagnostics = append(r.diagnostics, fmt.Sprintf("duplicate user syntax overlay for %q", manifest.ID))
+			continue
 		}
+		existing.module = pooledProcessLanguageModule(manifest, artifactPath)
+		existing.source = packageDir
+		existing.Capabilities.Containers = manifest.Capabilities.Containers
+		existing.Capabilities.LocalCalls = manifest.Capabilities.LocalCalls
+		existing.Capabilities.Imports = manifest.Capabilities.Imports
+		existing.Capabilities.IncrementalSyntax = manifest.Capabilities.IncrementalSyntax
 	}
 }
 
 func LanguageRuntimeForProject(projectRoot string) LanguageRuntimeSummary {
 	registry := languageRegistryForProject(projectRoot)
-	return LanguageRuntimeSummary{
-		BuiltinLanguages: len(builtinLanguages), InstalledLanguages: registry.activeCount,
-		EffectiveLanguages: len(registry.languages), Diagnostics: append([]string(nil), registry.diagnostics...),
-	}
-}
-
-func languageSpecFromManifest(manifest languageprotocol.Manifest, module languageModule, source string) *LanguageSpec {
-	extensions := sortedKeys(manifest.Detection.Extensions)
-	filenames := sortedKeys(manifest.Detection.Filenames)
-	shebangs := make([]ShebangRule, len(manifest.Detection.Shebangs))
-	for i, rule := range manifest.Detection.Shebangs {
-		shebangs[i] = ShebangRule{Contains: append([]string(nil), rule.Contains...), Dialect: rule.Dialect}
-	}
-	toolchain := make([]ToolchainRequirement, len(manifest.Toolchain))
-	for i, requirement := range manifest.Toolchain {
-		toolchain[i] = ToolchainRequirement{
-			Label: requirement.Label, Commands: append([]string(nil), requirement.Commands...),
-			InstallHint: requirement.InstallHint, WhenAnyFiles: append([]string(nil), requirement.WhenAnyFiles...),
+	overlays := 0
+	for _, spec := range registry.languages {
+		if spec.module != nil {
+			overlays++
 		}
 	}
-	spec := &LanguageSpec{
-		ID: manifest.ID, DisplayName: manifest.DisplayName, Aliases: append([]string(nil), manifest.Aliases...),
-		IDPrefix: manifest.IDPrefix, QualifiedSeparator: manifest.QualifiedSeparator,
-		Extensions: extensions, Filenames: filenames,
-		Detection: DetectionSpec{
-			Extensions: cloneStringMap(manifest.Detection.Extensions), Filenames: cloneStringMap(manifest.Detection.Filenames),
-			Shebangs: shebangs,
-		},
-		Capabilities: CapabilitySet{
-			Definitions: manifest.Capabilities.Definitions, Containers: manifest.Capabilities.Containers,
-			LocalCalls: manifest.Capabilities.LocalCalls, Imports: manifest.Capabilities.Imports,
-			CrossFileCalls: manifest.Capabilities.CrossFileCalls, OverloadResolve: manifest.Capabilities.OverloadResolve,
-			Implementations: manifest.Capabilities.Implementations, IncrementalSyntax: manifest.Capabilities.IncrementalSyntax,
-		},
-		Toolchain: toolchain, module: module, source: source,
-		packageSemantic: manifest.Semantic, projectManifests: append([]string(nil), manifest.Project.Manifests...),
+	return LanguageRuntimeSummary{
+		SyntaxOverlays: overlays,
+		Diagnostics:    append([]string(nil), registry.diagnostics...),
 	}
-	if manifest.CaseInsensitive {
-		spec.NormalizeIdentity = strings.ToLower
-	}
-	if manifest.Semantic != nil {
-		spec.Semantic = &SemanticBinding{ProviderID: manifest.Semantic.ProviderID, Mode: manifest.Semantic.Mode}
-	}
-	return spec
-}
-
-func sortedKeys(values map[string]string) []string {
-	result := make([]string, 0, len(values))
-	for key := range values {
-		result = append(result, strings.ToLower(key))
-	}
-	sort.Strings(result)
-	return result
-}
-
-func cloneStringMap(values map[string]string) map[string]string {
-	result := make(map[string]string, len(values))
-	for key, value := range values {
-		result[strings.ToLower(key)] = value
-	}
-	return result
 }
 
 func pooledProcessLanguageModule(manifest languageprotocol.Manifest, executable string) *processLanguageModule {
@@ -361,6 +278,11 @@ func CloseLanguageModules() {
 	languageModulePool.Unlock()
 	for _, module := range modules {
 		_ = module.Close()
+	}
+	for index := range builtinLanguages {
+		if builtinLanguages[index].module != nil {
+			_ = builtinLanguages[index].module.Close()
+		}
 	}
 }
 
@@ -464,47 +386,8 @@ func validateLanguageManifest(manifest languageprotocol.Manifest) error {
 		return fmt.Errorf("invalid language id prefix: %s", manifest.IDPrefix)
 	case manifest.ProtocolMin > languageprotocol.Version || manifest.ProtocolMax < languageprotocol.Version:
 		return fmt.Errorf("language protocol range %d-%d is incompatible with %d", manifest.ProtocolMin, manifest.ProtocolMax, languageprotocol.Version)
-	case len(manifest.Detection.Extensions) == 0 && len(manifest.Detection.Filenames) == 0 && len(manifest.Detection.Shebangs) == 0:
-		return fmt.Errorf("manifest has no file detection rules")
 	case len(manifest.Artifacts) == 0:
 		return fmt.Errorf("manifest has no worker artifacts")
-	}
-	for ext := range manifest.Detection.Extensions {
-		if !strings.HasPrefix(ext, ".") || ext != strings.ToLower(ext) {
-			return fmt.Errorf("invalid extension: %s", ext)
-		}
-	}
-	seenAliases := make(map[string]bool, len(manifest.Aliases))
-	for _, alias := range manifest.Aliases {
-		key := strings.ToLower(strings.TrimSpace(alias))
-		if key == "" || strings.ContainsAny(key, `/\\`) || strings.ContainsRune(key, '\x00') || seenAliases[key] {
-			return fmt.Errorf("invalid language alias: %s", alias)
-		}
-		seenAliases[key] = true
-	}
-	for name := range manifest.Detection.Filenames {
-		if strings.TrimSpace(name) == "" || filepath.Base(name) != name || strings.Contains(name, `\`) {
-			return fmt.Errorf("invalid language filename: %s", name)
-		}
-	}
-	for _, shebang := range manifest.Detection.Shebangs {
-		if len(shebang.Contains) == 0 {
-			return fmt.Errorf("language shebang rule has no match value")
-		}
-		for _, value := range shebang.Contains {
-			if strings.TrimSpace(value) == "" || strings.ContainsRune(value, '\x00') {
-				return fmt.Errorf("invalid language shebang match")
-			}
-		}
-	}
-	for _, marker := range manifest.Project.Manifests {
-		name := strings.TrimSpace(marker)
-		if name == "" || strings.ContainsAny(name, `/\\`) || name == "*" {
-			return fmt.Errorf("invalid language project manifest: %s", marker)
-		}
-	}
-	if manifest.Semantic != nil && strings.TrimSpace(manifest.Semantic.ProviderID) == "" {
-		return fmt.Errorf("language semantic provider id is required")
 	}
 	seenArtifacts := make(map[string]bool, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {

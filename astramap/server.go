@@ -69,15 +69,15 @@ func StartStandaloneServer(db *sqlx.DB, projectRoot, host string, port int) erro
 			"indexedEdges":                  status.EdgeCount,
 			"dirtyCount":                    status.DirtyCount,
 			"dirtyFiles":                    status.DirtyFiles,
+			"semanticDirtyCount":            status.SemanticDirtyCount,
+			"semanticDirtyFiles":            status.SemanticDirtyFiles,
 			"supportedLanguages":            SupportedLanguageIDsForProject(projectRoot),
 			"languageCapabilities":          SupportedLanguageCapabilitiesForProject(projectRoot),
 			"declaredLanguageCapabilities":  SupportedLanguageCapabilitiesForProject(projectRoot),
 			"effectiveLanguageCapabilities": EffectiveLanguageCapabilitiesForProject(readDB, projectRoot),
 			"semanticProviders":             SemanticProviderSpecsForProject(projectRoot),
 			"projectUnits":                  DetectProjectUnits(projectRoot, SupportedLanguageIDsForProject(projectRoot), filter),
-			"builtinLanguages":              languageRuntime.BuiltinLanguages,
-			"installedLanguages":            languageRuntime.InstalledLanguages,
-			"effectiveLanguages":            languageRuntime.EffectiveLanguages,
+			"syntaxOverlays":                languageRuntime.SyntaxOverlays,
 			"languagePackageDiagnostics":    languageRuntime.Diagnostics,
 		})
 	})
@@ -2477,7 +2477,7 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			}
 			childPath := filepath.Join(path, e.Name())
 			relPath, _ := filepath.Rel(projectRoot, childPath)
-			if !filter.AllowsDir(relPath, StageTreeSitter) {
+			if !filter.AllowsDir(relPath, StageSyntax) {
 				continue
 			}
 			addDir(childPath)
@@ -2530,28 +2530,22 @@ func watchProjectFiles(db *sqlx.DB, projectRoot string) {
 			mu.Unlock()
 
 			anyChanged := false
-			profile := BuildProjectProfile(projectRoot, filter, StageTreeSitter)
+			profile := BuildProjectProfile(projectRoot, filter, StageSyntax)
 			for _, name := range pending {
 				relPath, _ := filepath.Rel(projectRoot, name)
-				changed, err := syncFileAstraMapWithProfile(db, profile, name)
+				changed, err := SyncDirtySyntaxOverlayWithProfile(db, profile, name)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "[WATCH] Sync failed %s: %v\n", relPath, err)
+					fmt.Fprintf(os.Stderr, "[WATCH] Overlay refresh failed %s: %v\n", relPath, err)
 					continue
 				}
 				if changed {
-					fmt.Fprintf(os.Stderr, "[WATCH] Synced %s\n", relPath)
+					fmt.Fprintf(os.Stderr, "[WATCH] Refreshed syntax overlay %s\n", relPath)
 					anyChanged = true
 				}
 			}
 			if anyChanged {
-				fmt.Fprintf(os.Stderr, "[WATCH] Updating cross-file relationships, please wait...\n")
-				_ = ResolveGoInterfaces(db)
-				_ = ResolveWebRoutes(db, projectRoot)
-				if err := ResolveCrossFileCalls(db, projectRoot); err != nil {
-					fmt.Fprintf(os.Stderr, "[WATCH] Cross-file call resolution failed: %v\n", err)
-				}
 				InvalidateOverviewCache()
-				fmt.Fprintf(os.Stderr, "[WATCH] Cross-file relationship update complete\n")
+				fmt.Fprintf(os.Stderr, "[WATCH] Syntax overlay update complete\n")
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {

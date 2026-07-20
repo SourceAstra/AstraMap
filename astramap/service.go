@@ -79,11 +79,13 @@ func cleanQueryTerms(query string) []string {
 
 // IndexStatus holds index health metrics.
 type IndexStatus struct {
-	NodeCount  int      `json:"node_count" db:"node_count"`
-	EdgeCount  int      `json:"edge_count" db:"edge_count"`
-	FileCount  int      `json:"file_count" db:"file_count"`
-	DirtyCount int      `json:"dirty_count"`
-	DirtyFiles []string `json:"dirty_files"`
+	NodeCount          int      `json:"node_count" db:"node_count"`
+	EdgeCount          int      `json:"edge_count" db:"edge_count"`
+	FileCount          int      `json:"file_count" db:"file_count"`
+	DirtyCount         int      `json:"dirty_count"`
+	DirtyFiles         []string `json:"dirty_files"`
+	SemanticDirtyCount int      `json:"semantic_dirty_count"`
+	SemanticDirtyFiles []string `json:"semantic_dirty_files"`
 }
 
 // ExploreFileResult groups symbols and source code for a single file.
@@ -537,7 +539,7 @@ func QuerySearchPaged(db *sqlx.DB, query, kind string, limit, offset int) ([]*As
 	params := []interface{}{"%" + query + "%", "%" + query + "%"}
 	if kind != "" {
 		if kind == "struct" {
-			q += "AND ((kind = 'struct' AND signature NOT LIKE 'enum %' AND signature NOT LIKE 'typedef %') OR (kind = 'class' AND language IN ('c', 'cpp') AND signature NOT LIKE 'enum %' AND signature NOT LIKE 'typedef %' AND name NOT LIKE '%_e') OR (kind IN ('typedef', 'type') AND language IN ('c', 'cpp') AND signature LIKE 'typedef struct%')) "
+			q += "AND ((kind = 'struct' AND signature NOT LIKE 'enum %' AND signature NOT LIKE 'typedef %') OR (kind = 'class' AND language IN ('c', 'cpp') AND signature NOT LIKE 'enum %' AND signature NOT LIKE 'typedef %' AND name NOT LIKE '%_e')) "
 		} else if kind == "enum" {
 			q += "AND (kind = 'enum' OR (kind IN ('class', 'struct') AND language IN ('c', 'cpp') AND (signature LIKE 'enum %' OR signature LIKE 'typedef enum%' OR name LIKE '%_e' OR name LIKE '%enum%')) OR (kind IN ('typedef', 'type') AND language IN ('c', 'cpp') AND signature LIKE 'typedef enum%')) "
 		} else {
@@ -581,7 +583,7 @@ func normalizeSearchNodeKind(node *AstraMapNode, requestedKind string) {
 			node.Kind = "enum"
 		}
 	case "struct":
-		if strings.HasPrefix(signature, "struct ") || strings.HasPrefix(signature, "typedef struct ") {
+		if strings.HasPrefix(signature, "struct ") {
 			node.Kind = "struct"
 		}
 	}
@@ -596,13 +598,7 @@ func normalizeTypedefNodeKind(node *AstraMapNode) {
 	}
 	signature := strings.TrimSpace(node.Signature)
 	if strings.HasPrefix(signature, "typedef ") {
-		if strings.Contains(signature, "struct") {
-			node.Kind = "struct"
-		} else if strings.Contains(signature, "enum") {
-			node.Kind = "enum"
-		} else {
-			node.Kind = "type"
-		}
+		node.Kind = "typedef"
 	}
 }
 
@@ -1013,6 +1009,12 @@ func QueryStatusWithProjectRoot(db *sqlx.DB, projectRoot string) (*IndexStatus, 
 		s.DirtyFiles = dirty
 		s.DirtyCount = dirtyCount
 	}
+	if err := db.Get(&s.SemanticDirtyCount, "SELECT COUNT(*) FROM astramap_files WHERE syntax_hash != '' AND semantic_hash != syntax_hash"); err != nil {
+		return nil, err
+	}
+	if err := db.Select(&s.SemanticDirtyFiles, "SELECT path FROM astramap_files WHERE syntax_hash != '' AND semantic_hash != syntax_hash ORDER BY path LIMIT 100"); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -1029,30 +1031,69 @@ func QueryDirtyFilesWithCount(db *sqlx.DB, projectRoot string, limit int) ([]str
 	if err := db.Select(&files, "SELECT * FROM astramap_files ORDER BY path"); err != nil {
 		return nil, 0, err
 	}
+	indexed := make(map[string]*AstraMapFile, len(files))
+	for _, file := range files {
+		if file != nil && file.Path != "" {
+			indexed[filepath.ToSlash(file.Path)] = file
+		}
+	}
 	dirty := make([]string, 0)
 	dirtyCount := 0
-	for _, f := range files {
-		if f == nil || f.Path == "" {
-			continue
+	markDirty := func(path string) {
+		dirtyCount++
+		dirty = append(dirty, path)
+	}
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return nil, 0, err
+	}
+	profile := BuildProjectProfile(projectRoot, filter, StageSyntax)
+	seen := make(map[string]bool, len(indexed))
+	err = filepath.Walk(projectRoot, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info == nil {
+			return nil
 		}
-		absPath := filepath.Join(projectRoot, f.Path)
-		stat, err := os.Stat(absPath)
-		if err != nil {
-			dirtyCount++
-			if len(dirty) < limit {
-				dirty = append(dirty, f.Path)
+		relPath, relErr := filepath.Rel(projectRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		relPath = filepath.ToSlash(relPath)
+		if info.IsDir() {
+			if path != projectRoot && !filter.AllowsDir(relPath, StageSyntax) {
+				return filepath.SkipDir
 			}
-			continue
+			return nil
 		}
-		if stat.Size() != f.Size || stat.ModTime().Unix() != f.ModifiedAt {
-			hash, err := fileContentHash(absPath)
-			if err != nil || hash != f.ContentHash {
-				dirtyCount++
-				if len(dirty) < limit {
-					dirty = append(dirty, f.Path)
-				}
-			}
+		selection, supported := ResolveLanguageWithProfile(profile, path)
+		if !supported || selection.Module == nil || !filter.Allows(relPath, StageSyntax) {
+			return nil
 		}
+		seen[relPath] = true
+		file := indexed[relPath]
+		if file == nil || file.SyntaxHash == "" {
+			markDirty(relPath)
+			return nil
+		}
+		if info.Size() == file.Size && info.ModTime().UnixNano() == file.ModifiedAtNS {
+			return nil
+		}
+		hash, hashErr := fileContentHash(path)
+		if hashErr != nil || hash != file.SyntaxHash {
+			markDirty(relPath)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	for path := range indexed {
+		if !seen[path] {
+			markDirty(path)
+		}
+	}
+	sort.Strings(dirty)
+	if len(dirty) > limit {
+		dirty = dirty[:limit]
 	}
 	return dirty, dirtyCount, nil
 }
@@ -1246,7 +1287,7 @@ func resolveCanonicalTraceStart(db *sqlx.DB, nodeID string) string {
 		return nodeID
 	}
 
-	// Calculate degree only when multiple candidates with the same name exist
+	// Calculate incoming degree (callers) only when multiple candidates with the same name exist
 	type idDegree struct {
 		ID     string `db:"id"`
 		Degree int    `db:"degree"`
@@ -1254,7 +1295,7 @@ func resolveCanonicalTraceStart(db *sqlx.DB, nodeID string) string {
 	var ranked []idDegree
 	q, args, err := sqlx.In(`
 		SELECT n.id,
-		       (SELECT COUNT(*) FROM astramap_edges e WHERE e.kind = 'calls' AND (e.source = n.id OR e.target = n.id)) AS degree
+		       (SELECT COUNT(*) FROM astramap_edges e WHERE e.kind = 'calls' AND e.target = n.id) AS degree
 		FROM astramap_nodes n
 		WHERE n.id IN (?)
 		ORDER BY degree DESC, n.id

@@ -193,7 +193,7 @@ func languageFactsToGraph(spec LanguageSelection, facts languageprotocol.FileFac
 		node := &AstraMapNode{
 			ID: id, Kind: fact.Kind, Name: fact.Name, QualifiedName: fact.QualifiedName,
 			FilePath: relPath, Language: spec.ID, StartLine: fact.StartLine, EndLine: fact.EndLine,
-			Signature: fact.Signature, Docstring: fact.Docstring, Provenance: "language-package", UpdatedAt: now,
+			Signature: fact.Signature, Docstring: fact.Docstring, Provenance: "syntax-package", UpdatedAt: now,
 		}
 		if node.QualifiedName == "" {
 			node.QualifiedName = node.Name
@@ -214,7 +214,7 @@ func languageFactsToGraph(spec LanguageSelection, facts languageprotocol.FileFac
 			}
 			parentID = parent.ID
 		}
-		edges = append(edges, &AstraMapEdge{Source: parentID, Target: node.ID, Kind: "contains", Provenance: "language-package"})
+		edges = append(edges, &AstraMapEdge{Source: parentID, Target: node.ID, Kind: "contains", Provenance: "syntax-package"})
 	}
 	for _, fact := range facts.Calls {
 		caller := byLocalID[fact.CallerLocalID]
@@ -233,7 +233,7 @@ func languageFactsToGraph(spec LanguageSelection, facts languageprotocol.FileFac
 			continue
 		}
 		edges = append(edges, &AstraMapEdge{
-			Source: caller.ID, Target: targetID, Kind: "calls", Provenance: "language-package",
+			Source: caller.ID, Target: targetID, Kind: "calls", Provenance: "syntax-package",
 			Line: fact.Line, Col: fact.Column, Metadata: strings.TrimSpace(fact.Metadata),
 		})
 	}
@@ -242,7 +242,7 @@ func languageFactsToGraph(spec LanguageSelection, facts languageprotocol.FileFac
 			continue
 		}
 		edges = append(edges, &AstraMapEdge{
-			Source: "file:" + relPath, Target: "import:" + fact.Path, Kind: "imports", Provenance: "language-package", Line: fact.Line,
+			Source: "file:" + relPath, Target: "import:" + fact.Path, Kind: "imports", Provenance: "syntax-package", Line: fact.Line,
 		})
 	}
 	return nodes, edges, nil

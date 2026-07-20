@@ -30,10 +30,9 @@ var projectMarkers = []projectMarker{
 	{Ecosystem: "node", Providers: []string{"typescript"}, Exact: []string{"package.json", "tsconfig.json"}},
 	{Ecosystem: "python", Providers: []string{"python"}, Exact: []string{"pyproject.toml", "setup.py"}},
 	{Ecosystem: "clang", Providers: []string{"clang"}, Exact: []string{"compile_commands.json", "CMakeLists.txt", "Makefile", "makefile"}},
-	{Ecosystem: "jvm", Providers: []string{"java"}, Exact: []string{"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"}},
+	{Ecosystem: "jvm", Providers: []string{"java"}, Exact: []string{"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "scip-java.json"}},
 	{Ecosystem: "rust", Providers: []string{"rust"}, Exact: []string{"Cargo.toml"}},
 	{Ecosystem: "dotnet", Providers: []string{"dotnet"}, Suffixes: []string{".sln", ".csproj"}},
-	{Ecosystem: "php", Providers: []string{"php"}, Exact: []string{"composer.json"}},
 }
 
 func DetectProjectUnits(projectRoot string, languages []string, filter *IndexFilter) []ProjectUnit {

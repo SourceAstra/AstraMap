@@ -1,5 +1,9 @@
 # AstraMap 设计文档
 
+> **架构基线**：语言索引的状态机、支持矩阵和一致性契约以
+> `language-all-external-architecture.md` 为准：Core 内置 12 种正式语言的 Tree-sitter 实时层，
+> SCIP 提供最终跨文件语义，外置模块只能覆盖内置语法实现。
+
 > **定位**：一个独立的高精度语义代码地图引擎。通过 MCP (Model Context Protocol) stdio 服务和 HTTP REST API，为 AI 编程代理（Claude Code、Cursor、Codex 等）和开发者提供代码库的 "节点 + 边" 全景关系图，实现函数级精确定位和极致的 Token 压缩。
 
 ---
@@ -51,11 +55,10 @@
 ```mermaid
 graph TD
     A[源代码] -->|go.mod / package.json / Cargo.toml| B[SCIP 索引生成器]
-    A -->|源文件| D2[Tree-sitter 增量解析器]
-    A -->|源文件| D3[语言包工作者]
+    A -->|源文件| D2[内置 Tree-sitter 实时层]
+    A -.->|可选替换内置实现| D2
     B -->|index.scip| D[AstraMap 合并引擎]
-    D2 -->|动态补丁| D
-    D3 -->|FileFacts| D
+    D2 -->|FileFacts| D
     D -->|来源合并/去重| E[(SQLite 知识图谱)]
 
     F[MCP 服务器] -->|SQL 递归查询| E
@@ -64,36 +67,29 @@ graph TD
     I[AI Agent / IDE] -->|MCP stdio| F
 ```
 
-### 2.2 "SCIP 高精度源 + Tree-sitter 动态补丁 + 语言包工作者" 三轨融合模型
+### 2.2 “Tree-sitter 实时层 + SCIP 最终语义”双层模型
 
 ```
                     索引构建流水线
                     ═══════════════════
 
-  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-  │   SCIP 索引      │   │  Tree-sitter   │   │  语言包         │
-  │   (静态高精度    │   │  (增量语法补丁) │   │  (外部进程工作者)│
-  │    度)           │   │                 │   │                 │
-  │                  │   │                 │   │                 │
-  │  scip-clang      │   │  Go/WASM 解析器 │   │  Dart/Ruby/Lua │
-  │  scip-go         │   │  12 种内置语法  │   │  Scala/Swift   │
-  │  scip-typescript │   │  增量文件扫描   │   │  Visual Basic  │
-  │  scip-python     │   │  实时补丁       │   │  Zig           │
-  │  scip-java       │   │                 │   │                │
-  │  scip-rust       │   │                 │   │  languageprotocol│
-  │  scip-dotnet     │   │                 │   │  v1 有线协议    │
-  │  scip-php        │   │                 │   │                 │
-  └────────┬─────────┘   └────────┬─────────┘   └────────┬─────────┘
-           │                      │                       │
-           │ provenance:"scip"    │ provenance:"tree-sitter" provenance:"language-package"
-           │                      │                       │
-           ▼                      ▼                       ▼
+  ┌────────────────────────┐       ┌────────────────────────────────┐
+  │ SCIP 最终语义层         │       │ Tree-sitter 实时层              │
+  │                        │       │                                │
+  │ 编译器级跨文件关系      │       │ 12 种正式语言全部内置 grammar   │
+  │ 重载/类型/实现消歧       │       │ 文件级哈希检测与原子替换         │
+  │ 按 ProjectUnit 生成     │       │ 外置模块可替换同一语言实现       │
+  │ provenance: scip       │       │ provenance: syntax-package     │
+  └───────────┬────────────┘       └────────────────┬───────────────┘
+              │                                     │
+              └──────────────────┬──────────────────┘
+                                 ▼
   ┌─────────────────────────────────────────────────────────────────┐
   │                    合并引擎                                      │
   │                                                                 │
   │  规则：SCIP 边 > Tree-sitter 边（同源冲突）                     │
-  │        Tree-sitter 补充 SCIP 未覆盖的文件                        │
-  │        语言包补充内置语法未覆盖的文件                            │
+  │        Tree-sitter 始终表示磁盘当前文件状态                       │
+  │        外置模块只能覆盖内置 Tree-sitter 实现                      │
   │        边的 provenance 字段标记数据来源                          │
   └──────────────────────────┬──────────────────────────────────────┘
                              │
@@ -108,7 +104,8 @@ graph TD
   │                                                                 │
   │  边：source, target, kind, provenance, line, col, metadata    │
   │                                                                 │
-  │  文件：path, content_hash, language, size,                     │
+  │  文件：path, content_hash, semantic_hash, syntax_hash,         │
+  │         language, size,                                       │
   │         modified_at, modified_at_ns, indexed_at, node_count     │
   │                                                                 │
   │  FTS5 全文索引：astramap_fts(name, qualified_name,              │
@@ -120,7 +117,7 @@ graph TD
 
 #### 节点类型 (NodeKind)
 
-| 类型 | 描述 | SCIP 来源 | Tree-sitter 来源 | 语言包来源 |
+| 类型 | 描述 | SCIP 来源 | Tree-sitter 来源 | 外置覆盖来源 |
 |------|-------------|-------------|-------------------|---------------------|
 | `function` | 函数 | ✓ 方法/函数 | ✓ function_definition | ✓ DefinitionFact |
 | `method` | 方法 | ✓ 方法 | ✓ method_declaration | ✓ DefinitionFact |
@@ -157,9 +154,8 @@ graph TD
 | 来源 | 描述 |
 |-----------|-------------|
 | `scip` | SCIP 编译器级索引（最高精度） |
-| `tree-sitter` | Tree-sitter AST 解析（中等精度） |
+| `syntax-package` | 内置 Tree-sitter 或外置覆盖模块产生的实时文件事实 |
 | `heuristic` | 启发式推断（例如路由解析、跨文件调用匹配） |
-| `language-package` | 外部语言包工作者（中等精度） |
 
 ---
 
@@ -169,7 +165,7 @@ graph TD
 astramap/
 ├── cmd/amap/                    # CLI 入口点
 │   ├── main.go                  # 子命令分发、SCIP 配方系统、索引编排
-│   └── language.go              # 语言包子命令（install/update/enable/disable/remove/list/doctor）
+│   └── syntax.go                # 外置 Syntax 覆盖管理
 │
 ├── astramap/                    # 核心引擎包
 │   ├── astramap.go              # 数据模型（AstraMapNode/Edge/File）、SCIP 导入、增量同步
@@ -177,13 +173,13 @@ astramap/
 │   ├── graph.go                 # 图查询引擎（callers/callees/impact/deadcode/cycles/trace）
 │   ├── service.go               # 高层查询服务（search/explore/overview/projection）
 │   ├── query_helpers.go         # 查询辅助（文件路径缓存、源代码行缓存、预处理器守卫注解）
-│   ├── treesitter.go            # Tree-sitter 解析、每语言定义规则、跨文件调用解析
+│   ├── call_resolution.go       # 与语法引擎无关的跨文件调用解析
 │   ├── filter.go                # 索引过滤、生态感知排除规则
 │   ├── language_registry.go     # 语言规范、检测、能力、语义提供者
-│   ├── language_specs_extended.go # 扩展规范（Rust、C#、Kotlin、PHP、Bash）
-│   ├── language_install.go      # 语言包安装、签名验证、目录
-│   ├── language_packages.go     # 语言包注册表、激活、运行时快照
-│   ├── language_worker.go       # 基于进程的语言工作者（handshake/parse/shutdown）
+│   ├── language_install.go      # 外部 Syntax 包安装、签名验证、目录
+│   ├── language_packages.go     # Syntax Overlay 激活与运行时快照
+│   ├── language_worker.go       # 外部工作者进程边界（handshake/parse/shutdown）
+│   ├── syntax_overlay.go        # SCIP 图上的可选语法增强合并
 │   ├── project_units.go         # 项目单元检测、提供者边界合并
 │   ├── mcp.go                   # MCP stdio JSON-RPC 服务器（9 个工具）
 │   ├── server.go                # HTTP REST API 服务器（13+ 端点、控制台 SPA）
@@ -195,29 +191,8 @@ astramap/
 │       ├── d3.min.js            # D3.js 力导向图
 │       └── marked.min.js        # Markdown 渲染
 │
-├── languageprotocol/            # 语言包有线协议
+├── languageprotocol/            # 外置 Syntax 覆盖有线协议
 │   └── protocol.go              # v1 协议：Request/Response、Handshake、ParseRequest、FileFacts
-│
-├── language-packs/              # 外部语言工作者实现
-│   ├── dart/                    # Dart 语言包
-│   ├── lua/                     # Lua 语言包
-│   ├── ruby/                    # Ruby 语言包
-│   ├── scala/                   # Scala 语言包
-│   ├── swift/                   # Swift 语言包
-│   ├── visualbasic/             # Visual Basic 语言包
-│   ├── zig/                     # Zig 语言包
-│   ├── internal/sdk/sdk.go      # 语言包 SDK（共享库）
-│   └── cmd/pack/                # 语言包打包工具
-│
-├── scripts/                     # 构建和部署脚本
-│   └── languages/
-│       ├── build-package.sh     # 构建语言包 ZIP
-│       └── install-mainstream.sh # 安装主流语言包
-│
-├── tests/                       # 集成测试夹具
-│   ├── lib.sh                   # 共享测试库
-│   └── languages/               # 每语言测试夹具
-│       ├── dart/ lua/ ruby/ scala/ swift/ visualbasic/ zig/
 │
 ├── docs/                        # 设计和部署文档
 │   ├── astramap_design.md       # 本文档
@@ -233,7 +208,6 @@ astramap/
 ├── Makefile                     # 构建目标
 ├── README.md                    # 用户文档
 ├── QUICKSTART.md                # 2 分钟部署指南
-├── TESTING.md                   # 测试指南
 ├── AGENTS.md                    # AI 代理指令
 └── THIRD_PARTY_NOTICES.md       # 第三方许可证声明
 ```
@@ -404,9 +378,11 @@ PRAGMA temp_store(MEMORY);
 
 **预处理器守卫注解**：对于 C/C++ 边，系统读取源代码行，在调用点追踪 `#if`/`#ifdef`/`#ifndef`/`#endif` 栈，并将活动守卫写入边的 `metadata` 字段。这使得条件编译感知无需单独的数据库表即可实现。
 
-### 4.6 Tree-sitter 解析器 (`astramap/treesitter.go`)
+### 4.6 Tree-sitter 实时层 (`astramap/builtin_syntax_engine.go` + `builtin_syntax_modules.go`)
 
-**12 种内置语法**：Go、Python、TypeScript、JavaScript、C、C++、Java、Rust、C#、Kotlin、PHP、Bash
+**12 种内置语法**：Go、TypeScript、JavaScript、Python、Java、C、C++、Rust、C#、Kotlin、Ruby、Scala。
+旧 `treesitter.go` 的职责没有被删除，而是按“通用解析引擎 + 声明式语言模块”拆分；两者继续通过既有
+`languageModule` 契约进入主索引流程，不新增同义的 `SyntaxProvider` 接口。
 
 **每语言定义规则** (`DefinitionRule`)：
 - `Kind` — 要匹配的 AST 节点类型
@@ -425,7 +401,7 @@ PRAGMA temp_store(MEMORY);
 **跨文件调用解析** (`ResolveCrossFileCalls`)：
 1. 从所有索引节点构建全局可调用符号注册表
 2. 对于 Tree-sitter 数据中的每个未解析调用，使用正则模式匹配注册表
-3. 应用语言特定的导入路径解析（Go、Python、Java、Rust、PHP、shell）
+3. 应用语言特定的导入路径解析（Go、Python、Java、Rust 等）
 4. 创建 `provenance: "heuristic"` 的启发式边
 
 **C 函数指针解析** (`buildFunctionPointerFieldMap`)：
@@ -453,7 +429,7 @@ PRAGMA temp_store(MEMORY);
 
 **配置**：`.astramap/config.yaml`，包含 include/exclude glob 模式、force-include 覆盖。
 
-### 4.8 语言注册表 (`astramap/language_registry.go` + `language_specs_extended.go`)
+### 4.8 语言注册表 (`astramap/language_registry.go` + `builtin_syntax_modules.go`)
 
 **LanguageSpec** — 完整的语言定义：
 
@@ -469,16 +445,11 @@ PRAGMA temp_store(MEMORY);
 | `Semantic` | 语义提供者绑定 |
 | `Capabilities` | 能力集（definitions, containers, localCalls 等） |
 | `Toolchain` | 所需工具链（编译器、SCIP 工具） |
-| `Syntax` | Tree-sitter 语法规范（定义规则、调用规则、导入规则） |
+| `module` | 实现 `languageModule` 的内置 Tree-sitter 或外置覆盖模块 |
 
-**7 种核心语言**（内置语法 + SCIP 提供者）：
-Go、TypeScript、JavaScript、Python、Java、C、C++
-
-**5 种扩展语言**（内置语法，无 SCIP）：
-Rust、C#、Kotlin、PHP、Bash
-
-**7 种语言包语言**（外部工作者）：
-Dart、Lua、Ruby、Scala、Swift、Visual Basic、Zig
+**12 种正式语言**全部同时具备内置 Tree-sitter 与 SCIP Provider：
+Go、TypeScript、JavaScript、Python、Java、C、C++、Rust、C#、Kotlin、Ruby、Scala。
+没有“只支持语法”的正式语言，也不允许外置模块扩展 Registry。
 
 **语义提供者**：
 
@@ -491,7 +462,7 @@ Dart、Lua、Ruby、Scala、Swift、Visual Basic、Zig
 | `java` | scip-java | `ScipRecipeJVM` |
 | `rust` | scip-rust | `ScipRecipeRust` |
 | `dotnet` | scip-dotnet | `ScipRecipeDotNet` |
-| `php` | scip-php | `ScipRecipePHP` |
+| `ruby` | scip-ruby | `ScipRecipePackage` |
 
 **项目画像** (`BuildProjectProfile`)：扫描项目目录，按扩展名计数文件，确定存在哪些语言及其相对重要性。
 
@@ -551,7 +522,7 @@ type ProjectUnit struct {
 - `ownsManifestContent(name, marker)` — 单元具有包含标记文本的清单
 - `anyProjectBoundary(boundaries...)` — 多个边界的逻辑或
 
-**动态扩展**：语言包清单可以在运行时声明 `projectAggregates` 来扩展边界。
+外置 Syntax 覆盖模块不得扩展 ProjectUnit、生态过滤规则或语义 Provider 边界。
 
 **合并算法**：
 1. 构建 `owners` 映射：对于每个提供者，识别哪些单元根是“权威的”
@@ -559,7 +530,10 @@ type ProjectUnit struct {
 3. 如果是，移除子单元（它被祖先覆盖）
 4. 权威的嵌套根保持独立（例如，具有自己 `Cargo.toml` 的工作区成员）
 
-### 4.10 语言包系统
+### 4.10 外置 Syntax 覆盖模块
+
+该系统是内置 Tree-sitter 的可选替换机制，不是新增语言机制。模块 ID 必须命中正式 Registry；
+激活后仅替换对应语言的 `languageModule`，检测规则、ProjectUnit 和 SCIP Provider 仍由 Core 决定。
 
 #### 有线协议 (`languageprotocol/protocol.go`)
 
@@ -580,7 +554,7 @@ type ProjectUnit struct {
 
 | 类型 | 描述 |
 |------|-------------|
-| `Manifest` | 语言包清单（schema、ID、version、detection、capabilities、artifacts、signature） |
+| `Manifest` | 外置覆盖清单（schema、ID、version、capabilities、artifacts、signature） |
 | `Handshake` / `HandshakeResponse` | 协议协商 |
 | `ParseRequest` | 文件解析请求，包含源代码内容 |
 | `FileFacts` | 解析结果：definitions、calls、imports、diagnostics |
@@ -612,7 +586,7 @@ type ProjectUnit struct {
 - 转换 `CallFact` → `AstraMapEdge`，带启发式被调用者解析
 - 转换 `ImportFact` → 导入边
 
-#### 语言包管理 (`astramap/language_install.go` + `language_packages.go`)
+#### 外置覆盖管理 (`astramap/language_install.go` + `language_packages.go`)
 
 **安装流水线**：
 1. 解析来源（目录 URL 或本地路径）
@@ -629,11 +603,11 @@ type ProjectUnit struct {
 - 基于文件的锁定，带过期锁检测
 
 **注册表快照** (`languageRegistrySnapshot`)：
-- 合并内置语言与已安装语言包
-- 解决冲突（内置优先）
+- 以 Core 的 12 种正式语言构造稳定注册表
+- 已启用且通过校验的外置模块可覆盖同语言的内置模块
 - 通过 ID、别名、扩展名、文件名提供统一查找
 
-**CLI 子命令** (`amap language`)：
+**CLI 子命令** (`amap syntax`)：
 - `install <id|path|url>` — 安装语言包
 - `update <id|path|url>` — 更新到最新版本
 - `list [--json]` — 列出已安装的包
@@ -655,8 +629,7 @@ type ProjectUnit struct {
 | `ScipRecipeJVM` | `commandRecipe` | `scip-java index --output <output>` |
 | `ScipRecipeRust` | `defaultArtifactRecipe` | `scip-rust index .`，带产物备份 |
 | `ScipRecipeDotNet` | `defaultArtifactRecipe` | `scip-dotnet index`，带产物备份 |
-| `ScipRecipePHP` | `defaultArtifactRecipe` | `scip-php index`，带产物备份 |
-| `ScipRecipePackage` | `preparePackageScip` | 语言包 SCIP 提供者的通用配方 |
+| `ScipRecipePackage` | `preparePackageScip` | Ruby 等标准 Provider 的通用配方 |
 
 **清理栈**：每个配方返回一个带有清理栈的 `preparedScipRun`，在失败时按反向顺序运行，确保不留下临时文件。
 
@@ -701,7 +674,7 @@ type ProjectUnit struct {
    a. 从上次运行加载保存的语言选择
    b. 如果没有，通过文件扩展名计数检测项目语言
    c. 如果检测到多个，提示用户选择
-   d. 合并新安装的语言包语言
+   d. 将已启用的外置 Syntax 模块绑定到对应正式语言
 5. 生成/导入 SCIP 索引：
    a. 如果指定了 --scip 文件 → 直接导入
    b. 否则 → 自动检测项目单元并按单元生成 SCIP
@@ -813,7 +786,7 @@ type ProjectUnit struct {
 | `amap index [options]` | 构建/更新代码地图索引 |
 | `amap watch [seconds]` | 持续增量监控 |
 | `amap install` | 一键 MCP 注册到 IDE |
-| `amap language <action>` | 语言包管理 |
+| `amap syntax <action>` | 外置 Syntax 覆盖管理 |
 | `amap diff [--suggest-tests]` | 基于 git diff 的影响分析 |
 | `amap locate <symbol>` | 符号定义定位 |
 | `amap hotspots` | 代码热点检测 |
@@ -866,9 +839,10 @@ type ProjectUnit struct {
 3. 复用现有的有效 compdb
 4. 缺失或无效的 compdb 导致只读回退到 Tree-sitter
 
-### 6.4 语言包进程隔离
+### 6.4 外置 Syntax 覆盖进程隔离
 
-**原理**：外部语言工作者作为通过 `languageprotocol` 通信的独立进程运行。这提供了：
+**原理**：可选的外置 Syntax 工作者通过 `languageprotocol` 作为独立进程运行；它只替换内置
+`languageModule`，不改变语言注册表或最终语义来源。这提供了：
 - **崩溃隔离**：工作者崩溃不会影响核心引擎
 - **语言独立性**：每个工作者可以使用自己的运行时（Node.js、Python 等）
 - **版本独立性**：工作者可以独立更新
@@ -877,13 +851,15 @@ type ProjectUnit struct {
 ### 6.5 通过内容哈希进行增量同步
 
 **算法**：
-1. 对于每个源文件，计算 SHA-256 内容哈希
-2. 与 `astramap_files` 中存储的哈希进行比较
-3. 如果变更：使用 Tree-sitter 重新解析，更新节点/边
-4. 如果未变更：跳过
-5. 修剪：移除不再存在的文件的节点/边
+1. 使用大小与纳秒 mtime 快速排除未变文件，必要时计算 SHA-256
+2. 常驻进程对缓存命中的文件计算最小编辑区间，以 `Tree.Edit` 和旧 Tree 原生增量解析
+3. `syntax_hash` 表示实时层对应的源码，`semantic_hash` 表示 SCIP 层对应的源码
+4. 新增/修改文件在单事务内替换语法节点与边；修改时立即失效该文件的旧 SCIP 关系
+5. 删除/过滤文件对称删除文件记录、节点、关联边与孤立外部占位节点
+6. `syntax_hash != semantic_hash` 时暴露 `semanticDirty`，直到 SCIP Provider 收敛
 
-**稳定的节点 ID**：`reuseExistingIncrementalIDs` 为未变更的定义复用现有节点 ID，确保跨增量更新的稳定引用。
+**稳定身份**：语法节点 ID 由语言、文件、限定名和位置确定；哈希一致时，位置唯一匹配的语法定义
+直接映射到 SCIP 节点，避免两层产生重复逻辑符号。
 
 ### 6.6 条件编译感知
 
@@ -924,4 +900,4 @@ type ProjectUnit struct {
 | 批量解析 | 500 节点批量，消除 N+1 |
 | 监视防抖 | 可配置间隔（默认 10s） |
 | 最大 SCIP 帧 | 64 MiB（语言协议） |
-| 最大语言包 | 512 MiB |
+| 最大外置 Syntax 包 | 512 MiB |
