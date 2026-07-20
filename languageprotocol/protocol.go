@@ -23,42 +23,6 @@ type Capabilities struct {
 	IncrementalSyntax bool `json:"incrementalSyntax"`
 }
 
-type Detection struct {
-	Extensions map[string]string `json:"extensions,omitempty"`
-	Filenames  map[string]string `json:"filenames,omitempty"`
-	Shebangs   []Shebang         `json:"shebangs,omitempty"`
-}
-
-type Shebang struct {
-	Contains []string `json:"contains"`
-	Dialect  string   `json:"dialect,omitempty"`
-}
-
-type Toolchain struct {
-	Label        string   `json:"label"`
-	Commands     []string `json:"commands,omitempty"`
-	InstallHint  string   `json:"installHint,omitempty"`
-	WhenAnyFiles []string `json:"whenAnyFiles,omitempty"`
-}
-
-type Semantic struct {
-	ProviderID  string   `json:"providerId"`
-	Mode        string   `json:"mode,omitempty"`
-	Tool        string   `json:"tool,omitempty"`
-	InstallHint string   `json:"installHint,omitempty"`
-	Args        []string `json:"args,omitempty"`
-	Artifact    string   `json:"artifact,omitempty"`
-}
-
-type Project struct {
-	Manifests []string `json:"manifests,omitempty"`
-}
-
-type Filter struct {
-	Directories []string `json:"directories,omitempty"`
-	Files       []string `json:"files,omitempty"`
-}
-
 type Artifact struct {
 	OS     string `json:"os"`
 	Arch   string `json:"arch"`
@@ -73,16 +37,9 @@ type Manifest struct {
 	ProtocolMin        int               `json:"protocolMin"`
 	ProtocolMax        int               `json:"protocolMax"`
 	DisplayName        string            `json:"displayName"`
-	Aliases            []string          `json:"aliases,omitempty"`
 	IDPrefix           string            `json:"idPrefix"`
 	QualifiedSeparator string            `json:"qualifiedSeparator,omitempty"`
-	CaseInsensitive    bool              `json:"caseInsensitive,omitempty"`
-	Detection          Detection         `json:"detection"`
 	Capabilities       Capabilities      `json:"capabilities"`
-	Toolchain          []Toolchain       `json:"toolchain,omitempty"`
-	Semantic           *Semantic         `json:"semantic,omitempty"`
-	Project            Project           `json:"project,omitempty"`
-	Filter             Filter            `json:"filter,omitempty"`
 	Artifacts          []Artifact        `json:"artifacts"`
 	Publisher          string            `json:"publisher"`
 	KeyID              string            `json:"keyId"`
