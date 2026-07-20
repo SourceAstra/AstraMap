@@ -104,8 +104,11 @@ amap index
 # 指定仅导入某语言（跳过交互选择）
 amap index --lang go
 
-# 仅 Tree-sitter 快速扫描（跳过 SCIP 检测）
-amap index --treesitter-only
+# 仅执行 Tree-sitter 语法层，跳过 SCIP 生成与导入
+amap index --tree-sitter
+
+# 仅导入 SCIP，跳过可选 Syntax Overlay
+amap index --scip-only
 
 # 强制刷新 SCIP 层
 amap index --refresh-scip
@@ -135,7 +138,7 @@ SCIP 索引导入完成
 
 ── 索引来源统计 ──
   节点 (按语言): Go=356 (合计=356)
-  边   (按来源): scip=892, tree-sitter=41, heuristic=23 (合计=956)
+  边   (按来源): scip=892, syntax-package=41, heuristic=23 (合计=956)
 
 索引构建完成！
 ```
@@ -165,20 +168,20 @@ Log: /path/to/project/.astramap/dashboard.log
 ## 工作原理
 
 ```
-源码 → SCIP 高精度索引 + Tree-sitter 按哈希增量补丁 → SQLite 知识图谱 → MCP/HTTP API → 本地可视化与工具客户端
+源码 → 内置 Tree-sitter 实时层 + SCIP 最终语义 → SQLite 知识图谱 → MCP/HTTP API → 本地可视化与工具客户端
 ```
 
 ## 核心优势
 
 - **95%+ 语义精度** — SCIP 编译器级索引，区分重载/泛型
 - **60-95% Token 节约** — 单次调用替代多次 grep+Read
-- **低频增量更新** — `amap watch [秒数]` 或 `amap index --watch [秒数]` 批量刷新变更文件
+- **确定性持续更新** — `amap watch [秒数]` 或 `amap index --watch [秒数]` 先实时提交 Tree-sitter 结果，再刷新 SCIP 收敛跨文件语义
 
 ## 工具对比
 
 | 维度 | CodeGraph | GitNexus | Graphify | AstraMap |
 |------|-----------|----------|----------|----------|
-| 索引源 | Tree-sitter | Tree-sitter | Tree-sitter+静态图 | **SCIP+Tree-sitter** |
+| 索引源 | Tree-sitter | Tree-sitter | Tree-sitter+静态图 | **Tree-sitter 实时层 + SCIP 最终语义** |
 | 语义精度 | 启发式 | 符号级 | 混合 | **编译器级** |
 | 项目规模 | 百万行 | 千万行 | 百万行 | **亿行级** |
 | 部署复杂度 | 中等 | 简单 | 简单 | **零配置** |
