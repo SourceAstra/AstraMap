@@ -6,6 +6,8 @@ CLAUDE.md
 
 # docs 目录存在但内容不提交
 docs/*
+!docs/DEPLOY.md
+!docs/language-all-external-architecture.md
 !docs/.gitkeep
 
 # AI editor configs
