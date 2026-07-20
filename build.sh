@@ -5,25 +5,19 @@ VERSION="${1:-v0.1}"
 BINARY="${BINARY:-amap}"
 GOOS="${GOOS:-linux}"
 GOARCH="${GOARCH:-amd64}"
-CC="${CC:-musl-gcc}"
 
 echo "=== AstraMap static release build ==="
 echo "Version: ${VERSION}"
 echo "Target:  ${GOOS}/${GOARCH}"
 echo "Output:  ${BINARY}"
 
-if ! command -v "${CC}" >/dev/null 2>&1; then
-	echo "missing ${CC}: install musl-tools on the release builder, not on customer machines" >&2
-	exit 1
-fi
-
+CC=musl-gcc \
 CGO_ENABLED=1 \
 GOOS="${GOOS}" \
 GOARCH="${GOARCH}" \
-CC="${CC}" \
 go build \
 	-tags "netgo osusergo" \
-	-ldflags "-linkmode external -extldflags \"-static\" -s -w -X main.version=${VERSION}" \
+	-ldflags "-s -w -extldflags '-static' -X main.version=${VERSION}" \
 	-o "${BINARY}" \
 	./cmd/amap
 
