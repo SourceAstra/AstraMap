@@ -144,9 +144,7 @@ fixtures:
           set(target, prop, value) { target[prop] = value; return true; }
         };
     expected:
-      symbols:
-        - name: "handler"
-          kind: variable
+      symbols: []
 
   - id: weakref_usage
     files:

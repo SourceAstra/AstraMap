@@ -13,7 +13,7 @@ mkdir -p "$SCRIPT_DIR/reports"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n"
 printf "${BOLD}  AstraMap 多语言单元测试 v2.1${RESET}\n"
 printf "${BOLD}  日期: $(date '+%Y-%m-%d %H:%M:%S')${RESET}\n"
-printf "${BOLD}  覆盖: 10 种内置语言 + 2 种语言包 case${RESET}\n"
+printf "${BOLD}  覆盖: 12 种内置语言${RESET}\n"
 printf "${BOLD}═══════════════════════════════════════${RESET}\n\n"
 
 # ── Phase 0: 环境检测 ──
@@ -126,41 +126,26 @@ assert_untested "DETECT-H-CPP .h(含C++项目)归属" "tree-sitter cannot distin
 phase_summary "Phase 1: 语言识别测试"
 
 # ════════════════════════════════════════════════
-# L2: 语法提取测试（12 内置语言 + 7 语言包 basic.yaml）
+# L2: 语法提取测试（12 内置语言 basic.yaml）
 # ════════════════════════════════════════════════
 phase_header "Phase 2: 语法提取测试 (L2)"
 
-for lang in go python typescript javascript c cpp java rust csharp kotlin; do
+for lang in go python typescript javascript c cpp java rust csharp kotlin ruby scala; do
   run_fixture "$SCRIPT_DIR/languages/$lang/basic.yaml"
-done
-for lang in ruby scala; do
-  if astramap_language_active "$lang"; then
-    run_fixture "$SCRIPT_DIR/languages/$lang/basic.yaml"
-  else
-    assert_untested "[$lang] language package basic case" "语言包未安装或未激活"
-  fi
 done
 
 phase_summary "Phase 2: 语法提取测试"
 
 # ════════════════════════════════════════════════
-# L3: 语义解析测试（内置语言 advanced.yaml + edge_cases.yaml + 已激活语言包 advanced.yaml + 场景夹具）
+# L3: 语义解析测试（内置语言 advanced.yaml + edge_cases.yaml + 场景夹具）
 # ════════════════════════════════════════════════
 phase_header "Phase 3: 语义解析测试 (L3)"
 
-for lang in go python typescript javascript c cpp java rust csharp kotlin; do
+for lang in go python typescript javascript c cpp java rust csharp kotlin ruby scala; do
   if [[ -f "$SCRIPT_DIR/languages/$lang/advanced.yaml" ]]; then
     run_fixture "$SCRIPT_DIR/languages/$lang/advanced.yaml"
   fi
   if [[ -f "$SCRIPT_DIR/languages/$lang/edge_cases.yaml" ]]; then
-    run_fixture "$SCRIPT_DIR/languages/$lang/edge_cases.yaml"
-  fi
-done
-for lang in ruby scala; do
-  if astramap_language_active "$lang" && [[ -f "$SCRIPT_DIR/languages/$lang/advanced.yaml" ]]; then
-    run_fixture "$SCRIPT_DIR/languages/$lang/advanced.yaml"
-  fi
-  if astramap_language_active "$lang" && [[ -f "$SCRIPT_DIR/languages/$lang/edge_cases.yaml" ]]; then
     run_fixture "$SCRIPT_DIR/languages/$lang/edge_cases.yaml"
   fi
 done

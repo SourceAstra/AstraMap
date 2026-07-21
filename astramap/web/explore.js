@@ -29,6 +29,14 @@
         lightTextColor: "#cbd5e1",
     };
 
+    // Pluralized "N call(s)" label resolved against the active locale.
+    const saCallLabel = (n) => window.i18n
+        ? window.i18n.t(n === 1 ? 'call_one' : 'call_many', { n: n })
+        : n + ' call' + (n !== 1 ? 's' : '');
+
+    // Active locale tag, used to scope document API requests per language.
+    const saLocale = () => (window.i18n ? window.i18n.locale : 'en');
+
     function updateThemeColors() {
         const isLight = document.body.classList.contains('theme-light');
         if (isLight) {
@@ -348,7 +356,7 @@
                 if (event.target.closest('.explore-card')) return;
                 event.preventDefault();
                 if (window.SourceAstra && window.SourceAstra.showContextMenu) {
-                    window.SourceAstra.showContextMenu(event.clientX, event.clientY, '__project__', 'Entire Project', {
+                    window.SourceAstra.showContextMenu(event.clientX, event.clientY, '__project__', (window.i18n ? window.i18n.t('entire_project') : 'Entire Project'), {
                         docTargets: [{ docType: 'project', docKey: '__project__', autoGenerate: true }]
                     });
                 }
@@ -603,7 +611,7 @@
             window.G_SELECTED = null;
             this.currentFile = null;
             this.currentFuncId = null;
-            this.breadcrumb = [{ label: 'Top', action: () => this._drawOverview() }];
+            this.breadcrumb = [{ label: window.i18n ? window.i18n.t('top_label') : 'Top', action: () => this._drawOverview() }];
             this._renderBreadcrumb();
 
             if (this.simulation) { this.simulation.stop(); this.simulation = null; }
@@ -611,12 +619,12 @@
 
             const dirs = Object.values(this.dirMap);
             if (dirs.length === 0) {
-                this.canvasContainer.innerHTML = `<div style="color:${THEME.textDim};padding:80px;text-align:center;">No data</div>`;
+                this.canvasContainer.innerHTML = `<div style="color:${THEME.textDim};padding:80px;text-align:center;">${window.i18n ? window.i18n.t('no_data') : 'No Data'}</div>`;
                 return;
             }
 
             if (this.statsEl) {
-                this.statsEl.textContent = `${dirs.length} directories · ${this.dirEdges.length} connections`;
+                this.statsEl.textContent = window.i18n ? window.i18n.t('stats_line', { dirs: dirs.length, conns: this.dirEdges.length }) : `${dirs.length} directories · ${this.dirEdges.length} connections`;
             }
 
             const nodes = dirs.map(d => {
@@ -675,7 +683,7 @@
             this.currentFile = null;
             this.currentFuncId = null;
             this.breadcrumb = [
-                { label: 'Top', action: () => this._drawOverview() },
+                { label: window.i18n ? window.i18n.t('top_label') : 'Top', action: () => this._drawOverview() },
                 { label: this._dirDisplayName(dirPath), action: () => this._drawModule(dirPath) }
             ];
             this._renderBreadcrumb();
@@ -690,7 +698,7 @@
             // 
             if (window.G_GRAPH_MODE === 'projected' && !dirData.loaded) {
                 if (this.statsEl) {
-                    this.statsEl.textContent = "Loading module details...";
+                    this.statsEl.textContent = window.i18n ? window.i18n.t('loading_module_details') : 'Loading module details...';
                 }
                 try {
                     const res = await fetch(`/api/graph/module?id=${encodeURIComponent(dirPath)}`, {
@@ -862,11 +870,11 @@
             this.currentDir = (this.fileMap && this.fileMap[filePath]) ? this.fileMap[filePath].dirPath : null;
             this.currentFuncId = null;
             
-            const dirName = this.currentDir ? this._dirDisplayName(this.currentDir) : 'Unknown';
+            const dirName = this.currentDir ? this._dirDisplayName(this.currentDir) : (window.i18n ? window.i18n.t('unknown_label') : 'Unknown');
             const fileName = filePath.split('/').pop();
             
             this.breadcrumb = [
-                { label: 'Top', action: () => this._drawOverview() },
+                { label: window.i18n ? window.i18n.t('top_label') : 'Top', action: () => this._drawOverview() },
                 { label: dirName, action: () => this._drawModule(this.currentDir) },
                 { label: fileName, action: () => this._drawFile(filePath) }
             ];
@@ -887,7 +895,7 @@
                     return;
                 }
                 if (this.statsEl) {
-                    this.statsEl.textContent = "Loading module files data...";
+                    this.statsEl.textContent = window.i18n ? window.i18n.t('loading_module_files') : 'Loading module files data...';
                 }
                 this._drawModule(this.currentDir).then(() => {
                     this._drawFile(filePath, true);
@@ -1060,7 +1068,7 @@
                 const dir = fMapEntry ? fMapEntry.dirPath : (window.G_FILE_TO_MODULE && window.G_FILE_TO_MODULE[filePath] ? window.G_FILE_TO_MODULE[filePath].id : null);
                 if (dir) {
                     if (this.statsEl) {
-                        this.statsEl.textContent = "Loading trace data...";
+                        this.statsEl.textContent = window.i18n ? window.i18n.t('loading_trace_data') : 'Loading trace data...';
                     }
                     this._drawModule(dir).then(() => {
                         this._drawTrace(funcId, true);
@@ -1072,12 +1080,12 @@
             this.currentFile = filePath;
             this.currentDir = this.fileMap[filePath] ? this.fileMap[filePath].dirPath : null;
 
-            const dirName = this.currentDir ? this._dirDisplayName(this.currentDir) : 'Unknown';
-            const fileName = filePath.split('/').pop() || 'Unknown';
+            const dirName = this.currentDir ? this._dirDisplayName(this.currentDir) : (window.i18n ? window.i18n.t('unknown_label') : 'Unknown');
+            const fileName = filePath.split('/').pop() || (window.i18n ? window.i18n.t('unknown_label') : 'Unknown');
             const funcName = funcNode ? (funcNode.name || funcId) : funcId;
 
             this.breadcrumb = [
-                { label: 'Top', action: () => this._drawOverview() },
+                { label: window.i18n ? window.i18n.t('top_label') : 'Top', action: () => this._drawOverview() },
                 { label: dirName, action: () => this._drawModule(this.currentDir) },
                 { label: fileName, action: () => this._drawFile(filePath) },
                 { label: this._truncate(funcName, 20), action: () => this._drawTrace(funcId) }
@@ -1421,7 +1429,7 @@
                 .attr('y', d => d.cardHeight - CARD.tagHeight - CARD.padding + 2)
                 .attr('width', d => {
                     const w = weightMap[d.id] || 0;
-                    const t = w + ' call' + (w !== 1 ? 's' : '');
+                    const t = saCallLabel(w);
                     return t.length * 7 + 12;
                 })
                 .attr('height', 18)
@@ -1437,7 +1445,7 @@
                 .attr('font-family', 'Roboto, sans-serif')
                 .text(d => {
                     const w = weightMap[d.id] || 0;
-                    return w + ' call' + (w !== 1 ? 's' : '');
+                    return saCallLabel(w);
                 });
 
             // ──  ──
@@ -1532,7 +1540,7 @@
                 .attr('dy', -6)
                 .text(d => {
                     const c = d.count || 1;
-                    return c === 1 ? '1 call' : c + ' calls';
+                    return saCallLabel(c);
                 })
                 .style('opacity', 0.8);
 
@@ -1625,7 +1633,7 @@
                     .attr('x', CARD.padding - 2)
                     .attr('y', d => d.cardHeight - CARD.tagHeight - CARD.padding + 2)
                     .attr('width', d => {
-                        const t = d.totalDeg + ' call' + (d.totalDeg !== 1 ? 's' : '');
+                        const t = saCallLabel(d.totalDeg);
                         return t.length * 7 + 12;
                     })
                     .attr('height', 18)
@@ -1639,7 +1647,7 @@
                     .attr('font-size', '10px')
                     .attr('font-weight', '600')
                     .attr('font-family', 'Roboto, sans-serif')
-                    .text(d => d.totalDeg + ' call' + (d.totalDeg !== 1 ? 's' : ''));
+                    .text(d => saCallLabel(d.totalDeg));
 
             } else {
                 // ： + 2 + 
@@ -1667,7 +1675,7 @@
                     .attr('x', CARD.padding - 2)
                     .attr('y', d => d.cardHeight - CARD.tagHeight - CARD.padding + 2)
                     .attr('width', d => {
-                        const t = d.weight + ' call' + (d.weight !== 1 ? 's' : '');
+                        const t = saCallLabel(d.weight);
                         return t.length * 7 + 12;
                     })
                     .attr('height', 18)
@@ -1681,7 +1689,7 @@
                     .attr('font-size', '10px')
                     .attr('font-weight', '600')
                     .attr('font-family', 'Roboto, sans-serif')
-                    .text(d => d.weight + ' call' + (d.weight !== 1 ? 's' : ''));
+                    .text(d => saCallLabel(d.weight));
             }
 
             // ──  ──
@@ -1793,7 +1801,7 @@
                 this._bcMenuClickBound = true;
             }
 
-            const renderCustomDropdown = (options, currentValue, onChange, placeholder = 'Select...') => {
+            const renderCustomDropdown = (options, currentValue, onChange, placeholder = (window.i18n ? window.i18n.t('select_placeholder') : 'Select...')) => {
                 const wrap = document.createElement('div');
                 wrap.style.cssText = 'position:relative; display:inline-block; margin-left:4px;';
                 
@@ -1841,7 +1849,7 @@
 
                 const searchInput = document.createElement('input');
                 searchInput.type = 'text';
-                searchInput.placeholder = 'Search...';
+                searchInput.placeholder = window.i18n ? window.i18n.t('search_ph') : 'Search...';
                 searchInput.style.cssText = `
                     width:100%;
                     padding:6px;
@@ -2033,7 +2041,7 @@
                 const select = renderCustomDropdown(options, null, (val) => {
                     this._drawModule(val);
                     if (window.G_CURRENT_VIEW === 'nebula' && window.focusModule) window.focusModule(val);
-                }, 'Expand Directory');
+                }, window.i18n ? window.i18n.t('expand_directory') : 'Expand Directory');
                 this.breadcrumbEl.appendChild(select);
             } else if (this.currentLevel === 'module') {
                 const sep = document.createElement('span');
@@ -2049,7 +2057,7 @@
                 const select = renderCustomDropdown(options, null, (val) => {
                     this._drawFile(val);
                     if (window.G_CURRENT_VIEW === 'nebula' && window.focusFile) window.focusFile(val);
-                }, 'Expand File');
+                }, window.i18n ? window.i18n.t('expand_file') : 'Expand File');
                 this.breadcrumbEl.appendChild(select);
             } else if (this.currentLevel === 'file') {
                 const sep = document.createElement('span');
@@ -2078,7 +2086,7 @@
                     } else {
                         this._drawTrace(val);
                     }
-                }, 'Select Function');
+                }, window.i18n ? window.i18n.t('select_function') : 'Select Function');
                 this.breadcrumbEl.appendChild(select);
             }
 
@@ -2318,13 +2326,13 @@
             
             if (this.docDrawer) {
                 this.docDrawer.classList.add('active');
-                this.renderDocActionPanel(type, key, options.autoGenerate ? 'Preparing to generate...' : '');
+                this.renderDocActionPanel(type, key, options.autoGenerate ? (window.i18n ? window.i18n.t('doc_preparing_generate') : 'Preparing to generate...') : '');
                 if (options.autoGenerate) {
                     this.docTitle.textContent = type === 'file'
                         ? `${window.i18n ? window.i18n.t('file_label') : 'File'}: ${String(key).split('/').pop()}`
                         : type === 'project' ? (window.i18n ? window.i18n.t('project_arch_doc') : 'Project Architecture Document') : `${window.i18n ? window.i18n.t('dir_label') : 'Dir'}: ${this._dirDisplayName(key)}`;
                     await Promise.resolve();
-                    this.renderDocGeneratingState('Preparing code context...');
+                    this.renderDocGeneratingState();
                     if (type === 'file') {
                         await Promise.resolve(this._drawFile(key));
                     } else if (type === 'module') {
@@ -2399,7 +2407,7 @@
 
         }
 
-        renderDocGeneratingState(message = 'Preparing code context...') {
+        renderDocGeneratingState(message = (window.i18n ? window.i18n.t('preparing_context') : 'Preparing code context...')) {
             if (!this.docContent) return;
             
             // 
@@ -2551,13 +2559,13 @@
             const textEl = docBtn.querySelector('#explore-doc-btn-text');
 
             try {
-                const res = await fetch(`/api/documents/list?type=${type}&key=${encodeURIComponent(key)}`, {
+                const res = await fetch(`/api/documents/list?type=${type}&key=${encodeURIComponent(key)}&lang=${saLocale()}`, {
                     headers: window.saAuthHeaders ? window.saAuthHeaders() : {}
                 });
                 if (res.ok) {
                     const list = await res.json();
                     if (list && list.length > 0) {
-                        textEl.textContent = `Design Document [Generated]`;
+                        textEl.textContent = `${window.i18n ? window.i18n.t('design_doc_generated') : 'Design Document [Generated]'}`;
                         docBtn.style.borderColor = THEME.breadcrumbActive;
                         docBtn.style.color = THEME.breadcrumbActive;
                         docBtn.style.borderStyle = 'solid';
@@ -2571,7 +2579,7 @@
                             docBtn.style.borderColor = THEME.breadcrumbActive; 
                         };
                     } else {
-                        textEl.textContent = 'Generate Design Document';
+                        textEl.textContent = window.i18n ? window.i18n.t('generate_design_doc') : 'Generate Design Document';
                         docBtn.style.borderColor = THEME.textDim + '80';
                         docBtn.style.color = THEME.textDim;
                         docBtn.style.borderStyle = 'dashed';
@@ -2590,7 +2598,7 @@
                 }
             } catch (e) {
                 console.error('[Explore] Failed to get doc list:', e);
-                textEl.textContent = 'Design & Architecture Document';
+                textEl.textContent = window.i18n ? window.i18n.t('design_arch_doc') : 'Design & Architecture Document';
             }
         }
 
@@ -2604,7 +2612,7 @@
             this.docContent.innerHTML = `<div style="text-align:center;padding:40px;color:${THEME.textDim};">...</div>`;
 
             try {
-                const listRes = await fetch(`/api/documents/list?type=${type}&key=${encodeURIComponent(key)}`, {
+                const listRes = await fetch(`/api/documents/list?type=${type}&key=${encodeURIComponent(key)}&lang=${saLocale()}`, {
                     headers: window.saAuthHeaders ? window.saAuthHeaders() : {}
                 });
                 let historyList = [];
@@ -2612,7 +2620,7 @@
                     historyList = await listRes.json();
                 }
 
-                let url = `/api/documents/get?type=${type}&key=${encodeURIComponent(key)}`;
+                let url = `/api/documents/get?type=${type}&key=${encodeURIComponent(key)}&lang=${saLocale()}`;
                 if (targetTimestamp) {
                     url += `&timestamp=${encodeURIComponent(targetTimestamp)}`;
                 }
@@ -2652,10 +2660,10 @@
                         </div>
                         <div style="display:flex; gap:8px; margin-top:4px; width:100%;">
                             <button type="button" class="explore-doc-btn" id="explore-doc-regenerate-btn" style="flex:1; min-height:30px; padding:4px 12px;">
-                                <span>⚡</span> Regenerate
+                                <span>⚡</span> ${window.i18n ? window.i18n.t('doc_regenerate') : 'Regenerate'}
                             </button>
                             <button type="button" class="explore-doc-btn" id="explore-doc-export-btn" style="flex:1; min-height:30px; padding:4px 12px; background:rgba(16,185,129,0.15); border-color:rgba(16,185,129,0.3); color:#10b981;">
-                                <span>📤</span> Export
+                                <span>📤</span> ${window.i18n ? window.i18n.t('doc_export') : 'Export'}
                             </button>
                         </div>
                     </div>
@@ -2664,7 +2672,7 @@
                     </div>
                     <div class="explore-doc-footer-panel">
                         <button class="explore-doc-footer-btn" id="explore-doc-copy-all-btn" style="width: 100%;">
-                            <span>📋</span> Copy Markdown Full Text
+                            <span>📋</span> ${window.i18n ? window.i18n.t('doc_copy_full') : 'Copy Markdown Full Text'}
                         </button>
                     </div>
                 `;
@@ -2705,7 +2713,7 @@
                 copyAllBtn.onclick = () => {
                     navigator.clipboard.writeText(docData.content).then(() => {
                         const originalText = copyAllBtn.innerHTML;
-                        copyAllBtn.innerHTML = '<span>✅</span> Full Copy Successful';
+                        copyAllBtn.innerHTML = `<span>✅</span> ${window.i18n ? window.i18n.t('copy_success') : 'Full Copy Successful'}`;
                         setTimeout(() => {
                             copyAllBtn.innerHTML = originalText;
                         }, 2000);
@@ -2721,7 +2729,7 @@
                     console.error('[Explore] Markdown render failed:', err);
                     mdRenderEl.innerHTML = `
                         <div style="color:#ef4444;padding:16px;border:1px solid rgba(239,68,68,0.25);border-radius:8px;margin-bottom:12px;">
-                            Document formatting failed, switched to raw text: ${this.escapeHtml(err.message || String(err))}
+                            ${window.i18n ? window.i18n.t('doc_format_failed') : 'Markdown formatting unavailable, showing raw content'}: ${this.escapeHtml(err.message || String(err))}
                         </div>
                         <pre style="white-space:pre-wrap;word-break:break-word;color:${THEME.text};background:rgba(15,23,42,0.55);padding:16px;border-radius:8px;">${this.escapeHtml(docData.content)}</pre>
                     `;
@@ -2780,8 +2788,8 @@
                     const escapedCode = encodeURIComponent(code.trim());
                     return `<div class="cogni-mermaid-wrapper" style="border:1px solid rgba(99,102,241,0.3); border-radius:8px; margin:16px 0; overflow:hidden;">
                         <div class="cogni-mermaid-header" style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(99,102,241,0.1); border-bottom:1px solid rgba(99,102,241,0.2);">
-                            <span style="font-size:11px; color:#818cf8; font-weight:600;">📊 Architectural Relationship Map (Mermaid)</span>
-                            <button class="cogni-mermaid-btn" onclick="SourceAstra.copyMermaidCode(this)" data-code="${escapedCode}" style="background:rgba(99,102,241,0.2); border:none; color:#a5b4fc; padding:4px 10px; border-radius:4px; font-size:10px; cursor:pointer;">📋 Copy</button>
+                            <span style="font-size:11px; color:#818cf8; font-weight:600;">📊 ${window.i18n ? window.i18n.t('mermaid_section_title') : 'Architectural Relationship Map (Mermaid)'}</span>
+                            <button class="cogni-mermaid-btn" onclick="SourceAstra.copyMermaidCode(this)" data-code="${escapedCode}" style="background:rgba(99,102,241,0.2); border:none; color:#a5b4fc; padding:4px 10px; border-radius:4px; font-size:10px; cursor:pointer;">📋 ${window.i18n ? window.i18n.t('mermaid_copy') : 'Copy'}</button>
                         </div>
                         <div class="mermaid-container" style="padding:16px; background:rgba(0,0,0,0.2);">
                             <div class="mermaid">${_self.escapeHtml(code.trim())}</div>
@@ -2814,9 +2822,9 @@
                 actionsDiv.innerHTML = `
                     <span style="font-size:10px; color:#64748b; font-family:sans-serif; text-transform:uppercase;">${lang}</span>
                     <button class="explore-doc-code-btn" type="button">
-                        <span>📋</span> Copy
+                        <span>📋</span> ${window.i18n ? window.i18n.t('code_copy') : 'Copy'}
                     </button>
-                    <span class="copy-tooltip">Copied</span>
+                    <span class="copy-tooltip">${window.i18n ? window.i18n.t('code_copied') : 'Copied'}</span>
                 `;
                 pre.appendChild(actionsDiv);
 
@@ -2828,10 +2836,10 @@
                         e.stopPropagation();
                         navigator.clipboard.writeText(codeEl.textContent).then(() => {
                             tooltip.classList.add('active');
-                            copyBtn.innerHTML = '<span>✅</span> Copied';
+                            copyBtn.innerHTML = '<span>✅</span> ' + (window.i18n ? window.i18n.t('code_copied') : 'Copied');
                             setTimeout(() => {
                                 tooltip.classList.remove('active');
-                                copyBtn.innerHTML = '<span>📋</span> Copy';
+                                copyBtn.innerHTML = '<span>📋</span> ' + (window.i18n ? window.i18n.t('code_copy') : 'Copy');
                             }, 2000);
                         }).catch(err => {
                             console.error('Failed to copy code block:', err);
@@ -2870,7 +2878,7 @@
                 const response = await fetch('/api/documents/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...(window.saAuthHeaders ? window.saAuthHeaders() : {}) },
-                    body: JSON.stringify({ type, key })
+                    body: JSON.stringify({ type, key, lang: saLocale() })
                 });
 
                 if (!response.ok) {
@@ -2878,7 +2886,7 @@
                     throw new Error(`Document generation failed HTTP ${response.status}: ${errText.slice(0, 200)}`);
                 }
 
-                this.renderDocGeneratingState('Refreshing local document view...');
+                this.renderDocGeneratingState(window.i18n ? window.i18n.t('doc_refreshing') : 'Refreshing local document view...');
 
                 await this.loadDocHistoryAndContent();
                 this.updateDocButtonState();
@@ -2887,12 +2895,12 @@
                 this.docContent.innerHTML = `
                     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70%; text-align:center; padding:20px; gap:12px;">
                         <span style="font-size:32px;">❌</span>
-                        <div style="font-size:14px; font-weight:600; color:#ef4444;">Generation failed</div>
+                        <div style="font-size:14px; font-weight:600; color:#ef4444;">${window.i18n ? window.i18n.t('doc_generation_failed') : 'Generation failed'}</div>
                         <div style="font-size:12px; color:${THEME.textDim}; max-width:260px; line-height:1.5;">
                             ${this.escapeHtml(err.message || String(err))}
                         </div>
                         <button type="button" class="explore-doc-btn" id="explore-doc-retry-btn" style="margin-top:12px;">
-                            Retry
+                            ${window.i18n ? window.i18n.t('doc_retry') : 'Retry'}
                         </button>
                     </div>
                 `;
@@ -2929,39 +2937,27 @@
     };
     window.SourceAstra.isTraceableSymbol = isTraceableSymbol;
 
-    window.SourceAstra.onLocaleChange = function (loc) {
-        if (window._exploreView && window._exploreView.rawData) {
-            window._exploreView.updateSize();
-            if (window._exploreView.currentLevel === 'top') {
-                window._exploreView._drawOverview();
-            } else if (window._exploreView.currentLevel === 'module') {
-                window._exploreView._drawModule(window._exploreView.currentDir);
-            } else if (window._exploreView.currentLevel === 'file') {
-                window._exploreView._drawFile(window._exploreView.currentFile);
-            } else if (window._exploreView.currentLevel === 'trace') {
-                window._exploreView._drawTrace(window._exploreView.currentFuncId);
+    window.addEventListener('sa-locale-changed', () => {
+        const view = window._exploreView;
+        if (view && view.rawData) {
+            view.updateSize();
+            if (view.currentLevel === 'top') {
+                view._drawOverview();
+            } else if (view.currentLevel === 'module') {
+                view._drawModule(view.currentDir);
+            } else if (view.currentLevel === 'file') {
+                view._drawFile(view.currentFile);
+            } else if (view.currentLevel === 'trace') {
+                view._drawTrace(view.currentFuncId);
             }
-            if (typeof window._exploreView._renderBreadcrumb === 'function') {
-                window._exploreView._renderBreadcrumb();
+            if (typeof view._renderBreadcrumb === 'function') {
+                view._renderBreadcrumb();
             }
         }
-    };
-
-    window.addEventListener('sa-locale-changed', () => {
-        if (window._exploreView && window._exploreView.rawData) {
-            window._exploreView.updateSize();
-            if (window._exploreView.currentLevel === 'top') {
-                window._exploreView._drawOverview();
-            } else if (window._exploreView.currentLevel === 'module') {
-                window._exploreView._drawModule(window._exploreView.currentDir);
-            } else if (window._exploreView.currentLevel === 'file') {
-                window._exploreView._drawFile(window._exploreView.currentFile);
-            } else if (window._exploreView.currentLevel === 'trace') {
-                window._exploreView._drawTrace(window._exploreView.currentFuncId);
-            }
-            if (typeof window._exploreView._renderBreadcrumb === 'function') {
-                window._exploreView._renderBreadcrumb();
-            }
+        // Redraw the understanding document drawer with the new locale's stored doc.
+        if (view && view.docDrawer && view.docDrawer.classList.contains('active')) {
+            view.updateDocButtonState();
+            view.loadDocHistoryAndContent();
         }
     });
 

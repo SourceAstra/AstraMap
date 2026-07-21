@@ -306,13 +306,21 @@
                 localStorage.setItem('astramap_locale', lang);
                 document.documentElement.lang = lang;
                 this.apply();
+                // Views subscribe to this event and redraw locale-dependent content.
+                window.dispatchEvent(new CustomEvent('sa-locale-changed', { detail: { locale: lang } }));
             },
             toggle() {
                 this.setLocale(this.locale === 'en' ? 'zh' : 'en');
             },
-            t(key) {
+            t(key, params) {
                 const dict = TRANSLATIONS[this.locale] || TRANSLATIONS.en;
-                return dict[key] || key;
+                let text = dict[key] !== undefined ? dict[key] : (TRANSLATIONS.en[key] !== undefined ? TRANSLATIONS.en[key] : key);
+                if (params) {
+                    for (const name of Object.keys(params)) {
+                        text = text.split('{' + name + '}').join(params[name]);
+                    }
+                }
+                return text;
             },
             apply() {
                 const btnLang = document.getElementById('btn-lang');
@@ -324,6 +332,9 @@
                     } else {
                         el.textContent = this.t(key);
                     }
+                });
+                document.querySelectorAll('[data-i18n-title]').forEach(el => {
+                    el.title = this.t(el.getAttribute('data-i18n-title'));
                 });
             }
         };
@@ -352,7 +363,92 @@
                 step4: 'Local persistence and Markdown formatting',
                 generate_doc: 'Generate Understanding Document',
                 project_arch_doc: 'Project Architecture Document',
-                doc_empty_hint: 'Click the button below to generate an understanding document.'
+                design_doc_generated: 'Design Document [Generated]',
+                generate_design_doc: 'Generate Design Document',
+                design_arch_doc: 'Design & Architecture Document',
+                copy_success: 'Full Copy Successful',
+                // Explore view residuals
+                doc_empty_hint: 'No understanding document has been generated yet. Click the button above to generate one.',
+                stats_line: '{dirs} directories · {conns} connections',
+                top_label: 'Top',
+                no_data: 'No Data',
+                entire_project: 'Entire Project',
+                unknown_label: 'Unknown',
+                call_one: '{n} call',
+                call_many: '{n} calls',
+                select_placeholder: 'Select...',
+                search_ph: 'Search...',
+                expand_directory: 'Expand Directory',
+                expand_file: 'Expand File',
+                select_function: 'Select Function',
+                doc_regenerate: 'Regenerate',
+                doc_export: 'Export',
+                doc_copy_full: 'Copy Markdown Full Text',
+                doc_format_failed: 'Markdown formatting unavailable, showing raw content',
+                mermaid_section_title: 'Architectural Relationship Map (Mermaid)',
+                mermaid_copy: 'Copy',
+                code_copy: 'Copy',
+                code_copied: 'Copied',
+                doc_refreshing: 'Refreshing local document view...',
+                doc_preparing_generate: 'Preparing to generate...',
+                doc_generation_failed: 'Generation failed',
+                doc_retry: 'Retry',
+                // Trace view
+                related_functions: 'Related functions',
+                search_functions_ph: 'Search functions...',
+                related_call_chains: '🧠 Related Call Chains',
+                trace_depth: 'Depth',
+                perspective_dir: 'Perspective Directory',
+                all_directories: 'All Directories',
+                dir_grouping: '📂 Directory Grouping',
+                dir_grouping_title: 'Toggle directory and level grouping',
+                related_impact: '⚡ Related Impact',
+                related_scope: '💣 Related Scope',
+                function_title: 'Function',
+                fit_view: '⊞ Fit',
+                fit_view_title: 'Fit View',
+                detailed_relations: '📋 Detailed Relations',
+                detailed_relations_title: 'Show more complete call relationships',
+                loading_label: 'Loading...',
+                legend_start: 'Start',
+                legend_function: 'Function',
+                legend_external: 'External',
+                legend_impact_path: 'Impact Path',
+                source_preview: '📄 Source Preview',
+                collapse_preview_title: 'Collapse Source Preview',
+                expand_preview_title: 'Expand Source Preview',
+                preview_hint: 'Click a node in topology map to preview source',
+                trace_empty_title: 'Related Call View',
+                select_entry_hint: 'Select an entry from the left function tree',
+                loading_functions: 'Loading functions and directory tree...',
+                loading_module_details: 'Loading module details...',
+                loading_module_files: 'Loading module files data...',
+                loading_trace_data: 'Loading trace data...',
+                load_functions_failed: 'Failed to load function list',
+                no_matching_functions: 'No matching functions',
+                level_top: 'L0 (Top)',
+                level_n: 'Level {n}',
+                view_list_hint: 'Click right panel to view list',
+                external_dependency: 'External Dependency',
+                external_label: 'External',
+                system_module: 'System Module',
+                folded_utils: 'Folded utility functions',
+                agg_tip: 'To avoid spaghetti edges, the following utility/low-in-degree helper functions have been folded. Click to preview source code:',
+                external_no_source: 'External symbol, no source code available',
+                external_symbol: 'External Symbol',
+                loading_source: 'Loading source code...',
+                no_preview: 'No preview available',
+                load_failed: 'Load failed: ',
+                loading_metrics: 'Loading quality metrics...',
+                complexity_low: '🟢 Low',
+                complexity_critical: '🔴 Critical',
+                complexity_high: '🟡 High',
+                metric_complexity: 'Complexity',
+                metric_lines: 'Lines',
+                metric_nesting: 'Nesting Depth',
+                metric_returns: 'Return Points',
+                no_metrics: 'No complexity metrics available',
+                metrics_failed: 'Metrics failed: ',
             },
             zh: {
                 explore: '探索视界',
@@ -377,7 +473,92 @@
                 step4: '本地持久化与Markdown排版',
                 generate_doc: '一键生成理解文档',
                 project_arch_doc: '项目架构文档',
-                doc_empty_hint: '点击下方按钮生成理解文档。'
+                design_doc_generated: '设计文档 [已生成]',
+                generate_design_doc: '生成设计文档',
+                design_arch_doc: '设计与架构文档',
+                copy_success: '全文复制成功',
+                // Explore view residuals
+                doc_empty_hint: '尚未生成理解文档，点击上方按钮一键生成。',
+                stats_line: '{dirs} 个目录 · {conns} 条连接',
+                top_label: '顶层',
+                no_data: '暂无数据',
+                entire_project: '整个项目',
+                unknown_label: '未知',
+                call_one: '{n} 次调用',
+                call_many: '{n} 次调用',
+                select_placeholder: '请选择…',
+                search_ph: '搜索…',
+                expand_directory: '展开目录',
+                expand_file: '展开文件',
+                select_function: '选择函数',
+                doc_regenerate: '重新生成',
+                doc_export: '导出',
+                doc_copy_full: '复制 Markdown 全文',
+                doc_format_failed: 'Markdown 格式化不可用，展示原始内容',
+                mermaid_section_title: '架构关系图（Mermaid）',
+                mermaid_copy: '复制',
+                code_copy: '复制',
+                code_copied: '已复制',
+                doc_refreshing: '正在刷新本地文档视图…',
+                doc_preparing_generate: '准备生成中…',
+                doc_generation_failed: '生成失败',
+                doc_retry: '重试',
+                // Trace view
+                related_functions: '关联函数',
+                search_functions_ph: '搜索函数…',
+                related_call_chains: '🧠 关联调用链',
+                trace_depth: '深度',
+                perspective_dir: '透视目录',
+                all_directories: '全部目录',
+                dir_grouping: '📂 目录分组',
+                dir_grouping_title: '切换目录与层级分组',
+                related_impact: '⚡ 关联影响',
+                related_scope: '💣 关联范围',
+                function_title: '函数',
+                fit_view: '⊞ 适配',
+                fit_view_title: '适配视图',
+                detailed_relations: '📋 详细关系',
+                detailed_relations_title: '展示更完整的调用关系',
+                loading_label: '加载中…',
+                legend_start: '起点',
+                legend_function: '函数',
+                legend_external: '外部',
+                legend_impact_path: '影响路径',
+                source_preview: '📄 源码预览',
+                collapse_preview_title: '折叠源码预览',
+                expand_preview_title: '展开源码预览',
+                preview_hint: '点击拓扑图中的节点以预览源码',
+                trace_empty_title: '关联调用视图',
+                select_entry_hint: '从左侧函数树选择一个入口',
+                loading_functions: '正在加载函数与目录树…',
+                loading_module_details: '正在加载模块详情…',
+                loading_module_files: '正在加载模块文件数据…',
+                loading_trace_data: '正在加载追踪数据…',
+                load_functions_failed: '函数列表加载失败',
+                no_matching_functions: '无匹配函数',
+                level_top: 'L0（顶层）',
+                level_n: '层级 {n}',
+                view_list_hint: '点击右侧面板查看列表',
+                external_dependency: '外部依赖',
+                external_label: '外部',
+                system_module: '系统模块',
+                folded_utils: '已折叠工具函数',
+                agg_tip: '为避免连线过于密集，以下工具/低入度辅助函数已被折叠，点击可预览源码：',
+                external_no_source: '外部符号，无可用源码',
+                external_symbol: '外部符号',
+                loading_source: '正在加载源码…',
+                no_preview: '无可用预览',
+                load_failed: '加载失败：',
+                loading_metrics: '正在加载质量指标…',
+                complexity_low: '🟢 低',
+                complexity_critical: '🔴 严重',
+                complexity_high: '🟡 高',
+                metric_complexity: '复杂度',
+                metric_lines: '代码行',
+                metric_nesting: '嵌套深度',
+                metric_returns: '返回点',
+                no_metrics: '无复杂度指标',
+                metrics_failed: '指标加载失败：',
             }
         };
 
@@ -578,7 +759,6 @@
         if (btnLang) {
             btnLang.addEventListener('click', () => {
                 I18N.toggle();
-                location.reload();
             });
         }
 

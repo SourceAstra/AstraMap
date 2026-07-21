@@ -99,7 +99,7 @@ fun add(a: Int, b: Int): Int = a + b
 fun main() { println(add(1, 2)) }
 EOF
 
-amap index --project "$tmpdir" >/dev/null 2>&1
+"$(get_amap_bin)" index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证各语言文件被索引
 go_files=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_files WHERE path LIKE 'go/%'")
@@ -152,7 +152,7 @@ package pkg
 func Use() int { return Calculate(10) }
 EOF
 
-amap index --project "$tmpdir" >/dev/null 2>&1
+"$(get_amap_bin)" index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证跨文件调用边存在
 calculate_calls=$(count_calls "$tmpdir" "Use" "Calculate")
@@ -179,7 +179,7 @@ type File struct{}
 func (f File) Read() []byte { return nil }
 EOF
 
-amap index --project "$tmpdir" >/dev/null 2>&1
+"$(get_amap_bin)" index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证 implements 边
 reader_implements=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_edges WHERE kind='implements' AND target LIKE '%Reader'")
@@ -205,7 +205,7 @@ namespace Math {
 int main() { return Math::add(1, 2); }
 EOF
 
-amap index --project "$tmpdir" >/dev/null 2>&1
+"$(get_amap_bin)" index --project "$tmpdir" >/dev/null 2>&1
 
 # 容器关系由 contains 边表达，不在节点上冗余存储 container 字段。
 add_container=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_edges AS edge JOIN astramap_nodes AS parent ON parent.id=edge.source JOIN astramap_nodes AS child ON child.id=edge.target WHERE edge.kind='contains' AND parent.kind='namespace' AND parent.name='Math' AND child.name='add'")
@@ -226,7 +226,7 @@ double process(double x) { return x * 3.0; }
 int main() { return process(1); }
 EOF
 
-amap index --project "$tmpdir" >/dev/null 2>&1
+"$(get_amap_bin)" index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证多个定义存在
 process_count=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_nodes WHERE name='process'")
@@ -250,7 +250,7 @@ cat > "$tmpdir/macro/utils.c" << 'EOF'
 int main() { return MAX(1, 2); }
 EOF
 
-amap index --project "$tmpdir" >/dev/null 2>&1
+"$(get_amap_bin)" index --project "$tmpdir" >/dev/null 2>&1
 
 # 验证宏节点存在
 max_count=$(query_val "$tmpdir" "SELECT COUNT(*) FROM astramap_nodes WHERE name='MAX'")

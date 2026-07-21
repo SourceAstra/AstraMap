@@ -32,6 +32,9 @@
     let _cachedThemeColors = null;
     let _traceAbortCtrl = null;
 
+    // Locale-aware text lookup used across canvas labels and dynamic panels.
+    const t = (key, params) => (window.i18n ? window.i18n.t(key, params) : key);
+
     // Function
     function hexToRgbA(hex, alpha) {
         let c = hex.substring(1);
@@ -206,19 +209,19 @@
                 <div class="und-layout">
                     <div class="und-tree-panel">
                         <div class="und-tree-header">
-                            <div class="und-tree-title">Related functions</div>
-                            <input id="und-function-search" class="und-function-search" placeholder="Search functions..." autocomplete="off">
+                            <div class="und-tree-title" data-i18n="related_functions">Related functions</div>
+                            <input id="und-function-search" class="und-function-search" data-i18n="search_functions_ph" placeholder="Search functions..." autocomplete="off">
                         </div>
                         <div id="und-function-tree" class="und-function-tree"></div>
                     </div>
                     <div class="und-graph-panel">
                         <div class="und-graph-toolbar">
                             <div class="und-toolbar-left">
-                                <span class="und-toolbar-title">🧠 Related Call Chains</span>
+                                <span class="und-toolbar-title" data-i18n="related_call_chains">🧠 Related Call Chains</span>
                                 <span class="und-root-label" id="und-root-label"></span>
                             </div>
                             <div class="und-toolbar-right">
-                                <label class="und-depth-label">Depth
+                                <label class="und-depth-label"><span data-i18n="trace_depth">Depth</span>
                                     <select id="und-depth-select" class="und-select">
                                         <option value="1" selected>1</option>
                                         <option value="2">2</option>
@@ -229,54 +232,56 @@
                                         <option value="8">8</option>
                                     </select>
                                 </label>
-                                <label class="und-depth-label" style="margin-right:8px;">Perspective Directory
+                                <label class="und-depth-label" style="margin-right:8px;"><span data-i18n="perspective_dir">Perspective Directory</span>
                                     <select id="und-module-select" class="und-select" style="min-width:110px;">
-                                        <option value="all" selected>All Directories</option>
+                                        <option value="all" selected data-i18n="all_directories">All Directories</option>
                                     </select>
                                 </label>
-                                <button id="und-btn-group" class="und-btn" title="Toggle directory and level grouping">📂 Directory Grouping</button>
-                                <button id="und-btn-impact" class="und-btn" title="Function">⚡ Related Impact</button>
-                                <button id="und-btn-blast" class="und-btn" title="Function">💣 Related Scope</button>
-                                <button id="und-btn-fit" class="und-btn" title="Fit View">⊞ Fit</button>
-                                <button id="und-btn-detail" class="und-btn" title="Show more complete call relationships">📋 Detailed Relations</button>
+                                <button id="und-btn-group" class="und-btn" data-i18n="dir_grouping" data-i18n-title="dir_grouping_title" title="Toggle directory and level grouping">📂 Directory Grouping</button>
+                                <button id="und-btn-impact" class="und-btn" data-i18n="related_impact" data-i18n-title="function_title" title="Function">⚡ Related Impact</button>
+                                <button id="und-btn-blast" class="und-btn" data-i18n="related_scope" data-i18n-title="function_title" title="Function">💣 Related Scope</button>
+                                <button id="und-btn-fit" class="und-btn" data-i18n="fit_view" data-i18n-title="fit_view_title" title="Fit View">⊞ Fit</button>
+                                <button id="und-btn-detail" class="und-btn" data-i18n="detailed_relations" data-i18n-title="detailed_relations_title" title="Show more complete call relationships">📋 Detailed Relations</button>
                             </div>
                         </div>
                         <canvas id="und-canvas"></canvas>
                         <div id="und-loading-overlay" class="und-loading-overlay">
                             <div class="und-spinner-container">
                                 <div class="und-spinner"></div>
-                                <div class="und-loading-text">Loading...</div>
+                                <div class="und-loading-text" data-i18n="loading_label">Loading...</div>
                             </div>
                         </div>
                         <div class="und-legend">
-                            <div class="und-legend-item"><span class="und-dot" style="background:#f59e0b"></span>Start</div>
-                            <div class="und-legend-item"><span class="und-dot" style="background:#38bdf8"></span>Function</div>
-                            <div class="und-legend-item"><span class="und-dot" style="background:#64748b"></span>External</div>
-                            <div class="und-legend-item"><span class="und-dot" style="background:#ef4444"></span>Impact Path</div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#f59e0b"></span><span data-i18n="legend_start">Start</span></div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#38bdf8"></span><span data-i18n="legend_function">Function</span></div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#64748b"></span><span data-i18n="legend_external">External</span></div>
+                            <div class="und-legend-item"><span class="und-dot" style="background:#ef4444"></span><span data-i18n="legend_impact_path">Impact Path</span></div>
                         </div>
-                        <div class="und-code-toggle" id="und-code-toggle" title="Collapse Source Preview">›</div>
+                        <div class="und-code-toggle" id="und-code-toggle" data-i18n-title="collapse_preview_title" title="Collapse Source Preview">›</div>
                     </div>
                     <div class="und-resizer" id="und-resizer"></div>
                     <div class="und-code-panel">
                         <div class="und-code-header">
-                            <span id="und-code-title">📄 Source Preview</span>
+                            <span id="und-code-title" data-i18n="source_preview">📄 Source Preview</span>
                             <span id="und-code-file" class="und-code-file"></span>
                         </div>
                         <div id="und-quality-panel" class="und-quality-panel" style="display:none;"></div>
                         <div class="und-code-body" id="und-code-body">
                             <div class="und-code-empty">
                                 <div style="font-size:32px">📋</div>
-                                <div>Click a node in topology map to preview source</div>
+                                <div data-i18n="preview_hint">Click a node in topology map to preview source</div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="und-empty-state" id="und-empty">
                     <div style="font-size:48px">🧠</div>
-                    <h3>Related Call View</h3>
-                    <p>Select an entry from the left function tree，Function</p>
+                    <h3 data-i18n="trace_empty_title">Related Call View</h3>
+                    <p data-i18n="select_entry_hint">Select an entry from the left function tree</p>
                 </div>
             `;
+
+            if (window.i18n) window.i18n.apply();
 
             this.bindEvents();
             this.hookGlobalSelection();
@@ -374,7 +379,7 @@
 
             const hasSymbols = !!(window.G_DATA && window.G_DATA.symbols && Object.keys(window.G_DATA.symbols).length > 0);
             if (!hasSymbols && window._functionsLoading) {
-                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">Loading functions and directory tree...</div>';
+                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">' + t('loading_functions') + '</div>';
                 return;
             }
 
@@ -382,7 +387,7 @@
             if (!hasSymbols) {
 
                 window._functionsLoading = true;
-                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">Loading functions and directory tree...</div>';
+                tree.innerHTML = '<div class="und-tree-empty" style="color:var(--text-muted);font-size:12px;">' + t('loading_functions') + '</div>';
 
                 fetch('/api/astramap/functions')
                     .then(res => res.json())
@@ -401,13 +406,13 @@
                             }
                             this.renderFunctionTree(filterText);
                         } else {
-                            tree.innerHTML = '<div class="und-tree-empty">Failed to load function list</div>';
+                            tree.innerHTML = '<div class="und-tree-empty">' + t('load_functions_failed') + '</div>';
                         }
                     })
                     .catch(err => {
                         window._functionsLoading = false;
                         console.error("[Trace] Failed to load function list:", err);
-                        tree.innerHTML = '<div class="und-tree-empty">Failed to load function list</div>';
+                        tree.innerHTML = '<div class="und-tree-empty">' + t('load_functions_failed') + '</div>';
                     });
                 return;
             }
@@ -429,7 +434,7 @@
                 });
 
             if (!funcs.length) {
-                tree.innerHTML = '<div class="und-tree-empty">No matching functions</div>';
+                tree.innerHTML = '<div class="und-tree-empty">' + t('no_matching_functions') + '</div>';
                 return;
             }
 
@@ -1307,7 +1312,7 @@
                     ctx.fillStyle = strokeColor;
                     ctx.font = 'bold 9px "JetBrains Mono", monospace';
                     ctx.textAlign = 'right';
-                    const levelLabel = box.level === 0 ? (window.i18n.locale === 'zh' ? 'L0 (Top)' : 'L0 (Top)') : `Level ${box.level}`;
+                    const levelLabel = box.level === 0 ? t('level_top') : t('level_n', { n: box.level });
                     ctx.fillText(`[${box.moduleId}]  ${levelLabel}`, rx + rw - 16, ry + 18);
 
                     // Draw horizontal dashed divider lines between calling layers
@@ -1541,9 +1546,9 @@
                     ctx.font = '500 9px "JetBrains Mono", monospace';
                     ctx.fillStyle = isLightTheme ? '#6d28d9' : '#a78bfa';
                     ctx.textAlign = 'left';
-                    ctx.fillText(window.i18n.locale === 'zh' ? 'Click right panel to view list' : 'View list on right panel', rx + 15, ry + 38);
+                    ctx.fillText(t('view_list_hint'), rx + 15, ry + 38);
                 } else {
-                    const fileShort = n.file ? n.file.split('/').pop() : (isUnknown ? (window.i18n.locale === 'zh' ? 'External Dependency' : 'External') : (window.i18n.locale === 'zh' ? 'System Module' : 'System Module'));
+                    const fileShort = n.file ? n.file.split('/').pop() : (isUnknown ? t('external_dependency') : t('system_module'));
                     ctx.font = '500 9px "JetBrains Mono", monospace';
                     ctx.fillStyle = isLightTheme ? (isRoot ? '#e11d48' : (isUnknown ? '#6b7280' : '#059669')) : (isRoot ? '#f59e0b' : (isUnknown ? '#94a3b8' : '#38bdf8'));
                     ctx.textAlign = 'left';
@@ -1703,15 +1708,15 @@
 
             if (node.type === 'virtual_aggregate') {
                 titleLabel.textContent = '📁 ' + node.name;
-                fileLabel.textContent = 'Folded utility functions';
+                fileLabel.textContent = t('folded_utils');
 
                 let listHtml = `<div class="und-aggregate-list">`;
-                listHtml += `<div class="und-agg-tip">To avoid spaghetti edges, the following utility/low-in-degree helper functions have been folded. Click to preview source code:</div>`;
+                listHtml += `<div class="und-agg-tip">${t('agg_tip')}</div>`;
 
                 node.foldedNodeIds.forEach(fnId => {
                     const sym = window.G_DATA && window.G_DATA.symbols[fnId];
                     const displayName = sym ? (sym.qualifiedName || sym.name) : fnId;
-                    const displayFile = (sym && sym.file) ? sym.file.split('/').pop() : 'External Symbol';
+                    const displayFile = (sym && sym.file) ? sym.file.split('/').pop() : t('external_symbol');
                     listHtml += `<div class="und-agg-item" onclick="window.SourceAstra.loadAggregaterSource('${fnId}')">` +
                         `<span>fn</span><strong>${displayName}</strong>` +
                         `<small>${displayFile}</small>` +
@@ -1723,13 +1728,13 @@
             }
 
             if (!node.file) {
-                body.innerHTML = '<div class="und-code-empty"><div style="font-size:24px">⚠️</div><div>External symbol, no source code available</div></div>';
+                body.innerHTML = '<div class="und-code-empty"><div style="font-size:24px">⚠️</div><div>' + t('external_no_source') + '</div></div>';
                 return;
             }
 
             titleLabel.textContent = '📄 ' + (node.qualifiedName || node.name);
             fileLabel.textContent = node.file + ':' + (node.line || '?');
-            body.innerHTML = '<div class="und-code-loading">Loading source code...</div>';
+            body.innerHTML = '<div class="und-code-loading">' + t('loading_source') + '</div>';
 
             const jobId = sessionStorage.getItem('sourceastra_job_id');
             const url = `/api/snippet?file=${encodeURIComponent(node.file)}&line=${node.line || 1}&count=10000${jobId ? '&job=' + jobId : ''}`;
@@ -1796,23 +1801,25 @@
                     const hlLine = body.querySelector('.und-code-hl');
                     if (hlLine) hlLine.scrollIntoView({ block: 'center', behavior: 'smooth' });
                 } else {
-                    body.innerHTML = '<div class="und-code-empty">No preview available</div>';
+                    body.innerHTML = '<div class="und-code-empty">' + t('no_preview') + '</div>';
                 }
             } catch (e) {
-                body.innerHTML = '<div class="und-code-empty">Load failed: ' + e.message + '</div>';
+                body.innerHTML = '<div class="und-code-empty">' + t('load_failed') + e.message + '</div>';
             }
         },
 
         async updateQualityPanel(node) {
             const panel = document.getElementById('und-quality-panel');
             if (!panel) return;
+            // Remember the active node so a locale change can redraw the panel.
+            this._qualityNode = node;
             if (!node || node.type === 'virtual_aggregate' || !node.file) {
                 panel.style.display = 'none';
                 return;
             }
 
             panel.style.display = 'flex';
-            panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">Loading quality metrics...</div>`;
+            panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">${t('loading_metrics')}</div>`;
 
             try {
                 let metrics = _cachedComplexity[node.id];
@@ -1834,9 +1841,9 @@
                 if (metrics) {
                     const cc = metrics.cyclomatic_complexity || 0;
                     let ccBadge = 'green';
-                    let ccLabel = '🟢 Low';
-                    if (cc > 20) { ccBadge = 'red'; ccLabel = '🔴 Critical'; }
-                    else if (cc > 10) { ccBadge = 'yellow'; ccLabel = '🟡 High'; }
+                    let ccLabel = t('complexity_low');
+                    if (cc > 20) { ccBadge = 'red'; ccLabel = t('complexity_critical'); }
+                    else if (cc > 10) { ccBadge = 'yellow'; ccLabel = t('complexity_high'); }
 
                     const loc = metrics.lines_of_code || 0;
                     const depth = metrics.nesting_depth || 0;
@@ -1844,36 +1851,36 @@
 
                     panel.innerHTML = `
                         <div class="und-qp-item">
-                            <span class="und-qp-label">Complexity</span>
+                            <span class="und-qp-label">${t('metric_complexity')}</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${cc}</span>
                                 <span class="und-qp-badge ${ccBadge}">${ccLabel}</span>
                             </div>
                         </div>
                         <div class="und-qp-item">
-                            <span class="und-qp-label">Lines</span>
+                            <span class="und-qp-label">${t('metric_lines')}</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${loc}</span>
                             </div>
                         </div>
                         <div class="und-qp-item">
-                            <span class="und-qp-label">Nesting Depth</span>
+                            <span class="und-qp-label">${t('metric_nesting')}</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${depth}</span>
                             </div>
                         </div>
                         <div class="und-qp-item">
-                            <span class="und-qp-label">Return Points</span>
+                            <span class="und-qp-label">${t('metric_returns')}</span>
                             <div class="und-qp-value-wrap">
                                 <span class="und-qp-value">${returnCount}</span>
                             </div>
                         </div>
                     `;
                 } else {
-                    panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">No complexity metrics available</div>`;
+                    panel.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.4)">${t('no_metrics')}</div>`;
                 }
             } catch (err) {
-                panel.innerHTML = `<div style="font-size:11px;color:#ef4444">Metrics failed: ${err.message}</div>`;
+                panel.innerHTML = `<div style="font-size:11px;color:#ef4444">${t('metrics_failed')}${err.message}</div>`;
             }
         },
 
@@ -2041,7 +2048,7 @@
             const moduleSelect = document.getElementById('und-module-select');
             if (moduleSelect) {
                 const currentSelected = selectedModuleFilter || 'all';
-                moduleSelect.innerHTML = '<option value="all">All Directories</option>';
+                moduleSelect.innerHTML = '<option value="all">' + t('all_directories') + '</option>';
 
                 const uniqueModules = new Set();
                 traceNodes.forEach(n => {
@@ -2194,7 +2201,7 @@
                     e.stopPropagation();
                     const collapsed = layout.classList.toggle('code-collapsed');
                     toggleBtn.textContent = collapsed ? '‹' : '›';
-                    toggleBtn.title = collapsed ? 'Expand Source Preview' : 'Collapse Source Preview';
+                    toggleBtn.title = collapsed ? t('expand_preview_title') : t('collapse_preview_title');
 
                     // Recalculate and zoom canvas
                     setTimeout(() => {
@@ -2273,7 +2280,11 @@
 
     window.addEventListener('sa-locale-changed', () => {
         if (window.G_CURRENT_VIEW === 'trace' && traceCanvas) {
+            Understand.renderFunctionTree(document.getElementById('und-function-search')?.value || '');
+            Understand.applyFilters();
+            Understand.buildGraph();
             Understand.renderGraph();
+            if (Understand._qualityNode) Understand.updateQualityPanel(Understand._qualityNode);
         }
     });
 

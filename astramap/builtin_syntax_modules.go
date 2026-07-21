@@ -183,6 +183,9 @@ func goSyntaxSpec() treeSitterSpec {
 			"function_declaration": {Kind: "function", NameField: "name", Scope: true, Callable: true},
 			"method_declaration":   {Kind: "method", NameField: "name", Scope: true, Callable: true, Normalizer: normalizeGoSyntaxMethod},
 			"type_spec":            {NameField: "name", Scope: true, Normalizer: normalizeGoSyntaxType},
+			"const_spec":           syntaxNamedRule("constant", "name", false),
+			"var_spec":             syntaxNamedRule("variable", "name", false),
+			"method_spec":          syntaxNamedRule("method", "name", false, true),
 		},
 		Calls:   map[string][]string{"call_expression": {"function", "expression"}},
 		Imports: map[string]bool{"import_spec": true}, ImportPaths: syntaxQuotedPaths,
@@ -194,14 +197,17 @@ func scriptTreeSitterSpec() treeSitterSpec {
 	return treeSitterSpec{
 		Grammar: typescriptSyntaxGrammar,
 		Definitions: map[string]syntaxDefinitionRule{
-			"class_declaration":      syntaxNamedRule("class", "name", true),
-			"interface_declaration":  syntaxNamedRule("interface", "name", true),
-			"function_declaration":   syntaxNamedRule("function", "name", true, true),
-			"method_definition":      syntaxNamedRule("method", "name", true, true),
-			"type_alias_declaration": syntaxNamedRule("type", "name", false),
-			"enum_declaration":       syntaxNamedRule("enum", "name", true),
-			"internal_module":        syntaxNamedRule("namespace", "name", true),
-			"variable_declarator":    {Normalizer: normalizeScriptSyntaxLexical},
+			"class_declaration":              syntaxNamedRule("class", "name", true),
+			"abstract_class_declaration":     syntaxNamedRule("class", "name", true),
+			"interface_declaration":          syntaxNamedRule("interface", "name", true),
+			"function_declaration":           syntaxNamedRule("function", "name", true, true),
+			"generator_function_declaration": syntaxNamedRule("function", "name", true, true),
+			"method_definition":              syntaxNamedRule("method", "name", true, true),
+			"abstract_method_signature":      syntaxNamedRule("method", "name", true, true),
+			"type_alias_declaration":         syntaxNamedRule("type", "name", false),
+			"enum_declaration":               syntaxNamedRule("enum", "name", true),
+			"internal_module":                syntaxNamedRule("namespace", "name", true),
+			"variable_declarator":            {Normalizer: normalizeScriptSyntaxLexical},
 		},
 		Calls:       map[string][]string{"call_expression": {"function", "expression"}},
 		Imports:     map[string]bool{"import_statement": true, "export_statement": true},
@@ -222,6 +228,7 @@ func pythonSyntaxSpec() treeSitterSpec {
 		Definitions: map[string]syntaxDefinitionRule{
 			"class_definition":    syntaxNamedRule("class", "name", true),
 			"function_definition": {Kind: "function", NameField: "name", Scope: true, Callable: true, Normalizer: normalizePythonSyntaxFunction},
+			"assignment":          {Normalizer: normalizePythonSyntaxNamedTuple},
 		},
 		Calls:       map[string][]string{"call": {"function"}},
 		Imports:     map[string]bool{"import_statement": true, "import_from_statement": true},
@@ -254,9 +261,13 @@ func cFamilyTreeSitterSpec() treeSitterSpec {
 			"type_definition":      {Normalizer: normalizeCSyntaxType},
 			"class_specifier":      {Kind: "class", NameField: "name", Scope: true, Normalizer: normalizeStandaloneCSyntaxType},
 			"struct_specifier":     {Kind: "struct", NameField: "name", Scope: true, Normalizer: normalizeStandaloneCSyntaxType},
+			"union_specifier":      {Kind: "struct", NameField: "name", Scope: true, Normalizer: normalizeStandaloneCSyntaxType},
 			"enum_specifier":       {Kind: "enum", NameField: "name", Scope: true, Normalizer: normalizeStandaloneCSyntaxType},
+			"alias_declaration":    syntaxNamedRule("type", "name", false),
 			"namespace_definition": syntaxNamedRule("namespace", "name", true),
 			"function_definition":  {Kind: "function", Scope: true, Callable: true, Normalizer: normalizeCSyntaxFunction},
+			"declaration":          {Kind: "function", Scope: true, Callable: true, Normalizer: normalizeCSyntaxDeclaration},
+			"field_declaration":    {Kind: "function", Scope: true, Callable: true, Normalizer: normalizeCSyntaxDeclaration},
 			"preproc_def":          syntaxNamedRule("macro", "name", false),
 			"preproc_function_def": syntaxNamedRule("macro", "name", false),
 		},
@@ -270,13 +281,16 @@ func rustSyntaxSpec() treeSitterSpec {
 	return treeSitterSpec{
 		Grammar: syntaxGrammar(rust.Language),
 		Definitions: map[string]syntaxDefinitionRule{
-			"function_item":    {Normalizer: normalizeRustSyntaxCallable},
-			"struct_item":      syntaxNamedRule("struct", "name", true),
-			"enum_item":        syntaxNamedRule("enum", "name", true),
-			"trait_item":       syntaxNamedRule("interface", "name", true),
-			"type_item":        syntaxNamedRule("type", "name", false),
-			"mod_item":         syntaxNamedRule("module", "name", true),
-			"macro_definition": syntaxNamedRule("macro", "name", false),
+			"function_item":           {Normalizer: normalizeRustSyntaxCallable},
+			"function_signature_item": {Normalizer: normalizeRustSyntaxCallable},
+			"const_item":              syntaxNamedRule("constant", "name", false),
+			"static_item":             syntaxNamedRule("variable", "name", false),
+			"struct_item":             syntaxNamedRule("struct", "name", true),
+			"enum_item":               syntaxNamedRule("enum", "name", true),
+			"trait_item":              syntaxNamedRule("interface", "name", true),
+			"type_item":               syntaxNamedRule("type", "name", false),
+			"mod_item":                syntaxNamedRule("module", "name", true),
+			"macro_definition":        syntaxNamedRule("macro", "name", false),
 		},
 		Calls:       map[string][]string{"call_expression": {"function"}},
 		Imports:     map[string]bool{"use_declaration": true, "extern_crate_declaration": true},
@@ -293,10 +307,11 @@ func csharpSyntaxSpec() treeSitterSpec {
 				"class_declaration": "class", "record_declaration": "class", "struct_declaration": "struct",
 				"interface_declaration": "interface", "enum_declaration": "enum",
 				"namespace_declaration": "namespace", "file_scoped_namespace_declaration": "namespace",
+				"delegate_declaration": "type",
 			},
 			map[string]string{
 				"method_declaration": "method", "constructor_declaration": "method",
-				"local_function_statement": "function", "delegate_declaration": "function",
+				"local_function_statement": "function", "property_declaration": "method",
 				"operator_declaration": "method", "conversion_operator_declaration": "method",
 			},
 		),
@@ -313,7 +328,7 @@ func kotlinSyntaxSpec() treeSitterSpec {
 			"class_declaration":     {Normalizer: normalizeKotlinSyntaxType},
 			"object_declaration":    syntaxDescendantRule("class", true, "type_identifier"),
 			"companion_object":      syntaxFixedRule("companion", "class", true),
-			"function_declaration":  {Normalizer: normalizeKotlinSyntaxCallable},
+			"function_declaration":  {Normalizer: syntaxDescendantCallable("simple_identifier")},
 			"secondary_constructor": syntaxFixedRule("constructor", "method", true),
 			"primary_constructor":   syntaxFixedRule("constructor", "method", true),
 			"type_alias":            syntaxDescendantRule("type", false, "type_identifier", "simple_identifier"),
@@ -329,7 +344,7 @@ func rubySyntaxSpec() treeSitterSpec {
 		Grammar: syntaxGrammar(ruby.Language),
 		Definitions: map[string]syntaxDefinitionRule{
 			"class": syntaxNamedRule("class", "name", true), "module": syntaxNamedRule("module", "name", true),
-			"method":           syntaxNamedRule("function", "name", true, true),
+			"method":           syntaxNamedRule("method", "name", true, true),
 			"singleton_method": {Normalizer: normalizeRubySingletonMethod},
 			"singleton_class":  syntaxFixedRule("singleton", "class", true),
 		},
@@ -410,16 +425,46 @@ func normalizePythonSyntaxFunction(ctx syntaxDefinitionContext, rule syntaxDefin
 	return record, ok
 }
 
-func normalizeScriptSyntaxLexical(ctx syntaxDefinitionContext, _ syntaxDefinitionRule) (syntaxDefinitionRecord, bool) {
-	value, name := ctx.Node.ChildByFieldName("value"), ctx.Node.ChildByFieldName("name")
-	if value == nil || name == nil || (value.Kind() != "arrow_function" && value.Kind() != "function_expression") {
+// normalizePythonSyntaxNamedTuple recognizes `X = namedtuple('X', ...)` as a
+// class definition: the call synthesizes a class at runtime, so the static
+// symbol table mirrors what the interpreter produces.
+func normalizePythonSyntaxNamedTuple(ctx syntaxDefinitionContext, _ syntaxDefinitionRule) (syntaxDefinitionRecord, bool) {
+	left, right := ctx.Node.ChildByFieldName("left"), ctx.Node.ChildByFieldName("right")
+	if left == nil || right == nil || left.Kind() != "identifier" || right.Kind() != "call" {
 		return syntaxDefinitionRecord{}, false
 	}
-	kind := "function"
-	if ctx.ScopeKind == "class" {
-		kind = "method"
+	callee := right.ChildByFieldName("function")
+	if callee != nil && callee.Kind() == "attribute" {
+		callee = callee.ChildByFieldName("attribute")
 	}
-	return syntaxDefinitionRecord{Name: syntaxNodeText(name, ctx.Code), Kind: kind, Scope: true, Callable: true}, true
+	if callee == nil || syntaxNodeText(callee, ctx.Code) != "namedtuple" {
+		return syntaxDefinitionRecord{}, false
+	}
+	name := syntaxNodeText(left, ctx.Code)
+	return syntaxDefinitionRecord{Name: name, Kind: "class", Scope: true}, name != ""
+}
+
+// normalizeScriptSyntaxLexical indexes declarations whose value is a callable
+// or a class. Plain data assignments stay unindexed by design: indexing every
+// variable would drown the symbol table in local noise.
+func normalizeScriptSyntaxLexical(ctx syntaxDefinitionContext, _ syntaxDefinitionRule) (syntaxDefinitionRecord, bool) {
+	value, name := ctx.Node.ChildByFieldName("value"), ctx.Node.ChildByFieldName("name")
+	if value == nil || name == nil {
+		return syntaxDefinitionRecord{}, false
+	}
+	record := syntaxDefinitionRecord{Name: syntaxNodeText(name, ctx.Code), Scope: true}
+	switch value.Kind() {
+	case "arrow_function", "function_expression", "generator_function":
+		record.Kind, record.Callable = "function", true
+		if ctx.ScopeKind == "class" {
+			record.Kind = "method"
+		}
+	case "class":
+		record.Kind = "class"
+	default:
+		return syntaxDefinitionRecord{}, false
+	}
+	return record, record.Name != ""
 }
 
 func normalizeCSyntaxType(ctx syntaxDefinitionContext, _ syntaxDefinitionRule) (syntaxDefinitionRecord, bool) {
@@ -441,7 +486,7 @@ func normalizeCSyntaxFunction(ctx syntaxDefinitionContext, rule syntaxDefinition
 		return syntaxDefinitionRecord{}, false
 	}
 	name, container := syntaxCFunctionName(declarator, ctx.Code)
-	if name == "" {
+	if !syntaxCFunctionNameValid(name) {
 		return syntaxDefinitionRecord{}, false
 	}
 	kind := rule.Kind
@@ -453,6 +498,50 @@ func normalizeCSyntaxFunction(ctx syntaxDefinitionContext, rule syntaxDefinition
 	}
 	sum := sha256.Sum256([]byte(strings.TrimSpace(syntaxNodeText(declarator, ctx.Code))))
 	return syntaxDefinitionRecord{Name: name, Kind: kind, Container: container, Scope: true, Callable: true, IdentitySuffix: fmt.Sprintf("~%x", sum[:6])}, true
+}
+
+// normalizeCSyntaxDeclaration indexes body-less function declarations such as
+// `virtual void draw() = 0;` or `void swap(T&) noexcept;` by reusing the
+// definition normalizer once the declarator chain has been proven to carry a
+// function declarator.
+func normalizeCSyntaxDeclaration(ctx syntaxDefinitionContext, rule syntaxDefinitionRule) (syntaxDefinitionRecord, bool) {
+	if syntaxDeclaratorFunction(ctx.Node.ChildByFieldName("declarator")) == nil {
+		return syntaxDefinitionRecord{}, false
+	}
+	return normalizeCSyntaxFunction(ctx, rule)
+}
+
+// syntaxDeclaratorFunction walks the declarator chain of a declaration without
+// descending into initializer values: a lambda's own parameter list must not
+// turn its variable into a function definition.
+func syntaxDeclaratorFunction(node *sitter.Node) *sitter.Node {
+	for node != nil {
+		if node.Kind() == "function_declarator" {
+			return node
+		}
+		if node.Kind() != "pointer_declarator" && node.Kind() != "reference_declarator" && node.Kind() != "parenthesized_declarator" {
+			return nil
+		}
+		var next *sitter.Node
+		for index := uint(0); index < node.ChildCount(); index++ {
+			if child := node.Child(index); strings.HasSuffix(child.Kind(), "_declarator") {
+				next = child
+			}
+		}
+		node = next
+	}
+	return nil
+}
+
+var cFunctionNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// syntaxCFunctionNameValid accepts plain identifiers, destructors and operator
+// names, rejecting declarator noise such as "(*fp)" from function pointers.
+func syntaxCFunctionNameValid(name string) bool {
+	if name == "" {
+		return false
+	}
+	return strings.HasPrefix(name, "operator") || strings.HasPrefix(name, "~") || cFunctionNamePattern.MatchString(name)
 }
 
 func syntaxCFunctionName(node *sitter.Node, code []byte) (string, string) {
@@ -511,14 +600,19 @@ func normalizeRustSyntaxCallable(ctx syntaxDefinitionContext, _ syntaxDefinition
 	}
 	record := syntaxDefinitionRecord{Name: name, Kind: "function", Scope: true, Callable: true}
 	for parent := ctx.Node.Parent(); parent != nil; parent = parent.Parent() {
-		if parent.Kind() != "impl_item" {
-			continue
+		switch parent.Kind() {
+		case "impl_item":
+			record.Kind = "method"
+			if target := parent.ChildByFieldName("type"); target != nil {
+				record.Container = syntaxNodeText(target, ctx.Code)
+			}
+			return record, true
+		case "trait_item":
+			// Trait methods belong to the trait; the enclosing trait scope
+			// supplies the container, so no receiver override is needed.
+			record.Kind = "method"
+			return record, true
 		}
-		record.Kind = "method"
-		if target := parent.ChildByFieldName("type"); target != nil {
-			record.Container = syntaxNodeText(target, ctx.Code)
-		}
-		break
 	}
 	return record, true
 }
@@ -535,16 +629,6 @@ func normalizeKotlinSyntaxType(ctx syntaxDefinitionContext, _ syntaxDefinitionRu
 		kind = "enum"
 	}
 	return syntaxDefinitionRecord{Name: name, Kind: kind, Scope: true}, true
-}
-
-func normalizeKotlinSyntaxCallable(ctx syntaxDefinitionContext, _ syntaxDefinitionRule) (syntaxDefinitionRecord, bool) {
-	record, ok := syntaxDescendantCallable("simple_identifier")(ctx, syntaxDefinitionRule{})
-	if ok {
-		if receiver := ctx.Node.ChildByFieldName("receiver"); receiver != nil {
-			record.Kind, record.Container = "method", syntaxNodeText(receiver, ctx.Code)
-		}
-	}
-	return record, ok
 }
 
 func normalizeRubySingletonMethod(ctx syntaxDefinitionContext, _ syntaxDefinitionRule) (syntaxDefinitionRecord, bool) {

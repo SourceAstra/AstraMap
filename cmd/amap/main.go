@@ -1377,8 +1377,15 @@ func runIndex(opts indexOptions) {
 			scipPaths, scipAutoPaths, generateErr = autoGenerateScip(projectRoot, selected, filter, offerExisting)
 			if generateErr != nil {
 				cleanupOwnedFiles(scipAutoPaths)
-				logError("SCIP dependency check failed: %v", generateErr)
-				os.Exit(1)
+				scipPaths = nil
+				if opts.refreshScip || opts.scipOnly {
+					// Explicit semantic demand: an unavailable SCIP toolchain is fatal.
+					logError("SCIP dependency check failed: %v", generateErr)
+					os.Exit(1)
+				}
+				// Auto-detected SCIP is an optional enhancement; the syntax
+				// overlay below must remain available without it.
+				logWarn("SCIP semantic indexing unavailable, falling back to syntax-only: %v", generateErr)
 			}
 		}
 	} else if !quiet {
