@@ -1,15 +1,15 @@
 /**
  * SourceAstra - Understand Module v2.0 (Fully rewritten)
- * Design.md 3.0 规格：追踪视图 (核心攻坚区)
+ * Design.md 3.0 Spec: Trace View (core area)
  *
- * 架构：双面板布局
- *   左: D3 Canvas 追踪拓扑图 (DAG flow + 流光动画)
- *   右: C Source Preview (语法高亮)
+ * Architecture: dual-panel layout
+ *   Left: D3 Canvas trace topology (DAG flow + glow animation)
+ *   Right: C Source Preview (syntax highlight)
  *
- * 核心能力：
- *   - 多终点路径裁剪 (Path Clipping)
- *   - 流光影响分析 (Impact Flow Animation)
- *   - 代码一体化协同
+ * Core capabilities:
+ *   - Multi-endpoint path clipping (Path Clipping)
+ *   - Glow impact analysis (Impact Flow Animation)
+ *   - Code-source integration
  */
 (function() {
     let initialized = false;
@@ -234,7 +234,7 @@
                                         <option value="all" selected>All Directories</option>
                                     </select>
                                 </label>
-                                <button id="und-btn-group" class="und-btn" title="切换目录与层级分组布局">📂 Directory Grouping</button>
+                                <button id="und-btn-group" class="und-btn" title="Toggle directory and level grouping">📂 Directory Grouping</button>
                                 <button id="und-btn-impact" class="und-btn" title="Function">⚡ Related Impact</button>
                                 <button id="und-btn-blast" class="und-btn" title="Function">💣 Related Scope</button>
                                 <button id="und-btn-fit" class="und-btn" title="Fit View">⊞ Fit</button>

@@ -49,7 +49,7 @@
             -webkit-text-fill-color: transparent;
             letter-spacing: 1px;
         }
-        /* 导航 Tab */
+        /* Navigation tabs */
         .tab-btn {
             background: transparent;
             border: none;
@@ -69,7 +69,7 @@
             background: var(--accent-primary);
         }
         
-        /* 核心内容视口 */
+        /* Core viewport */
         .view-panel {
             position: absolute;
             top: 56px;
@@ -112,7 +112,7 @@
             color: #fff;
         }
 
-        /* About 按钮 */
+        /* About button */
         .about-btn {
             background: rgba(99, 102, 241, 0.15);
             border: 1px solid rgba(99, 102, 241, 0.3);
@@ -129,7 +129,7 @@
             color: #fff;
         }
 
-        /* About 弹窗 */
+        /* About modal */
         .about-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -272,122 +272,27 @@
 </head>
 <body class="view-explore">
     <header>
-        <h1>AstraMap 星辰地图</h1>
+        <h1>AstraMap</h1>
         <div style="width: 24px;"></div>
-        <button id="btn-explore" class="tab-btn active">探索视界</button>
-        <button id="btn-trace" class="tab-btn">依赖分析</button>
+        <button id="btn-explore" class="tab-btn active">Explore</button>
+        <button id="btn-trace" class="tab-btn">Trace</button>
         <div style="flex:1"></div>
-        <button id="btn-about" class="about-btn">关于</button>
     </header>
 
     <div id="global-breadcrumb-bar" style="display:none;">
         <div id="explore-breadcrumb"></div>
     </div>
 
-    <!-- 探索画布 -->
+    <!-- Explore Canvas -->
     <div id="view-explore" class="view-panel active">
         <div id="explore-canvas-container" style="width:100%; height:100%;"></div>
     </div>
 
-    <!-- 追踪分析画布 -->
+    <!-- Trace Canvas -->
     <div id="view-trace" class="view-panel"></div>
 
-    <!-- About 弹窗 -->
-    <div id="about-overlay" class="about-overlay">
-        <div class="about-modal">
-            <div class="about-header">
-                <h2>🚀 AstraMap 代码地图</h2>
-                <button id="about-close" class="about-close">&times;</button>
-            </div>
-            <div class="about-body">
-
-                <div class="about-section">
-                    <h3>核心优势</h3>
-                    <ul>
-                        <li><span class="about-highlight">95%+ 语义精度</span> — SCIP 编译器级索引，区分重载/泛型</li>
-                        <li><span class="about-highlight">60-95% Token 节约</span> — 单次调用替代多次 grep+Read</li>
-                        <li><span class="about-highlight">毫秒级更新</span> — 文件变更 50ms 内同步</li>
-                        <li><span class="about-highlight">条件编译支持</span> — C++/Go/Rust 条件分支动态投影</li>
-                    </ul>
-                </div>
-
-                <div class="about-section">
-                    <h3>工作原理</h3>
-                    <p>源码 → 内置 Tree-sitter 实时层 + SCIP 最终语义 → SQLite 知识图谱 → MCP/HTTP API → 本地可视化与工具客户端</p>
-                </div>
-
-                <div class="about-section">
-                    <h3>🚀 2 分钟部署指南 (Linux)</h3>
-                    
-                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
-                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">📁 第一步：加入 PATH</div>
-                        <div style="margin-bottom: 12px;">
-                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px;">mkdir -p ~/bin</code>
-                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">cp ./amap ~/bin</code><br>
-                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-top: 8px; display: block;">echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc</code>
-                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-top: 8px; display: block;">source ~/.bashrc</code>
-                        </div>
-                    </div>
-                    
-                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
-                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">📂 第二步，进入所在项目</div>
-                        
-                        <div style="margin-bottom: 12px;">
-                            <div style="color: #f1f5f9; font-size: 13px; margin-bottom: 6px;"># 一键注册 MCP + 规则文件到 Claude Code等</div>
-                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; display: block;">amap install</code>
-                        </div>
-                        
-                        <div style="margin-bottom: 12px;">
-                            <div style="color: #f1f5f9; font-size: 13px; margin-bottom: 6px;"># 默认模式：自动检测变成工具，并生成代码地图所使用 SCIP</div>
-                            <code style="background: rgba(99, 102, 241, 0.2); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; display: block;">amap index</code>
-                        </div>
-                    </div>
-                    
-                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
-                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">🤖 第三步，打开 Claude Code</div>
-                        <div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">
-                            测试代码地图使用可以使用<code style="background: rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 3px; font-size: 12px;">/amap</code> 斜杠命令<br>
-                            或 MCP 服务器自动集成
-                        </div>
-                    </div>
-                    
-                    <div style="background: rgba(15, 23, 42, 0.6); border-radius: 8px; padding: 16px; margin: 12px 0;">
-                        <div style="color: #60a5fa; font-weight: 600; margin-bottom: 8px;">🖥️ 第四步，进入所在项目，可使用代码看Function调用链图</div>
-                        <div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">
-                            <code style="background: rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 3px; font-size: 12px;">amap dashboard</code><br>
-                            默认端口 3000，冲突自动+1<br>
-                            访问: <code style="background: rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 3px; font-size: 12px;">http://localhost:3000</code>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="about-section">
-                    <h3>工具对比</h3>
-                    <table class="about-table">
-                        <thead>
-                            <tr><th>维度</th><th>CodeGraph</th><th>GitNexus</th><th>Graphify</th><th>AstraMap</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr><td>索引源</td><td>Tree-sitter</td><td>Tree-sitter</td><td>Tree-sitter+静态图</td><td class="about-us">Tree-sitter 实时层 + SCIP 最终语义</td></tr>
-                            <tr><td>语义精度</td><td>启发式</td><td>符号级</td><td>混合</td><td class="about-us">编译器级</td></tr>
-                            <tr><td>条件编译</td><td>❌</td><td>❌</td><td>❌</td><td class="about-us">✅ 全支持</td></tr>
-                            <tr><td>项目规模</td><td>百万行</td><td>千万行</td><td>百万行</td><td class="about-us">亿行级</td></tr>
-                            <tr><td>部署复杂度</td><td>中等</td><td>简单</td><td>简单</td><td class="about-us">零配置</td></tr>
-                            <tr><td>交互可视化</td><td>❌ 纯文本</td><td>静态图</td><td>只读图表</td><td class="about-us">✅ 力导向图+追踪</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-
-            </div>
-            <div class="about-footer">
-                <p class="copyright">© 2024-2025 AstraMap — 高精度代码地图引擎</p>
-                <p>作者: <span class="about-highlight">何志川</span> &nbsp;|&nbsp; 版本: <span class="about-highlight">v0.1</span></p>
-            </div>
-        </div>
-    </div>
-
     <script>
-        // ===== 补齐 SourceAstra 独立运行所需的 Mocks 全局变量，防止 JS 加载或交互报错 =====
+        // SourceAstra standalone runtime mocks
         window.G_CURRENT_VIEW = 'explore';
         window.G_GRAPH_MODE = 'projected';
         window.G_FILE_TO_MODULE = {};
@@ -469,17 +374,17 @@
                 };
                 menu.appendChild(item);
             };
-            addItem(isFunction ? '进入依赖分析' : '仅Function可进入依赖分析', isFunction, () => {
+            addItem(isFunction ? 'Enter Trace Analysis' : 'Trace Analysis (Functions Only)', isFunction, () => {
                 openTraceForSymbol(key, name);
             });
 
             const targets = docCtx && Array.isArray(docCtx.docTargets) ? docCtx.docTargets : [];
             targets.forEach(target => {
                 const label = target.docType === 'file'
-                    ? '生成文件理解文档'
+                    ? 'Generate File Understanding Doc'
                     : target.docKey === '__project__'
-                        ? '生成项目理解文档'
-                        : '生成目录理解文档';
+                        ? 'Generate Project Understanding Doc'
+                        : 'Generate Directory Understanding Doc';
                 addItem(label, !!(target.docType && target.docKey), () => {
                     if (window.SourceAstra && typeof window.SourceAstra.openDocForExplore === 'function') {
                         window.SourceAstra.openDocForExplore(target.docType, target.docKey, { autoGenerate: true });
@@ -487,14 +392,14 @@
                 });
             });
             if (targets.length === 0 && key === '__project__') {
-                addItem('生成项目理解文档', true, () => {
+                addItem('Generate Project Understanding Doc', true, () => {
                     if (window.SourceAstra && typeof window.SourceAstra.openDocForExplore === 'function') {
                         window.SourceAstra.openDocForExplore('project', '__project__', { autoGenerate: true });
                     }
                 });
             }
             if (!isFunction && targets.length === 0 && key !== '__project__') {
-                addItem('无可用操作', false, () => {});
+                addItem('No Actions Available', false, () => {});
             }
             document.body.appendChild(menu);
             const close = (event) => {
@@ -506,7 +411,7 @@
             setTimeout(() => document.addEventListener('mousedown', close), 0);
         };
 
-        // 懒加载 marked 库 Mock，供 explore.js 中的文档预览机制在运行时调用
+        // Lazy-load marked library mock for explore.js document preview
         window._lazyLibs = {
             marked: { loaded: false, src: 'marked.min.js', css: null }
         };
@@ -526,7 +431,7 @@
             });
         };
 
-        // 统一覆盖全局 fetch 的 Authorization 请求头，避免原 Auth 检测阻挡
+        // Override global fetch Authorization header to avoid auth blocking
         const originalFetch = window.fetch;
         window.fetch = function(input, init) {
             init = init || {};
@@ -534,7 +439,7 @@
             return originalFetch(input, init);
         };
 
-        // About 弹窗控制
+        // About modal controls
         const aboutOverlay = document.getElementById('about-overlay');
         const aboutBtn = document.getElementById('btn-about');
         const aboutClose = document.getElementById('about-close');
@@ -554,7 +459,7 @@
                 }
             });
         }
-        // ESC 关闭弹窗
+        // ESC to close modal
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && aboutOverlay && aboutOverlay.classList.contains('show')) {
                 aboutOverlay.classList.remove('show');
@@ -587,7 +492,7 @@
         }
     </script>
     <script>
-        // Tab 切换逻辑
+        // Tab switching logic
         let activeTab = 'explore';
         const btnExplore = document.getElementById('btn-explore');
         const btnTrace = document.getElementById('btn-trace');
@@ -620,9 +525,9 @@
             viewTrace.classList.add('active');
             viewExplore.classList.remove('active');
             document.body.className = 'view-trace';
-            
+
             await loadTraceModule();
-            // 初始化 Trace 视图
+            // Initialize Trace view
             if (window.SourceAstra && typeof window.SourceAstra.initUnderstand === 'function') {
                 window.SourceAstra.initUnderstand();
             }
@@ -692,7 +597,7 @@
             window.G_GRAPH_MODE = 'full';
         }
 
-        // 挂载页面组件实例并拉取初始化数据
+        // Mount page components and fetch initial data
         window.addEventListener('DOMContentLoaded', async () => {
             try {
                 const [statusRes, overviewRes] = await Promise.all([
@@ -709,11 +614,11 @@
                     astraMapInstallSymbols([]);
                 }
             } catch(e) {
-                console.warn("加载 AstraMap 轻量初始化数据失败，回退全量图: ", e);
+                console.warn("Failed to load AstraMap lightweight init data, falling back to full graph: ", e);
                 try {
                     await astraMapLoadFullFallback();
                 } catch(fullErr) {
-                    console.error("加载 AstraMap 初始化数据失败: ", fullErr);
+                    console.error("Failed to load AstraMap init data: ", fullErr);
                     window.G_PROJECTED_GRAPH = { nodes: [], links: [] };
                     window.G_DATA = { symbols: {}, nameMap: {}, edges: [], links: [], files: [] };
                 }

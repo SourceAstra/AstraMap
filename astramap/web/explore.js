@@ -1,7 +1,7 @@
 /**
  * SourceAstra - Explore Module JS v26
- * 两层导航架构：概览层(目录聚合大卡片) + 详情层(Function节点展开)
- * 微服务卡片风格：圆角矩形 + 金色标题 + 虚线连接 + 深色背景
+ * Two-level navigation: overview (directory cards) + detail (function nodes)
+ * Microservice card style: rounded rects + gold titles + dashed links + dark bg
  */
 
 (function () {
@@ -178,7 +178,7 @@
                 <div id="explore-doc-drawer" class="explore-doc-drawer">
                     <div class="explore-doc-resizer" id="explore-doc-resizer"></div>
                     <div class="explore-doc-header">
-                        <span class="explore-doc-title" id="explore-doc-title">理解文档</span>
+                        <span class="explore-doc-title" id="explore-doc-title">Understanding Document</span>
                         <button class="explore-doc-close" id="explore-doc-close">✕</button>
                     </div>
                     <div class="explore-doc-content-area" id="explore-doc-content"></div>
@@ -2132,8 +2132,8 @@
                 sidebarListContainer.className = 'sidebar-nav-list';
                 
                 if (this.currentLevel === 'top') {
-                    if (sidebarTitle) sidebarTitle.textContent = (window.i18n.locale === 'zh' ? '目录' : 'Directories') + ` (${Object.keys(this.dirMap).length})`;
-                    
+                    if (sidebarTitle) sidebarTitle.textContent = 'Directories' + ` (${Object.keys(this.dirMap).length})`;
+
                     Object.values(this.dirMap).sort((a, b) => a.name.localeCompare(b.name)).forEach(d => {
                         const m = d.dirPath;
                         const name = d.name;
@@ -2142,8 +2142,8 @@
                         const item = document.createElement('div');
                         item.className = 'sidebar-nav-item';
                         if (this.currentDir === m) item.classList.add('active');
-                        
-                        item.innerHTML = `<span>📦 ${name}</span><span class="badge">${fileCount} ${window.i18n.locale === 'zh' ? '文件' : 'Files'}</span>`;
+
+                        item.innerHTML = `<span>📦 ${name}</span><span class="badge">${fileCount} Files</span>`;
                         item.onclick = () => {
                             this._drawModule(m);
                             if (window.G_CURRENT_VIEW === 'nebula' && window.focusModule) window.focusModule(m);
@@ -2321,8 +2321,8 @@
                 this.renderDocActionPanel(type, key, options.autoGenerate ? 'Preparing to generate...' : '');
                 if (options.autoGenerate) {
                     this.docTitle.textContent = type === 'file'
-                        ? `文件: ${String(key).split('/').pop()}`
-                        : type === 'project' ? 'Project Architecture Document' : `目录: ${this._dirDisplayName(key)}`;
+                        ? `File: ${String(key).split('/').pop()}`
+                        : type === 'project' ? 'Project Architecture Document' : `Dir: ${this._dirDisplayName(key)}`;
                     await Promise.resolve();
                     this.renderDocGeneratingState('Preparing code context...');
                     if (type === 'file') {
@@ -2380,10 +2380,10 @@
                     </div>
                     <div class="explore-doc-empty-title">${type === 'file' ? '' : (type === 'project' ? '' : '')}</div>
                     <div class="explore-doc-empty-desc">
-                        ${hint || '、、。'}
+                        ${hint || 'Click the button below to generate an understanding document.'}
                     </div>
                     <button type="button" class="explore-doc-btn" id="explore-doc-generate-btn" style="width:100%;">
-                        <span>⚡</span> 一键生成理解文档
+                        <span>⚡</span> Generate Understanding Document
                     </button>
                 </div>
             `;
@@ -2392,27 +2392,27 @@
         renderDocActionPanel(type, key, hint = '') {
             if (!this.docContent) return;
             this.docTitle.textContent = type === 'file'
-                ? `文件: ${String(key).split('/').pop()}`
-                : type === 'project' ? 'Project Architecture Document' : `目录: ${this._dirDisplayName(key)}`;
+                ? `File: ${String(key).split('/').pop()}`
+                : type === 'project' ? 'Project Architecture Document' : `Dir: ${this._dirDisplayName(key)}`;
             
             this.docContent.innerHTML = this._getEmptyDocHtml(type, hint);
 
         }
 
-        renderDocGeneratingState(message = '正在提取代码上下文...') {
+        renderDocGeneratingState(message = 'Preparing code context...') {
             if (!this.docContent) return;
             
             // 
             let step1Class = 'active', step2Class = '', step3Class = '', step4Class = '';
             
-            if (message.includes('呼叫') || message.includes('分析')) {
+            if (message.includes('call') || message.includes('analyze')) {
                 step1Class = 'done';
                 step2Class = 'active';
-            } else if (message.includes('保存') || message.includes('持久化')) {
+            } else if (message.includes('save') || message.includes('persist')) {
                 step1Class = 'done';
                 step2Class = 'done';
                 step3Class = 'active';
-            } else if (message.includes('排版') || message.includes('渲染')) {
+            } else if (message.includes('format') || message.includes('render')) {
                 step1Class = 'done';
                 step2Class = 'done';
                 step3Class = 'done';
@@ -2427,25 +2427,25 @@
                     
                     <div style="text-align:center; margin-top:-8px;">
                         <div style="font-size:13.5px; font-weight:700; color:#38bdf8;" id="gen-step-msg">${this.escapeHtml(message)}</div>
-                        <div style="font-size:11px; color:${THEME.textDim}; margin-top:4px;">正在从本地代码地图归纳结构信息...</div>
+                        <div style="font-size:11px; color:${THEME.textDim}; margin-top:4px;">Analyzing structure from local code map...</div>
                     </div>
                     
                     <div class="explore-doc-steps">
                         <div class="explore-doc-step-item ${step1Class}">
                             <div class="step-dot"></div>
-                            <span>1. 提取源码结构与上下文准备</span>
+                            <span>1. Extract source structure and prepare context</span>
                         </div>
                         <div class="explore-doc-step-item ${step2Class}">
                             <div class="step-dot"></div>
-                            <span>2. 汇总符号、文件与依赖关系</span>
+                            <span>2. Aggregate symbols, files and dependencies</span>
                         </div>
                         <div class="explore-doc-step-item ${step3Class}">
                             <div class="step-dot"></div>
-                            <span>3. 归纳架构设计职责与依赖链</span>
+                            <span>3. Summarize architecture design and dependency chains</span>
                         </div>
                         <div class="explore-doc-step-item ${step4Class}">
                             <div class="step-dot"></div>
-                            <span>4. 本地持久化与Markdown排版</span>
+                            <span>4. Local persistence and Markdown formatting</span>
                         </div>
                     </div>
                     
@@ -2598,7 +2598,7 @@
             if (!this.docContent) return;
             const type = this.currentLevel === 'top' ? 'project' : (this.currentLevel === 'file' ? 'file' : 'module');
             const key = type === 'project' ? '__project__' : (type === 'file' ? this.currentFile : this.currentDir);
-            const title = this.currentLevel === 'file' ? `文件: ${key.split('/').pop()}` : (type === 'project' ? 'Project Architecture Document' : `目录: ${this._dirDisplayName(key)}`);
+            const title = this.currentLevel === 'file' ? `File: ${key.split('/').pop()}` : (type === 'project' ? 'Project Architecture Document' : `Dir: ${this._dirDisplayName(key)}`);
 
             this.docTitle.textContent = title;
             this.docContent.innerHTML = `<div style="text-align:center;padding:40px;color:${THEME.textDim};">...</div>`;
@@ -2640,7 +2640,7 @@
                     <div class="explore-doc-config explore-doc-sticky-bar">
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                             <div style="display:flex; align-items:center; gap:4px;">
-                                <span style="font-size:11px;color:${THEME.textDim};">版本:</span>
+                                <span style="font-size:11px;color:${THEME.textDim};">Version:</span>
                                 <select class="explore-doc-select" id="explore-doc-version-select" style="min-width:110px; height:28px; padding:2px 20px 2px 8px;">
                                     ${historyList.map(item => `
                                         <option value="${item.timestamp}" ${item.timestamp === activeTimestamp ? 'selected' : ''}>
