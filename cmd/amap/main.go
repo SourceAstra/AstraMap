@@ -394,7 +394,7 @@ type preparedScipRun struct {
 	cleanup  cleanupStack
 }
 
-type scipRecipe func(string, astramap.SemanticProviderSpec, string, string, *astramap.IndexFilter) (preparedScipRun, error)
+type scipRecipe func(string, astramap.SemanticProviderSpec, string, string, string, *astramap.IndexFilter) (preparedScipRun, error)
 
 var scipRecipes = map[astramap.ScipRecipe]scipRecipe{
 	astramap.ScipRecipeGo:      defaultArtifactRecipe(),
@@ -576,14 +576,14 @@ func runScipGeneration(toolPath string, provider astramap.SemanticProviderSpec, 
 	if recipe == nil {
 		return "", fmt.Errorf("Semantic Provider %s has no SCIP recipe configured", provider.ID)
 	}
-	prepared, err := recipe(toolPath, provider, unitRoot, pendingPath, filter)
+	prepared, err := recipe(toolPath, provider, unitRoot, repositoryRoot, pendingPath, filter)
 	if err != nil {
 		prepared.cleanup.runReverse()
 		return "", err
 	}
 	defer prepared.cleanup.runReverse()
 	cmd := prepared.command
-	cmd.Dir = unitRoot
+	cmd.Dir = repositoryRoot
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -607,7 +607,7 @@ func runScipGeneration(toolPath string, provider astramap.SemanticProviderSpec, 
 }
 
 func commandRecipe(arguments ...string) scipRecipe {
-	return func(toolPath string, _ astramap.SemanticProviderSpec, _, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+	return func(toolPath string, _ astramap.SemanticProviderSpec, _, _ string, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
 		args := append([]string(nil), arguments...)
 		args = append(args, output)
 		return preparedScipRun{command: exec.Command(toolPath, args...), artifact: output}, nil
@@ -615,11 +615,20 @@ func commandRecipe(arguments ...string) scipRecipe {
 }
 
 func defaultArtifactRecipe(arguments ...string) scipRecipe {
-	return func(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, _ string, _ *astramap.IndexFilter) (preparedScipRun, error) {
-		artifact := filepath.Join(projectRoot, "index.scip")
-		prepared := preparedScipRun{command: exec.Command(toolPath, arguments...), artifact: artifact}
+	return func(toolPath string, _ astramap.SemanticProviderSpec, unitRoot, repositoryRoot, _ string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+		artifact := filepath.Join(repositoryRoot, "index.scip")
+		args := append([]string(nil), arguments...)
+		// When unitRoot != repositoryRoot, pass the unit root to the tool
+		// so it can locate project manifests (go.mod, Cargo.toml, etc.).
+		if unitRoot != repositoryRoot {
+			rel, err := filepath.Rel(repositoryRoot, unitRoot)
+			if err == nil && rel != "." {
+				args = append(args, rel)
+			}
+		}
+		prepared := preparedScipRun{command: exec.Command(toolPath, args...), artifact: artifact}
 		if _, err := os.Stat(artifact); err == nil {
-			backup := filepath.Join(projectRoot, ".index.scip.astramap-backup")
+			backup := filepath.Join(repositoryRoot, ".index.scip.astramap-backup")
 			removeOwnedFile(backup)
 			if err := os.Rename(artifact, backup); err != nil {
 				return preparedScipRun{}, err
@@ -635,40 +644,44 @@ func defaultArtifactRecipe(arguments ...string) scipRecipe {
 	}
 }
 
-func prepareNodeScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, filter *astramap.IndexFilter) (preparedScipRun, error) {
+func prepareNodeScip(toolPath string, _ astramap.SemanticProviderSpec, unitRoot, repositoryRoot, output string, filter *astramap.IndexFilter) (preparedScipRun, error) {
 	prepared := preparedScipRun{artifact: output}
-	backupPath, createdConfig, err := ensureTsConfig(projectRoot, filter)
+	backupPath, createdConfig, err := ensureTsConfig(unitRoot, filter)
 	if err != nil {
 		return prepared, err
 	}
 	if backupPath != "" {
 		prepared.cleanup.add(func() error {
-			_ = os.Rename(backupPath, filepath.Join(projectRoot, "tsconfig.json"))
+			_ = os.Rename(backupPath, filepath.Join(unitRoot, "tsconfig.json"))
 			return nil
 		})
 	} else if createdConfig {
-		prepared.cleanup.add(func() error { return os.Remove(filepath.Join(projectRoot, "tsconfig.json")) })
+		prepared.cleanup.add(func() error { return os.Remove(filepath.Join(unitRoot, "tsconfig.json")) })
 	}
-	prepared.command = exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", output)
+	// Run from repositoryRoot so RelativePath is relative to project root.
+	// Pass the unit root as an absolute project path so scip-typescript
+	// locates tsconfig.json and produces paths with the correct prefix.
+	args := []string{"index", "--cwd", repositoryRoot, unitRoot, "--output", output}
+	prepared.command = exec.Command(toolPath, args...)
 	return prepared, nil
 }
 
-func preparePythonScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+func preparePythonScip(toolPath string, _ astramap.SemanticProviderSpec, _, repositoryRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
 	return preparedScipRun{
-		command: exec.Command(toolPath, "index", "--cwd", projectRoot, "--output", output), artifact: output,
+		command: exec.Command(toolPath, "index", "--cwd", repositoryRoot, "--output", output), artifact: output,
 	}, nil
 }
 
-func prepareClangScip(toolPath string, _ astramap.SemanticProviderSpec, projectRoot, output string, filter *astramap.IndexFilter) (preparedScipRun, error) {
+func prepareClangScip(toolPath string, _ astramap.SemanticProviderSpec, unitRoot, repositoryRoot, output string, filter *astramap.IndexFilter) (preparedScipRun, error) {
 	prepared := preparedScipRun{artifact: output}
-	compdbPath := filepath.Join(projectRoot, "compile_commands.json")
-	_, createErr := ensureCompileCommands(projectRoot, compdbPath)
+	compdbPath := filepath.Join(unitRoot, "compile_commands.json")
+	_, createErr := ensureCompileCommands(unitRoot, compdbPath)
 	if createErr != nil {
 		return prepared, createErr
 	}
 	// Do NOT add compdb to cleanup: compile_commands.json is a project build
 	// artifact that should persist for reuse in subsequent index runs.
-	filteredPath, err := prepareCompileCommandsJson(compdbPath, projectRoot, filter)
+	filteredPath, err := prepareCompileCommandsJson(compdbPath, repositoryRoot, filter)
 	if err != nil {
 		prepared.cleanup.runReverse()
 		return preparedScipRun{}, fmt.Errorf("prepare compile_commands.json: %w", err)
@@ -684,9 +697,9 @@ func prepareClangScip(toolPath string, _ astramap.SemanticProviderSpec, projectR
 	return prepared, nil
 }
 
-func preparePackageScip(toolPath string, provider astramap.SemanticProviderSpec, projectRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
+func preparePackageScip(toolPath string, provider astramap.SemanticProviderSpec, _, repositoryRoot, output string, _ *astramap.IndexFilter) (preparedScipRun, error) {
 	expand := func(value string) string {
-		value = strings.ReplaceAll(value, "{projectRoot}", projectRoot)
+		value = strings.ReplaceAll(value, "{projectRoot}", repositoryRoot)
 		return strings.ReplaceAll(value, "{output}", output)
 	}
 	args := make([]string, len(provider.Args))
@@ -697,11 +710,11 @@ func preparePackageScip(toolPath string, provider astramap.SemanticProviderSpec,
 	if provider.Artifact != "" {
 		artifact = expand(provider.Artifact)
 		if !filepath.IsAbs(artifact) {
-			artifact = filepath.Join(projectRoot, artifact)
+			artifact = filepath.Join(repositoryRoot, artifact)
 		}
 	}
 	command := exec.Command(toolPath, args...)
-	command.Dir = projectRoot
+	command.Dir = repositoryRoot
 	prepared := preparedScipRun{command: command, artifact: artifact}
 	if artifact != output {
 		if _, err := os.Stat(artifact); err == nil {
