@@ -112,19 +112,18 @@
             color: #fff;
         }
 
-        /* About button */
-        .about-btn {
+        .lang-btn {
             background: rgba(99, 102, 241, 0.15);
             border: 1px solid rgba(99, 102, 241, 0.3);
             color: #a5b4fc;
-            padding: 6px 14px;
+            padding: 4px 10px;
             border-radius: 6px;
-            font-size: 13px;
+            font-size: 12px;
             cursor: pointer;
             transition: all 0.2s;
-            margin-left: auto;
+            font-weight: 600;
         }
-        .about-btn:hover {
+        .lang-btn:hover {
             background: rgba(99, 102, 241, 0.3);
             color: #fff;
         }
@@ -274,9 +273,10 @@
     <header>
         <h1>AstraMap</h1>
         <div style="width: 24px;"></div>
-        <button id="btn-explore" class="tab-btn active">Explore</button>
-        <button id="btn-trace" class="tab-btn">Trace</button>
+        <button id="btn-explore" class="tab-btn active" data-i18n="explore">Explore</button>
+        <button id="btn-trace" class="tab-btn" data-i18n="trace">Trace</button>
         <div style="flex:1"></div>
+        <button id="btn-lang" class="lang-btn">EN</button>
     </header>
 
     <div id="global-breadcrumb-bar" style="display:none;">
@@ -298,10 +298,91 @@
         window.G_FILE_TO_MODULE = {};
         window.G_MODULES = [];
         
-        window.i18n = {
-            locale: 'zh',
-            translations: { zh: {} }
+        // i18n: language switcher state
+        const I18N = {
+            locale: localStorage.getItem('astramap_locale') || 'en',
+            setLocale(lang) {
+                this.locale = lang;
+                localStorage.setItem('astramap_locale', lang);
+                document.documentElement.lang = lang;
+                this.apply();
+            },
+            toggle() {
+                this.setLocale(this.locale === 'en' ? 'zh' : 'en');
+            },
+            t(key) {
+                const dict = TRANSLATIONS[this.locale] || TRANSLATIONS.en;
+                return dict[key] || key;
+            },
+            apply() {
+                const btnLang = document.getElementById('btn-lang');
+                if (btnLang) btnLang.textContent = this.locale.toUpperCase();
+                document.querySelectorAll('[data-i18n]').forEach(el => {
+                    const key = el.getAttribute('data-i18n');
+                    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                        el.placeholder = this.t(key);
+                    } else {
+                        el.textContent = this.t(key);
+                    }
+                });
+            }
         };
+
+        const TRANSLATIONS = {
+            en: {
+                explore: 'Explore',
+                trace: 'Trace',
+                enter_trace: 'Enter Trace Analysis',
+                trace_functions_only: 'Trace Analysis (Functions Only)',
+                gen_file_doc: 'Generate File Understanding Doc',
+                gen_project_doc: 'Generate Project Understanding Doc',
+                gen_dir_doc: 'Generate Directory Understanding Doc',
+                no_actions: 'No Actions Available',
+                understanding_doc: 'Understanding Document',
+                directories: 'Directories',
+                files: 'Files',
+                file_label: 'File',
+                dir_label: 'Dir',
+                version: 'Version',
+                preparing_context: 'Preparing code context...',
+                analyzing_structure: 'Analyzing structure from local code map...',
+                step1: 'Extract source structure and prepare context',
+                step2: 'Aggregate symbols, files and dependencies',
+                step3: 'Summarize architecture design and dependency chains',
+                step4: 'Local persistence and Markdown formatting',
+                generate_doc: 'Generate Understanding Document',
+                project_arch_doc: 'Project Architecture Document',
+                doc_empty_hint: 'Click the button below to generate an understanding document.'
+            },
+            zh: {
+                explore: '探索视界',
+                trace: '依赖分析',
+                enter_trace: '进入依赖分析',
+                trace_functions_only: '仅Function可进入依赖分析',
+                gen_file_doc: '生成文件理解文档',
+                gen_project_doc: '生成项目理解文档',
+                gen_dir_doc: '生成目录理解文档',
+                no_actions: '无可用操作',
+                understanding_doc: '理解文档',
+                directories: '目录',
+                files: '文件',
+                file_label: '文件',
+                dir_label: '目录',
+                version: '版本',
+                preparing_context: '正在提取代码上下文...',
+                analyzing_structure: '正在从本地代码地图归纳结构信息...',
+                step1: '提取源码结构与上下文准备',
+                step2: '汇总符号、文件与依赖关系',
+                step3: '归纳架构设计职责与依赖链',
+                step4: '本地持久化与Markdown排版',
+                generate_doc: '一键生成理解文档',
+                project_arch_doc: '项目架构文档',
+                doc_empty_hint: '点击下方按钮生成理解文档。'
+            }
+        };
+
+        window.i18n = I18N;
+        window.i18n.apply();
         
         window.isSourceDeclarationFile = function(f) { return false; };
 
@@ -374,17 +455,17 @@
                 };
                 menu.appendChild(item);
             };
-            addItem(isFunction ? 'Enter Trace Analysis' : 'Trace Analysis (Functions Only)', isFunction, () => {
+            addItem(isFunction ? (window.i18n ? window.i18n.t('enter_trace') : 'Enter Trace Analysis') : (window.i18n ? window.i18n.t('trace_functions_only') : 'Trace Analysis (Functions Only)'), isFunction, () => {
                 openTraceForSymbol(key, name);
             });
 
             const targets = docCtx && Array.isArray(docCtx.docTargets) ? docCtx.docTargets : [];
             targets.forEach(target => {
                 const label = target.docType === 'file'
-                    ? 'Generate File Understanding Doc'
+                    ? (window.i18n ? window.i18n.t('gen_file_doc') : 'Generate File Understanding Doc')
                     : target.docKey === '__project__'
-                        ? 'Generate Project Understanding Doc'
-                        : 'Generate Directory Understanding Doc';
+                        ? (window.i18n ? window.i18n.t('gen_project_doc') : 'Generate Project Understanding Doc')
+                        : (window.i18n ? window.i18n.t('gen_dir_doc') : 'Generate Directory Understanding Doc');
                 addItem(label, !!(target.docType && target.docKey), () => {
                     if (window.SourceAstra && typeof window.SourceAstra.openDocForExplore === 'function') {
                         window.SourceAstra.openDocForExplore(target.docType, target.docKey, { autoGenerate: true });
@@ -392,14 +473,14 @@
                 });
             });
             if (targets.length === 0 && key === '__project__') {
-                addItem('Generate Project Understanding Doc', true, () => {
+                addItem(window.i18n ? window.i18n.t('gen_project_doc') : 'Generate Project Understanding Doc', true, () => {
                     if (window.SourceAstra && typeof window.SourceAstra.openDocForExplore === 'function') {
                         window.SourceAstra.openDocForExplore('project', '__project__', { autoGenerate: true });
                     }
                 });
             }
             if (!isFunction && targets.length === 0 && key !== '__project__') {
-                addItem('No Actions Available', false, () => {});
+                addItem(window.i18n ? window.i18n.t('no_actions') : 'No Actions Available', false, () => {});
             }
             document.body.appendChild(menu);
             const close = (event) => {
@@ -492,6 +573,15 @@
         }
     </script>
     <script>
+        // Language switcher button
+        const btnLang = document.getElementById('btn-lang');
+        if (btnLang) {
+            btnLang.addEventListener('click', () => {
+                I18N.toggle();
+                location.reload();
+            });
+        }
+
         // Tab switching logic
         let activeTab = 'explore';
         const btnExplore = document.getElementById('btn-explore');

@@ -178,7 +178,7 @@
                 <div id="explore-doc-drawer" class="explore-doc-drawer">
                     <div class="explore-doc-resizer" id="explore-doc-resizer"></div>
                     <div class="explore-doc-header">
-                        <span class="explore-doc-title" id="explore-doc-title">Understanding Document</span>
+                        <span class="explore-doc-title" id="explore-doc-title">${window.i18n ? window.i18n.t('understanding_doc') : 'Understanding Document'}</span>
                         <button class="explore-doc-close" id="explore-doc-close">✕</button>
                     </div>
                     <div class="explore-doc-content-area" id="explore-doc-content"></div>
@@ -2132,7 +2132,7 @@
                 sidebarListContainer.className = 'sidebar-nav-list';
                 
                 if (this.currentLevel === 'top') {
-                    if (sidebarTitle) sidebarTitle.textContent = 'Directories' + ` (${Object.keys(this.dirMap).length})`;
+                    if (sidebarTitle) sidebarTitle.textContent = (window.i18n ? window.i18n.t('directories') : 'Directories') + ` (${Object.keys(this.dirMap).length})`;
 
                     Object.values(this.dirMap).sort((a, b) => a.name.localeCompare(b.name)).forEach(d => {
                         const m = d.dirPath;
@@ -2143,7 +2143,7 @@
                         item.className = 'sidebar-nav-item';
                         if (this.currentDir === m) item.classList.add('active');
 
-                        item.innerHTML = `<span>📦 ${name}</span><span class="badge">${fileCount} Files</span>`;
+                        item.innerHTML = `<span>📦 ${name}</span><span class="badge">${fileCount} ${window.i18n ? window.i18n.t('files') : 'Files'}</span>`;
                         item.onclick = () => {
                             this._drawModule(m);
                             if (window.G_CURRENT_VIEW === 'nebula' && window.focusModule) window.focusModule(m);
@@ -2321,8 +2321,8 @@
                 this.renderDocActionPanel(type, key, options.autoGenerate ? 'Preparing to generate...' : '');
                 if (options.autoGenerate) {
                     this.docTitle.textContent = type === 'file'
-                        ? `File: ${String(key).split('/').pop()}`
-                        : type === 'project' ? 'Project Architecture Document' : `Dir: ${this._dirDisplayName(key)}`;
+                        ? `${window.i18n ? window.i18n.t('file_label') : 'File'}: ${String(key).split('/').pop()}`
+                        : type === 'project' ? (window.i18n ? window.i18n.t('project_arch_doc') : 'Project Architecture Document') : `${window.i18n ? window.i18n.t('dir_label') : 'Dir'}: ${this._dirDisplayName(key)}`;
                     await Promise.resolve();
                     this.renderDocGeneratingState('Preparing code context...');
                     if (type === 'file') {
@@ -2380,10 +2380,10 @@
                     </div>
                     <div class="explore-doc-empty-title">${type === 'file' ? '' : (type === 'project' ? '' : '')}</div>
                     <div class="explore-doc-empty-desc">
-                        ${hint || 'Click the button below to generate an understanding document.'}
+                        ${hint || (window.i18n ? window.i18n.t('doc_empty_hint') : 'Click the button below to generate an understanding document.')}
                     </div>
                     <button type="button" class="explore-doc-btn" id="explore-doc-generate-btn" style="width:100%;">
-                        <span>⚡</span> Generate Understanding Document
+                        <span>⚡</span> ${window.i18n ? window.i18n.t('generate_doc') : 'Generate Understanding Document'}
                     </button>
                 </div>
             `;
@@ -2392,8 +2392,8 @@
         renderDocActionPanel(type, key, hint = '') {
             if (!this.docContent) return;
             this.docTitle.textContent = type === 'file'
-                ? `File: ${String(key).split('/').pop()}`
-                : type === 'project' ? 'Project Architecture Document' : `Dir: ${this._dirDisplayName(key)}`;
+                ? `${window.i18n ? window.i18n.t('file_label') : 'File'}: ${String(key).split('/').pop()}`
+                : type === 'project' ? (window.i18n ? window.i18n.t('project_arch_doc') : 'Project Architecture Document') : `${window.i18n ? window.i18n.t('dir_label') : 'Dir'}: ${this._dirDisplayName(key)}`;
             
             this.docContent.innerHTML = this._getEmptyDocHtml(type, hint);
 
@@ -2427,25 +2427,25 @@
                     
                     <div style="text-align:center; margin-top:-8px;">
                         <div style="font-size:13.5px; font-weight:700; color:#38bdf8;" id="gen-step-msg">${this.escapeHtml(message)}</div>
-                        <div style="font-size:11px; color:${THEME.textDim}; margin-top:4px;">Analyzing structure from local code map...</div>
+                        <div style="font-size:11px; color:${THEME.textDim}; margin-top:4px;">${window.i18n ? window.i18n.t('analyzing_structure') : 'Analyzing structure from local code map...'}</div>
                     </div>
-                    
+
                     <div class="explore-doc-steps">
                         <div class="explore-doc-step-item ${step1Class}">
                             <div class="step-dot"></div>
-                            <span>1. Extract source structure and prepare context</span>
+                            <span>1. ${window.i18n ? window.i18n.t('step1') : 'Extract source structure and prepare context'}</span>
                         </div>
                         <div class="explore-doc-step-item ${step2Class}">
                             <div class="step-dot"></div>
-                            <span>2. Aggregate symbols, files and dependencies</span>
+                            <span>2. ${window.i18n ? window.i18n.t('step2') : 'Aggregate symbols, files and dependencies'}</span>
                         </div>
                         <div class="explore-doc-step-item ${step3Class}">
                             <div class="step-dot"></div>
-                            <span>3. Summarize architecture design and dependency chains</span>
+                            <span>3. ${window.i18n ? window.i18n.t('step3') : 'Summarize architecture design and dependency chains'}</span>
                         </div>
                         <div class="explore-doc-step-item ${step4Class}">
                             <div class="step-dot"></div>
-                            <span>4. Local persistence and Markdown formatting</span>
+                            <span>4. ${window.i18n ? window.i18n.t('step4') : 'Local persistence and Markdown formatting'}</span>
                         </div>
                     </div>
                     
@@ -2598,7 +2598,7 @@
             if (!this.docContent) return;
             const type = this.currentLevel === 'top' ? 'project' : (this.currentLevel === 'file' ? 'file' : 'module');
             const key = type === 'project' ? '__project__' : (type === 'file' ? this.currentFile : this.currentDir);
-            const title = this.currentLevel === 'file' ? `File: ${key.split('/').pop()}` : (type === 'project' ? 'Project Architecture Document' : `Dir: ${this._dirDisplayName(key)}`);
+            const title = this.currentLevel === 'file' ? `${window.i18n ? window.i18n.t('file_label') : 'File'}: ${key.split('/').pop()}` : (type === 'project' ? (window.i18n ? window.i18n.t('project_arch_doc') : 'Project Architecture Document') : `${window.i18n ? window.i18n.t('dir_label') : 'Dir'}: ${this._dirDisplayName(key)}`);
 
             this.docTitle.textContent = title;
             this.docContent.innerHTML = `<div style="text-align:center;padding:40px;color:${THEME.textDim};">...</div>`;
@@ -2640,7 +2640,7 @@
                     <div class="explore-doc-config explore-doc-sticky-bar">
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                             <div style="display:flex; align-items:center; gap:4px;">
-                                <span style="font-size:11px;color:${THEME.textDim};">Version:</span>
+                                <span style="font-size:11px;color:${THEME.textDim};">${window.i18n ? window.i18n.t('version') : 'Version'}:</span>
                                 <select class="explore-doc-select" id="explore-doc-version-select" style="min-width:110px; height:28px; padding:2px 20px 2px 8px;">
                                     ${historyList.map(item => `
                                         <option value="${item.timestamp}" ${item.timestamp === activeTimestamp ? 'selected' : ''}>
