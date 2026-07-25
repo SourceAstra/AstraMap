@@ -8,7 +8,7 @@
 
 ## 1. 结论
 
-当前测试依赖真实项目（`/home/he/sdk/tests/astramap`、`/home/he/SourceAstra/tests/astramap`），存在以下结构性缺陷：
+当前测试若仅依赖硬编码的本地环境项目（如 `tests/integration/*`），存在以下结构性缺陷：
 
 1. **覆盖不系统**：Go 项目为主，Python/TypeScript/C/C++/Java 仅被动验证
 2. **边界难触及**：错误处理、重载消歧、宏生成符号等边缘场景无专用夹具
@@ -404,14 +404,14 @@ amap locate --project /tmp test_main
 
 ### 6.1 迁移策略
 
-现有测试（`/home/he/sdk/tests/astramap/*.sh`）保留作为**集成测试**，新增 `tests/` 作为**单元测试**。
+现有测试（`tests/integration/*.sh`）保留作为**集成测试**，新增 `tests/` 作为**单元测试**。
 
 ```text
 tests/                    # 单元测试（新）
   → fixtures/            # 声明式夹具
   → run_unit_tests.sh    # 快速反馈（< 30s）
 
-/home/he/sdk/tests/astramap/  # 集成测试（现有）
+tests/integration/       # 集成测试（现有）
   → phase1~8.sh          # 真实项目验证
   → run.sh               # 全量回归（~10min）
 ```
@@ -422,7 +422,7 @@ tests/                    # 单元测试（新）
 # CI 流水线
 ./tests/run_unit_tests.sh          # 单元测试（必过）
 ./tests/run_benchmarks.sh          # 性能基准（可选）
-/home/he/sdk/tests/astramap/run.sh # 集成测试（可选）
+./tests/integration/run.sh         # 集成测试（可选）
 ```
 
 ---

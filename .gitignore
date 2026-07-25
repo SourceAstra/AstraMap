@@ -1,16 +1,25 @@
+# Build outputs and binaries
+/amap
+/amap.exe
+/dist/
+amap-*
+*.tar.gz
+*.zip
+
+# Database & Runtime state
 .astramap/
 *.db
 *.db-shm
 *.db-wal
+
+# Environments and caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# AI editor & local developer state
 CLAUDE.md
-
-# docs 目录存在但内容不提交
-docs/*
-!docs/DEPLOY.md
-!docs/language-all-external-architecture.md
-!docs/.gitkeep
-
-# AI editor configs
 .agents/
 .claude/
 .clinerules/
@@ -19,3 +28,9 @@ docs/*
 .mcp.json
 .windsurfrules
 AGENTS.md
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+

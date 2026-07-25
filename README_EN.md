@@ -1,10 +1,20 @@
-# AstraMap — Semantic Code Map for AI Coding Agents
+# astra-code-map — Semantic Code Map for AI Coding Agents
+
+<p align="center">
+  <img src="pic/banner.png" alt="astra-code-map Hero Banner" width="100%">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+  <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go Version"></a>
+  <a href="THIRD_PARTY_NOTICES.md"><img src="https://img.shields.io/badge/Compliance-Third--Party_Notices-green.svg" alt="Compliance"></a>
+</p>
 
 [中文](README.md) | **English**
 
 > Semantic Code Map · Code Graph · Code Intelligence · MCP Server
 
-AstraMap is a local-first **semantic code map and code graph engine** for Claude Code, Codex, Cursor, and other MCP-compatible AI coding tools.
+astra-code-map is a local-first **semantic code map and code graph engine** for Claude Code, Codex, Cursor, and other MCP-compatible AI coding tools.
 
 It turns a codebase into queryable symbol nodes and semantic edges, allowing AI agents to locate definitions, trace calls, explore dependencies, and analyze change impact without repeatedly scanning entire files with `grep`.
 
@@ -13,16 +23,16 @@ Source code
   ├─ Tree-sitter: fast parsing of the current file structure
   └─ SCIP: cross-file, type-aware final semantics
           ↓
-      AstraMap merge engine
+      astra-code-map merge engine
           ↓
  SQLite Semantic Code Graph
           ↓
  MCP Server · REST API · Web Dashboard
 ```
 
-## What AstraMap Helps Answer
+## What astra-code-map Helps Answer
 
-| Question | AstraMap capability |
+| Question | astra-code-map capability |
 |---|---|
 | Where is a function, type, or method defined? | Semantic symbol search and precise location |
 | Who calls this function, and what does it call? | Callers and callees queries |
@@ -31,7 +41,7 @@ Source code
 | What should be excluded from AI context in a large repository? | Ecosystem-aware filtering and generated-file exclusion |
 | How can an agent understand a codebase with less context? | Structured MCP queries and on-demand source snippets |
 
-AstraMap does not replace source code or language toolchains. It provides AI agents, IDEs, and engineering platforms with a **queryable, traceable, continuously updated code-navigation foundation**.
+astra-code-map does not replace source code or language toolchains. It provides AI agents, IDEs, and engineering platforms with a **queryable, traceable, continuously updated code-navigation foundation**.
 
 ## Highlights
 
@@ -50,27 +60,27 @@ AstraMap does not replace source code or language toolchains. It provides AI age
 
 Start from a project, directory, file, or symbol and move from global structure to local implementation.
 
-<img src="pic/veiw.png" alt="AstraMap Explore View">
+<img src="pic/view.png" alt="astra-code-map Explore View">
 
 ### Dependency View
 
 Inspect callers, callees, and related call paths around a target function.
 
-<img src="pic/trace.png" alt="AstraMap Dependency Graph">
+<img src="pic/trace.png" alt="astra-code-map Dependency Graph">
 
 ### Understanding Documents
 
 Generate structured function-, file-, module-, and project-level documents for code reading, review, refactoring, and handover.
 
-<img src="pic/understand.png" alt="AstraMap Understanding Documents">
+<img src="pic/understand.png" alt="astra-code-map Understanding Documents">
 
 ## Quick Start
 
-See [QUICKSTART.md](QUICKSTART.md) for platform-specific installation, SCIP Provider setup, and troubleshooting.
+See [QUICKSTART_EN.md](QUICKSTART_EN.md) for platform-specific installation, SCIP Provider setup, and troubleshooting.
 
 ### 1. Build and install
 
-Run from the AstraMap repository root:
+Run from the astra-code-map repository root:
 
 ```bash
 ./build.sh
@@ -100,7 +110,7 @@ cd /path/to/your/project
 amap install
 ```
 
-The command detects installed clients and writes AstraMap MCP configuration only for clients that are actually present.
+The command detects installed clients and writes astra-code-map MCP configuration only for clients that are actually present.
 
 ### 4. Build the first code map
 
@@ -111,9 +121,9 @@ amap index
 The first run creates:
 
 ```text
-.astramap/
+.astra-code-map/
 ├── config.yaml
-└── astramap.db
+└── astra-code-map.db
 ```
 
 ### 5. Launch the Dashboard
@@ -155,25 +165,25 @@ MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `astramap_search` | Search functions, methods, types, and other symbols |
-| `astramap_explore` | Explore files and relationships around a concept or symbol |
-| `astramap_node` | Read symbol definition, signature, location, and source snippet |
-| `astramap_callers` | Query direct callers |
-| `astramap_callees` | Query direct callees |
-| `astramap_impact` | Analyze recursive change impact |
-| `astramap_trace` | Find a call path between two symbols |
-| `astramap_status` | Inspect index coverage and provenance |
-| `astramap_files` | Query indexed files by path or pattern |
+| `astra-code-map_search` | Search functions, methods, types, and other symbols |
+| `astra-code-map_explore` | Explore files and relationships around a concept or symbol |
+| `astra-code-map_node` | Read symbol definition, signature, location, and source snippet |
+| `astra-code-map_callers` | Query direct callers |
+| `astra-code-map_callees` | Query direct callees |
+| `astra-code-map_impact` | Analyze recursive change impact |
+| `astra-code-map_trace` | Find a call path between two symbols |
+| `astra-code-map_status` | Inspect index coverage and provenance |
+| `astra-code-map_files` | Query indexed files by path or pattern |
 
 ## Architecture Overview
 
-AstraMap combines real-time structure with final semantic information.
+astra-code-map combines real-time structure with final semantic information.
 
 ```mermaid
 graph LR
     A[Source Code] --> B[Tree-sitter Real-time Layer]
     A --> C[SCIP Semantic Providers]
-    B --> D[AstraMap Merge Engine]
+    B --> D[astra-code-map Merge Engine]
     C --> D
     D --> E[(SQLite Semantic Code Graph)]
     E --> F[MCP Server]
@@ -252,7 +262,7 @@ SCIP availability depends on the project, language toolchain, and build inputs. 
 
 ## Ecosystem-Aware Filtering
 
-AstraMap follows a simple default principle:
+astra-code-map follows a simple default principle:
 
 > Prefer hand-written source code that carries business meaning.
 
@@ -264,7 +274,7 @@ It automatically excludes common categories such as:
 - Generated source and compressed assets
 - Binary files and unsupported resources
 
-Use `include`, `exclude`, and `force-include` in `.astramap/config.yaml` to adjust the result.
+Use `include`, `exclude`, and `force-include` in `.astra-code-map/config.yaml` to adjust the result.
 
 ```yaml
 index:
@@ -279,34 +289,34 @@ index:
 
 ## Local Data and Privacy
 
-AstraMap reads and indexes code locally and stores project data under `.astramap/`.
+astra-code-map reads and indexes code locally and stores project data under `.astra-code-map/`.
 
-- AstraMap does not require uploading the complete repository to a separate remote indexing service.
+- astra-code-map does not require uploading the complete repository to a separate remote indexing service.
 - The MCP Server exposes structured queries through local stdio.
 - The Dashboard and REST API operate on local project data.
-- Whether an AI client sends returned context to a remote model depends on that client and model configuration, not AstraMap.
+- Whether an AI client sends returned context to a remote model depends on that client and model configuration, not astra-code-map.
 
-Do not commit `.astramap/astramap.db`. Add the following to the target project's `.gitignore`:
+Do not commit `.astra-code-map/astra-code-map.db`. Add the following to the target project's `.gitignore`:
 
 ```gitignore
-.astramap/
+.astra-code-map/
 ```
 
 ## Open-Source Components and Licensing
 
-AstraMap builds on open-source projects including SCIP, Tree-sitter, SQLite-related components, `sqlx`, `fsnotify`, D3.js, and Marked.
+astra-code-map builds on open-source projects including SCIP, Tree-sitter, SQLite-related components, `sqlx`, `fsnotify`, D3.js, and Marked.
 
-- AstraMap-owned source code is licensed under the [Apache License 2.0](LICENSE), unless a file states otherwise.
+- astra-code-map-owned source code is licensed under the [Apache License 2.0](LICENSE), unless a file states otherwise.
 - Third-party components remain under their respective copyrights and licenses.
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for component, version, and license information.
 - Release archives should include license texts under `LICENSES/` and a version-specific SBOM.
-- External SCIP Providers are normally used as separate tools and are not bundled with AstraMap unless a release explicitly states otherwise.
+- External SCIP Providers are normally used as separate tools and are not bundled with astra-code-map unless a release explicitly states otherwise.
 
 The component names in this README are an architectural overview. `THIRD_PARTY_NOTICES.md`, `LICENSES/`, and the release SBOM are the authoritative distribution records.
 
 ## Project Status
 
-AstraMap is under active development. Public APIs, configuration formats, and index storage may change before a stable release.
+astra-code-map is under active development. Public APIs, configuration formats, and index storage may change before a stable release.
 
 Current uses include:
 
@@ -319,7 +329,7 @@ Current uses include:
 
 Before opening an issue, please include:
 
-- Operating system and AstraMap version
+- Operating system and astra-code-map version
 - Project language and build tool
 - SCIP Provider and version, when applicable
 - A minimal reproducible code sample
@@ -329,7 +339,7 @@ Before submitting code, open an Issue describing the problem and the proposed ap
 
 ## Documentation
 
-- [Quick Start](QUICKSTART.md)
+- [Quick Start](QUICKSTART_EN.md)
 - [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 
 ## License

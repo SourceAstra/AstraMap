@@ -1,5 +1,7 @@
 # AstraMap 2 分钟部署指南
 
+**中文** | [English](QUICKSTART_EN.md)
+
 > 从零到 AI 工具集成代码地图，只需五步。
 
 ---

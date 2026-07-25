@@ -1,3 +1,17 @@
+// Copyright 2026 AstraMap Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the original license at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package astramap
 
 import (
@@ -128,19 +142,19 @@ func ScipIndexProjectLanguages(scipPath, projectRoot string) ([]string, error) {
 	return result, nil
 }
 
-func readScipIndexFile(scipPath string) (scip.Index, error) {
+func readScipIndexFile(scipPath string) (*scip.Index, error) {
 	data, err := os.ReadFile(scipPath)
 	if err != nil {
-		return scip.Index{}, fmt.Errorf("failed to read SCIP index file: %w", err)
+		return nil, fmt.Errorf("failed to read SCIP index file: %w", err)
 	}
 	var index scip.Index
 	if err := proto.Unmarshal(data, &index); err != nil {
-		return scip.Index{}, fmt.Errorf("SCIP Protobuf deserialization failed: %w", err)
+		return nil, fmt.Errorf("SCIP Protobuf deserialization failed: %w", err)
 	}
 	if len(index.Documents) == 0 {
-		return scip.Index{}, fmt.Errorf("SCIP index contains no documents")
+		return nil, fmt.Errorf("SCIP index contains no documents")
 	}
-	return index, nil
+	return &index, nil
 }
 
 func ImportScipIndexToAstraMap(db *sqlx.DB, scipPath, projectRoot string) error {

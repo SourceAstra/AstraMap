@@ -1,10 +1,20 @@
-# AstraMap — 面向 AI 编程代理的语义代码地图
+# astra-code-map — 面向 AI 编程代理的语义代码地图
 
-**中文** | [English](README_EN_public.md)
+<p align="center">
+  <img src="pic/banner.png" alt="astra-code-map Hero Banner" width="100%">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+  <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go Version"></a>
+  <a href="THIRD_PARTY_NOTICES.md"><img src="https://img.shields.io/badge/Compliance-Third--Party_Notices-green.svg" alt="Compliance"></a>
+</p>
+
+**中文** | [English](README_EN.md)
 
 > Semantic Code Map · Code Graph · Code Intelligence · MCP Server
 
-AstraMap 是一个本地优先的**语义代码地图与代码图谱引擎**，面向 Claude Code、Codex、Cursor 以及其他支持 MCP 的 AI 编程工具。
+astra-code-map 是一个本地优先的**语义代码地图与代码图谱引擎**，面向 Claude Code、Codex、Cursor 以及其他支持 MCP 的 AI 编程工具。
 
 它把代码库转换为可查询的“符号节点 + 语义关系边”，让 AI 不必依赖反复 `grep` 和整文件读取，就能完成符号定位、调用链追踪、依赖探索和变更影响分析。
 
@@ -13,16 +23,16 @@ AstraMap 是一个本地优先的**语义代码地图与代码图谱引擎**，�
   ├─ Tree-sitter：快速解析当前文件结构
   └─ SCIP：提供跨文件、类型感知的最终语义
           ↓
-      AstraMap 合并引擎
+      astra-code-map 合并引擎
           ↓
  SQLite Semantic Code Graph
           ↓
  MCP Server · REST API · Web Dashboard
 ```
 
-## AstraMap 能解决什么
+## astra-code-map 能解决什么
 
-| 你想知道的问题 | AstraMap 提供的能力 |
+| 你想知道的问题 | astra-code-map 提供的能力 |
 |---|---|
 | 某个函数、类型或方法在哪里定义？ | 语义符号搜索与精确定位 |
 | 谁调用了这个函数？它又调用了谁？ | Callers / Callees 查询 |
@@ -31,7 +41,7 @@ AstraMap 是一个本地优先的**语义代码地图与代码图谱引擎**，�
 | 大型仓库中哪些内容不应进入 AI 上下文？ | 生态感知过滤与生成文件排除 |
 | 如何让 AI 用更少上下文理解代码库？ | MCP 结构化查询与按需源码片段 |
 
-AstraMap 不替代源码，也不替代编译器。它为 AI Agent、IDE 和研发平台提供一张**可查询、可追踪、可持续更新的代码导航底图**。
+astra-code-map 不替代源码，也不替代编译器。它为 AI Agent、IDE 和研发平台提供一张**可查询、可追踪、可持续更新的代码导航底图**。
 
 ## 核心特性
 
@@ -50,19 +60,19 @@ AstraMap 不替代源码，也不替代编译器。它为 AI Agent、IDE 和研�
 
 从项目、目录、文件或函数进入，先观察全局结构，再逐层深入局部实现。
 
-<img src="pic/view.png" alt="AstraMap Explore View">
+<img src="pic/view.png" alt="astra-code-map Explore View">
 
 ### 依赖关系
 
 围绕目标函数查看调用者、被调用者和相关调用路径。
 
-<img src="pic/trace.png" alt="AstraMap Dependency Graph">
+<img src="pic/trace.png" alt="astra-code-map Dependency Graph">
 
 ### 理解文档
 
 生成函数、文件、模块和项目级结构化文档，辅助代码阅读、审查、重构和交接。
 
-<img src="pic/understand_zh.png" alt="AstraMap Understanding Documents">
+<img src="pic/understand_zh.png" alt="astra-code-map Understanding Documents">
 
 ## 快速开始
 
@@ -70,7 +80,7 @@ AstraMap 不替代源码，也不替代编译器。它为 AI Agent、IDE 和研�
 
 ### 1. 构建并安装
 
-在 AstraMap 仓库根目录执行：
+在 astra-code-map 仓库根目录执行：
 
 ```bash
 ./build.sh
@@ -100,7 +110,7 @@ cd /path/to/your/project
 amap install
 ```
 
-该命令会探测本机已安装的客户端，并只为实际存在的客户端写入 AstraMap MCP 配置。
+该命令会探测本机已安装的客户端，并只为实际存在的客户端写入 astra-code-map MCP 配置。
 
 ### 4. 首次构建代码地图
 
@@ -111,9 +121,9 @@ amap index
 首次运行会创建：
 
 ```text
-.astramap/
+.astra-code-map/
 ├── config.yaml
-└── astramap.db
+└── astra-code-map.db
 ```
 
 ### 5. 启动 Dashboard
@@ -148,25 +158,25 @@ amap watch 30
 
 | 工具 | 用途 |
 |---|---|
-| `astramap_search` | 搜索函数、方法、类型及其他符号 |
-| `astramap_explore` | 围绕业务概念或符号探索相关文件和关系 |
-| `astramap_node` | 查看符号定义、签名、位置和源码片段 |
-| `astramap_callers` | 查询直接调用者 |
-| `astramap_callees` | 查询直接被调用者 |
-| `astramap_impact` | 递归分析变更影响范围 |
-| `astramap_trace` | 查找两个符号之间的调用路径 |
-| `astramap_status` | 查看索引覆盖与数据来源 |
-| `astramap_files` | 按目录或模式查询已索引文件 |
+| `astra-code-map_search` | 搜索函数、方法、类型及其他符号 |
+| `astra-code-map_explore` | 围绕业务概念或符号探索相关文件和关系 |
+| `astra-code-map_node` | 查看符号定义、签名、位置和源码片段 |
+| `astra-code-map_callers` | 查询直接调用者 |
+| `astra-code-map_callees` | 查询直接被调用者 |
+| `astra-code-map_impact` | 递归分析变更影响范围 |
+| `astra-code-map_trace` | 查找两个符号之间的调用路径 |
+| `astra-code-map_status` | 查看索引覆盖与数据来源 |
+| `astra-code-map_files` | 按目录或模式查询已索引文件 |
 
 ## 架构概览
 
-AstraMap 使用“实时结构 + 最终语义”的双层模型。
+astra-code-map 使用“实时结构 + 最终语义”的双层模型。
 
 ```mermaid
 graph LR
     A[Source Code] --> B[Tree-sitter Real-time Layer]
     A --> C[SCIP Semantic Providers]
-    B --> D[AstraMap Merge Engine]
+    B --> D[astra-code-map Merge Engine]
     C --> D
     D --> E[(SQLite Semantic Code Graph)]
     E --> F[MCP Server]
@@ -245,7 +255,7 @@ SCIP Provider 是否可用，取决于对应项目、语言工具链和构建输
 
 ## 生态感知过滤
 
-AstraMap 遵循一条默认原则：
+astra-code-map 遵循一条默认原则：
 
 > 代码地图优先索引手写的、承载业务语义的源代码。
 
@@ -257,7 +267,7 @@ AstraMap 遵循一条默认原则：
 - 生成代码与压缩文件
 - 二进制文件和不可解析资源
 
-用户可通过 `.astramap/config.yaml` 使用 `include`、`exclude` 和 `force-include` 调整结果。
+用户可通过 `.astra-code-map/config.yaml` 使用 `include`、`exclude` 和 `force-include` 调整结果。
 
 ```yaml
 index:
@@ -272,34 +282,34 @@ index:
 
 ## 本地数据与隐私
 
-AstraMap 本身在本地读取和索引代码，并将数据保存在当前项目的 `.astramap/` 目录中。
+astra-code-map 本身在本地读取和索引代码，并将数据保存在当前项目的 `.astra-code-map/` 目录中。
 
-- AstraMap 不要求将完整代码库上传到独立的远程索引服务。
+- astra-code-map 不要求将完整代码库上传到独立的远程索引服务。
 - MCP Server 通过本地 stdio 向客户端提供结构化查询。
 - Dashboard 和 REST API 默认服务于本地项目数据。
-- AI 客户端是否会把查询结果发送到远程模型，取决于该客户端及模型服务的配置，不由 AstraMap 控制。
+- AI 客户端是否会把查询结果发送到远程模型，取决于该客户端及模型服务的配置，不由 astra-code-map 控制。
 
-不要将 `.astramap/astramap.db` 提交到 Git。建议在项目的 `.gitignore` 中加入：
+不要将 `.astra-code-map/astra-code-map.db` 提交到 Git。建议在项目的 `.gitignore` 中加入：
 
 ```gitignore
-.astramap/
+.astra-code-map/
 ```
 
 ## 开源组件与许可证
 
-AstraMap 建立在成熟的开源生态之上，包括 SCIP、Tree-sitter、SQLite 相关组件、`sqlx`、`fsnotify`、D3.js 和 Marked 等。
+astra-code-map 建立在成熟的开源生态之上，包括 SCIP、Tree-sitter、SQLite 相关组件、`sqlx`、`fsnotify`、D3.js 和 Marked 等。
 
-- AstraMap 自有源代码采用 [Apache License 2.0](LICENSE)，除非具体文件另有说明。
+- astra-code-map 自有源代码采用 [Apache License 2.0](LICENSE)，除非具体文件另有说明。
 - 第三方组件继续适用其各自的版权声明和许可证。
 - 完整的第三方组件、版本和许可证清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - 发布包应同时包含 `LICENSES/` 中的许可证原文和对应版本生成的 SBOM。
-- 外部 SCIP Provider 默认作为独立工具使用；除非 Release 明确说明，否则不随 AstraMap 二进制一起分发。
+- 外部 SCIP Provider 默认作为独立工具使用；除非 Release 明确说明，否则不随 astra-code-map 二进制一起分发。
 
 README 中的组件列表仅用于说明主要技术构成，`THIRD_PARTY_NOTICES.md`、`LICENSES/` 和 Release SBOM 才是分发合规的权威清单。
 
 ## 项目状态
 
-AstraMap 仍在持续演进。公开接口、配置格式和索引数据结构在稳定版本之前可能发生变化。
+astra-code-map 仍在持续演进。公开接口、配置格式和索引数据结构在稳定版本之前可能发生变化。
 
 适合当前阶段的使用方式：
 
@@ -312,7 +322,7 @@ AstraMap 仍在持续演进。公开接口、配置格式和索引数据结构�
 
 提交 Issue 前，请尽量提供：
 
-- 操作系统与 AstraMap 版本
+- 操作系统与 astra-code-map 版本
 - 项目语言和构建工具
 - 使用的 SCIP Provider 及版本
 - 可复现的最小代码样例

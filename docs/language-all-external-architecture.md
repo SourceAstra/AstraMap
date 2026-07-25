@@ -185,7 +185,7 @@ SCIP 失败不能回滚已经成功的实时语法层，但必须保留 `semanti
 
 ## 10. 2026-07-20 回归报告的根因
 
-`/home/he/sdk/docs/astramap-test-report-latest.md` 的 16 个失败不是 16 个独立缺陷：
+`docs/astramap-test-report-latest.md` 的 16 个失败不是 16 个独立缺陷：
 
 - `INC-01/02/03/06/B01`、`CE-08`、`FI-32` 的共同根因是已有 SCIP 时普通 index 缺失内置
   Tree-sitter 写入路径。删除仍能通过修剪生效，新增和修改却没有事实来源；所有语言共用该断点。
