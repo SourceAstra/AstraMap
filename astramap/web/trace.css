@@ -548,25 +548,54 @@ body:not(.resizing) .und-code-panel {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: rgba(255, 255, 255, 0.3);
-    gap: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    gap: 16px;
     z-index: 10;
-    background: #0f0f1a;
+    background: radial-gradient(circle at center, rgba(15, 23, 42, 0.96) 0%, rgba(3, 7, 18, 0.98) 100%);
     pointer-events: none;
 }
 
+.und-empty-logo-wrapper {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.und-empty-logo {
+    width: 220px;
+    max-width: 80%;
+    height: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 0 24px rgba(56, 189, 248, 0.5)) drop-shadow(0 0 45px rgba(168, 85, 247, 0.3));
+    animation: undLogoGlow 3.5s ease-in-out infinite alternate;
+}
+
+@keyframes undLogoGlow {
+    0% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.4)) drop-shadow(0 0 35px rgba(168, 85, 247, 0.25));
+    }
+    100% {
+        transform: scale(1.04);
+        filter: drop-shadow(0 0 32px rgba(56, 189, 248, 0.7)) drop-shadow(0 0 60px rgba(168, 85, 247, 0.55));
+    }
+}
+
 .und-empty-state h3 {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
     margin: 0;
-    background: linear-gradient(135deg, #818cf8, #38bdf8);
+    background: linear-gradient(135deg, #a855f7, #38bdf8);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    letter-spacing: 0.5px;
 }
 
 .und-empty-state p {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.25);
+    color: rgba(148, 163, 184, 0.7);
     margin: 0;
 }
 

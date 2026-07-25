@@ -275,9 +275,11 @@
                     </div>
                 </div>
                 <div class="und-empty-state" id="und-empty">
-                    <div style="font-size:48px">🧠</div>
+                    <div class="und-empty-logo-wrapper">
+                        <img src="logo.png" alt="AstraMap" class="und-empty-logo">
+                    </div>
                     <h3 data-i18n="trace_empty_title">Related Call View</h3>
-                    <p data-i18n="select_entry_hint">Select an entry from the left function tree</p>
+                    <p data-i18n="select_entry_hint">Select an entry from the left function tree to start tracing call paths</p>
                 </div>
             `;
 

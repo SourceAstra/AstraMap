@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AstraMap - Starfield Independent Console</title>
+    <link rel="icon" type="image/png" href="logo-icon.png">
     <script src="d3.min.js" defer></script>
     <link rel="stylesheet" href="index.css">
     <link rel="stylesheet" href="explore.css">
@@ -42,12 +43,60 @@
             display: flex; align-items: center; padding: 0 20px; gap: 16px; z-index: 1000;
             box-shadow: var(--shadow-sm);
         }
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .header-brand img {
+            height: 40px;
+            width: 40px;
+            border-radius: 9px;
+            object-fit: contain;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            box-shadow: 0 0 14px rgba(56, 189, 248, 0.5);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .header-brand:hover img {
+            transform: scale(1.08);
+            box-shadow: 0 0 22px rgba(168, 85, 247, 0.75);
+            border-color: rgba(168, 85, 247, 0.6);
+        }
         header h1 {
-            font-size: 18px; font-weight: 800;
+            font-size: 20px; font-weight: 800;
             background: linear-gradient(to right, #a855f7, #38bdf8);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             letter-spacing: 1px;
+            margin: 0;
+        }
+        /* Canvas background branding watermark */
+        .canvas-watermark {
+            position: fixed;
+            bottom: 16px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0.35;
+            pointer-events: none;
+            user-select: none;
+            z-index: 100;
+        }
+        .canvas-watermark img {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));
+        }
+        .canvas-watermark span {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+            color: #94a3b8;
         }
         /* Navigation tabs */
         .tab-btn {
@@ -271,8 +320,11 @@
 </head>
 <body class="view-explore">
     <header>
-        <h1>AstraMap</h1>
-        <div style="width: 24px;"></div>
+        <div class="header-brand">
+            <img src="logo-icon.png" alt="AstraMap Logo">
+            <h1>AstraMap</h1>
+        </div>
+        <div style="width: 16px;"></div>
         <button id="btn-explore" class="tab-btn active" data-i18n="explore">Explore</button>
         <button id="btn-trace" class="tab-btn" data-i18n="trace">Trace</button>
         <div style="flex:1"></div>
@@ -290,6 +342,12 @@
 
     <!-- Trace Canvas -->
     <div id="view-trace" class="view-panel"></div>
+
+    <!-- Canvas Branding Watermark -->
+    <div class="canvas-watermark">
+        <img src="logo-icon.png" alt="AstraMap Logo">
+        <span>ASTRAMAP ENGINE</span>
+    </div>
 
     <script>
         // SourceAstra standalone runtime mocks
