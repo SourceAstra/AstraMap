@@ -60,7 +60,7 @@ astra-code-map does not replace source code or language toolchains. It provides 
 
 Start from a project, directory, file, or symbol and move from global structure to local implementation.
 
-<img src="pic/view.png" alt="astra-code-map Explore View">
+<img src="pic/explore.png" alt="astra-code-map Explore View">
 
 ### Dependency View
 

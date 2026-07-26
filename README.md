@@ -60,7 +60,7 @@ astra-code-map 不替代源码，也不替代编译器。它为 AI Agent、IDE �
 
 从项目、目录、文件或函数进入，先观察全局结构，再逐层深入局部实现。
 
-<img src="pic/view.png" alt="astra-code-map Explore View">
+<img src="pic/explore.png" alt="astra-code-map Explore View">
 
 ### 依赖关系
 
@@ -72,7 +72,7 @@ astra-code-map 不替代源码，也不替代编译器。它为 AI Agent、IDE �
 
 生成函数、文件、模块和项目级结构化文档，辅助代码阅读、审查、重构和交接。
 
-<img src="pic/understand_zh.png" alt="astra-code-map Understanding Documents">
+<img src="pic/understand.png" alt="astra-code-map Understanding Documents">
 
 ## 快速开始
 
