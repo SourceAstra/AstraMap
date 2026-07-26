@@ -38,19 +38,19 @@ echo "================================================="
 
 # Step 1: Code formatting & Vet & Test
 echo ""
-echo "[Step 1/4] 🔍 Running code quality checks & tests..."
+echo "[Step 1/5] 🔍 Running code quality checks & tests..."
 gofmt -w .
 make vet
 make test
 
 # Step 2: Build & Package Release
 echo ""
-echo "[Step 2/4] 📦 Building static release artifacts..."
+echo "[Step 2/5] 📦 Building static release artifacts..."
 ./release.sh "${VERSION}"
 
 # Step 3: Git Stage & Commit
 echo ""
-echo "[Step 3/4] 📝 Staging files and creating Git commit..."
+echo "[Step 3/5] 📝 Staging files and creating Git commit..."
 git add .
 if git diff-index --quiet HEAD --; then
   echo "    No changes to commit."
@@ -61,7 +61,7 @@ fi
 
 # Step 4: Push to Remotes
 echo ""
-echo "[Step 4/4] 🚀 Pushing to GitHub & Remote repositories..."
+echo "[Step 4/5] 🚀 Pushing to GitHub & Remote repositories..."
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
 echo "    Pushing branch '${CURRENT_BRANCH}' to origin (GitHub)..."
@@ -77,10 +77,37 @@ if [ -n "${VERSION}" ]; then
   git push origin "${VERSION}" || true
 fi
 
-# Also push to gitee if configured
-if git remote | grep -q "^gitee$"; then
-  echo "    Pushing branch '${CURRENT_BRANCH}' to gitee..."
-  git push gitee "${CURRENT_BRANCH}" || true
+# Step 5: Upload release artifacts to GitHub Release
+echo ""
+if [ -d "${PROJECT_ROOT}/dist" ] && ls "${PROJECT_ROOT}/dist"/amap-* >/dev/null 2>&1; then
+  if command -v gh >/dev/null 2>&1; then
+    echo "[Step 5/5] 📤 Uploading release artifacts to GitHub Release..."
+
+    # Ensure the tag exists (created above in Step 4)
+    if git rev-parse "${VERSION}" >/dev/null 2>&1; then
+      # Create release if it doesn't already exist
+      if ! gh release view "${VERSION}" >/dev/null 2>&1; then
+        echo "    Creating GitHub Release '${VERSION}'..."
+        gh release create "${VERSION}" \
+          --title "AstraMap ${VERSION}" \
+          --notes "Release artifacts for AstraMap ${VERSION}. See SHA256SUMS for checksums." \
+          --draft=false
+      fi
+
+      echo "    Uploading artifacts from dist/..."
+      gh release upload "${VERSION}" "${PROJECT_ROOT}/dist"/amap-* "${PROJECT_ROOT}/dist"/SHA256SUMS \
+        --clobber
+      echo "    Release artifacts uploaded successfully."
+    else
+      echo "    [Warning] Tag '${VERSION}' not found, skipping GitHub Release upload."
+    fi
+  else
+    echo "[Step 5/5] ⚠️  'gh' CLI not found — skipping GitHub Release upload."
+    echo "    Install gh (https://cli.github.com) and run:"
+    echo "      gh release create ${VERSION} ./dist/amap-* ./dist/SHA256SUMS"
+  fi
+else
+  echo "[Step 5/5] ⏭️  No release artifacts found in dist/, skipping GitHub Release upload."
 fi
 
 echo ""
