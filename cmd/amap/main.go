@@ -369,14 +369,21 @@ func findScipTool(lang, registryRoot, unitRoot string) (string, bool) {
 	if p, err := exec.LookPath(name); err == nil {
 		return p, true
 	}
-	if provider, ok := astramap.SemanticProviderForProjectLanguage(registryRoot, lang); ok && provider.Recipe == astramap.ScipRecipeGo {
-		gopath := os.Getenv("GOPATH")
-		if gopath == "" {
-			gopath = filepath.Join(os.Getenv("HOME"), "go")
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		candidates := []string{
+			filepath.Join(home, ".npm-global", "bin", name),
+			filepath.Join(home, ".local", "bin", name),
+			filepath.Join(home, "go", "bin", name),
+			filepath.Join(home, ".cargo", "bin", name),
 		}
-		p := filepath.Join(gopath, "bin", name)
-		if _, err := os.Stat(p); err == nil {
-			return p, true
+		if gopath := os.Getenv("GOPATH"); gopath != "" {
+			candidates = append(candidates, filepath.Join(gopath, "bin", name))
+		}
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				return p, true
+			}
 		}
 	}
 	return "", false
@@ -1358,7 +1365,7 @@ func runIndex(opts indexOptions) {
 			fmt.Printf("  %d. %s (%d source files)\n", i+1, languageDisplayName(lc.Lang), lc.Count)
 		}
 		fmt.Println()
-		fmt.Print("Please select languages to import (enter index numbers, separate multiple with commas, e.g., 1,3; press Enter to import all): ")
+		fmt.Print("Select languages [e.g. 1,2 or Enter for all]: ")
 		var input string
 		fmt.Scanln(&input)
 		if input != "" {
@@ -2538,7 +2545,7 @@ func printConfigs(amapPath, projectPath string) {
 	fmt.Println("  Codex:        AGENTS.md (追加 AstraMap 段落) + ~/.codex/config.toml (MCP)")
 	fmt.Println("  Windsurf:     .windsurfrules (追加 AstraMap 段落)")
 	fmt.Println("  Cline:        .clinerules/astramap.md")
-	fmt.Println("  Antigravity:  .agents/AGENTS.md 或 ~/.gemini/config/AGENTS.md (追加 AstraMap 段落)")
+	fmt.Println("  Antigravity:  项目 .agents/AGENTS.md 及 AGENTS.md (追加 AstraMap 段落)")
 
 	fmt.Println("\n=== Codex MCP (TOML) ===")
 	fmt.Printf("  CLI: codex mcp add astramap -- %s serve --project .\n", amapPath)
@@ -2603,22 +2610,21 @@ func installAntigravity(amapPath, projectPath string) bool {
 		logWarn("Cannot retrieve user home directory, skipping global Antigravity MCP registration")
 	}
 
-	// 3. 注册规则 (AGENTS.md)
-	// 项目级规则：.agents/AGENTS.md
+	// 3. 注册规则 (只修改项目级 AGENTS.md，不动用户全局文件)
 	rulesOK1 := appendRulesFile(filepath.Join(projectPath, ".agents", "AGENTS.md"), "## AstraMap", astramapRulesContent)
+	rulesOK2 := appendRulesFile(filepath.Join(projectPath, "AGENTS.md"), "## AstraMap", astramapRulesContent)
+	_ = rulesOK1 || rulesOK2
 
-	// 全局级规则：~/.gemini/config/AGENTS.md
-	rulesOK2 := false
-	if home != "" {
-		rulesOK2 = appendRulesFile(filepath.Join(home, ".gemini", "config", "AGENTS.md"), "## AstraMap", astramapRulesContent)
-	}
+	// 4. 注册 /amap 命令 (.agents/commands/amap.md 及 .agents/workflows/amap.md)
+	cmdOK := installAntigravitySlashCommand(projectPath)
 
 	// 汇总输出
 	if len(mcpMethods) > 0 {
-		fmt.Printf("  ✓ Antigravity  — MCP registered (written to %s)\n", strings.Join(mcpMethods, ", "))
-		if rulesOK1 || rulesOK2 {
-			fmt.Printf("  ✓ Antigravity  — Rules appended to AGENTS.md\n")
+		cmdMsg := ""
+		if cmdOK {
+			cmdMsg = " + /amap command"
 		}
+		fmt.Printf("  ✓ Antigravity  — MCP registered (written to %s)%s\n", strings.Join(mcpMethods, ", "), cmdMsg)
 		return true
 	}
 	fmt.Println("  ✗ Antigravity  — MCP registration failed")
@@ -2689,6 +2695,42 @@ func installSlashCommand(projectPath string) bool {
 		return false
 	}
 	return true
+}
+
+// installAntigravitySlashCommand 创建 .agents/commands/amap.md 和 .agents/workflows/amap.md
+func installAntigravitySlashCommand(projectPath string) bool {
+	dirs := []string{
+		filepath.Join(projectPath, ".agents", "commands"),
+		filepath.Join(projectPath, ".agents", "workflows"),
+	}
+	success := false
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err == nil {
+			path := filepath.Join(dir, "amap.md")
+			if err := os.WriteFile(path, []byte(amapSlashCommandTpl), 0644); err == nil {
+				success = true
+			}
+		}
+	}
+	return success
+}
+
+// installCodexSlashCommand 创建 .codex/prompts/amap.md 和 .agents/commands/amap.md
+func installCodexSlashCommand(projectPath string) bool {
+	dirs := []string{
+		filepath.Join(projectPath, ".codex", "prompts"),
+		filepath.Join(projectPath, ".agents", "commands"),
+	}
+	success := false
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err == nil {
+			path := filepath.Join(dir, "amap.md")
+			if err := os.WriteFile(path, []byte(amapSlashCommandTpl), 0644); err == nil {
+				success = true
+			}
+		}
+	}
+	return success
 }
 
 // installClaudeCodePermissions writes mcp__astramap__* tool permissions
@@ -2822,16 +2864,25 @@ User Input: $ARGUMENTS
 `
 
 // astramapRulesContent 是所有工具规则文件共享的核心指令内容
-const astramapRulesContent = `AstraMap 是当前项目的代码地图 MCP 服务。当用户询问代码结构相关问题时，必须优先使用 AstraMap 工具而非 grep 或文件搜索：
+const astramapRulesContent = `AstraMap 是当前项目的代码地图 MCP 服务，采用 SCIP 编译器级精确语义（主）+ Tree-sitter 实时语法层（辅）的双层架构。
 
-- 查找符号定义 → astramap_search
-- 理解代码上下文和调用关系 → astramap_explore
-- view symbol details和源码 → astramap_node
-- 追溯谁调用了某符号 → astramap_callers
-- 追溯某符号调用了什么 → astramap_callees
-- 评估修改影响范围 → astramap_impact
+【AI Agent 强制工具调度协议】：
+在进行任何代码阅读、重构、Bug 修复、符号查找或影响评估时，必须强制遵守以下工具选择策略：
+
+1. 严禁盲目 Grep：查找类名、函数名、结构体、接口定义时，【严禁】首选全文 grep / view_file。必须优先调用 astramap_search 或 astramap_explore。
+2. 架构与调用链分析：追溯调用关系（Who calls what）或追踪 A 到 B 的路径时，【必须】使用 astramap_callers / astramap_callees / astramap_trace。
+3. 修改影响评估：修改任何公共函数、结构体或接口前，【必须】先执行 astramap_impact 评估受影响范围。
+4. 只有在检索非代码符号（如日志文本、注释、配置键名）时，才允许使用常规 grep。
+
+工具路由表：
+- 查找符号定义/函数/类 → astramap_search
+- 聚合查看上下文与代码关系 → astramap_explore
+- 查看指定符号详情与源码 → astramap_node
+- 追溯调用方 (Callers) → astramap_callers
+- 追溯被调用方 (Callees) → astramap_callees
+- 评估修改破坏范围 → astramap_impact
 - 追踪 A 到 B 的调用路径 → astramap_trace
-- 检查索引状态 → astramap_status
+- 检查索引健康度与语言支持 → astramap_status
 `
 
 // installVSCode 注册到 VS Code (MCP server + Copilot instructions)
@@ -2933,21 +2984,22 @@ func installProjectMcpJson(amapPath, projectPath string) bool {
 	return true
 }
 
-// installCodex 注册到 OpenAI Codex (AGENTS.md)
+// installCodex 注册到 OpenAI Codex (AGENTS.md + /amap command)
 func installCodex(amapPath, projectPath string) bool {
 	ok1 := appendRulesFile(filepath.Join(projectPath, "AGENTS.md"), "## AstraMap", astramapRulesContent)
 	ok2 := installCodexMcp(amapPath)
+	cmdOK := installCodexSlashCommand(projectPath)
 	switch {
-	case ok1 && ok2:
-		fmt.Println("  ✓ Codex         — MCP registered + rules written to AGENTS.md")
-	case ok1:
-		fmt.Println("  ✓ Codex         — Rules written to AGENTS.md (MCP registration failed, run manually: codex mcp add astramap -- <amap-path> serve --project .)")
-	case ok2:
-		fmt.Println("  ✓ Codex         — MCP registered (AGENTS.md write failed)")
+	case ok1 && ok2 && cmdOK:
+		fmt.Println("  ✓ Codex         — MCP registered + rules written to AGENTS.md + /amap command")
+	case ok1 && cmdOK:
+		fmt.Println("  ✓ Codex         — Rules written to AGENTS.md + /amap command (MCP registration failed)")
+	case ok2 && cmdOK:
+		fmt.Println("  ✓ Codex         — MCP registered + /amap command")
 	default:
-		fmt.Println("  ✗ Codex         — MCP registration and AGENTS.md write both failed")
+		fmt.Println("  ✗ Codex         — MCP registration and AGENTS.md write failed")
 	}
-	return ok1 || ok2
+	return ok1 || ok2 || cmdOK
 }
 
 func installCodexMcp(amapPath string) bool {
