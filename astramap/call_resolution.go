@@ -331,7 +331,7 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 					continue
 				}
 				calleeName := line[m[2]:m[3]]
-				if isKeyword(calleeName) {
+				if isKeyword(calleeName) || calleeName == "init" {
 					continue
 				}
 
@@ -371,6 +371,7 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 					}
 					targets = filtered
 				}
+				hasExplicitQualifiedMatch := false
 				if sepIndex != -1 {
 					leftBound := sepIndex
 					for leftBound > 0 {
@@ -387,11 +388,61 @@ func resolveCrossFileCalls(db *sqlx.DB, projectRoot string, changedFiles []strin
 						possibleQualified2 := prefix + "::" + calleeName
 						if qTargets, exists := qualifiedMap[possibleQualified1]; exists {
 							targets = qTargets
+							hasExplicitQualifiedMatch = true
 						} else if qTargets, exists := qualifiedMap[possibleQualified2]; exists {
 							targets = qTargets
+							hasExplicitQualifiedMatch = true
 						}
 					}
 				}
+				// 防御漏洞 B：对于包含成员/包选择符（如 obj.Method()）的调用，
+				// 如果未能通过 QualifiedName 精确匹配到定义，且当前候选目标有多个不同类型的同名方法，
+				// 严禁退化为盲目全连，直接跳过以防止污染调用图。
+				if sepIndex != -1 && !hasExplicitQualifiedMatch && len(targets) > 1 {
+					continue
+				}
+				// 启发式消歧逻辑：当存在多个候选 target 时，通过路径/包就近原则进行过滤
+				if len(targets) > 1 {
+					callerFile := fp
+					callerDir := filepath.ToSlash(filepath.Dir(callerFile))
+
+					var refinedTargets []string
+					for _, targetID := range targets {
+						// 从 targetID 或 qualifiedMap 的对应节点获取被调用者的 file_path。
+						// 比较 callerDir 与 targetID 的所属目录，优先匹配同包（相同目录）下的定义。
+						// Go 格式 targetID 类似 'scip:core-go/cmd/mint/main.go::main' 或包含路径
+						targetPath := ""
+						if strings.HasPrefix(targetID, "scip:") {
+							// scip:path::symbol
+							parts := strings.Split(strings.TrimPrefix(targetID, "scip:"), "::")
+							if len(parts) > 0 {
+								targetPath = parts[0]
+							}
+						} else if strings.Contains(targetID, "::") {
+							// heuristic/syntax ID format: lang:path/to/file::symbol or file:path/to/file::symbol
+							parts := strings.Split(targetID, "::")
+							if len(parts) > 0 {
+								rawPath := parts[0]
+								if idx := strings.Index(rawPath, ":"); idx >= 0 {
+									rawPath = rawPath[idx+1:]
+								}
+								targetPath = rawPath
+							}
+						}
+
+						if targetPath != "" {
+							targetDir := filepath.ToSlash(filepath.Dir(targetPath))
+							if targetDir == callerDir {
+								refinedTargets = append(refinedTargets, targetID)
+							}
+						}
+					}
+					// 如果就近原则筛选出了唯一的或更少的目标，采用精细化后的结果；否则回退保留原有匹配
+					if len(refinedTargets) > 0 {
+						targets = refinedTargets
+					}
+				}
+
 				if isAmbiguousHeuristicCall(targets) {
 					continue
 				}

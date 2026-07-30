@@ -29,6 +29,13 @@ CLAUDE.md
 .windsurfrules
 AGENTS.md
 
+# Private design docs & internal reports
+/docs/
+/tests/reports/
+/AstraMap_代码地图_v01.md
+*.png.tmp
+2026-07-25_*.png
+
 # OS junk
 .DS_Store
 Thumbs.db

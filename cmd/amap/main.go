@@ -1519,6 +1519,11 @@ func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, appl
 		allowedLangs[lang] = true
 	}
 
+	// 引入 SCIP 防抖收敛计时器（静默 2 分钟后自动后台运行一次 SCIP 导入）
+	var scipTimer *time.Timer
+	scipDebounceDuration := 2 * time.Minute
+	var scipTimerChan <-chan time.Time
+
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -1591,9 +1596,23 @@ func watchIndexCmd(db *sqlx.DB, projectRoot string, interval time.Duration, appl
 				if resolveErr := astramap.ResolveCrossFileCallsForFiles(db, projectRoot, changedPaths); resolveErr != nil {
 					logWarn("watch heuristic refresh failed: %v", resolveErr)
 				}
-				if refreshErr := refreshWatchScip(db, projectRoot, watchFilter, profile, langFilter); refreshErr != nil {
-					logWarn("watch SCIP convergence deferred; realtime syntax remains active: %v", refreshErr)
+
+				// 触发/重置 SCIP 最终收敛防抖计时器
+				if scipTimer != nil {
+					scipTimer.Stop()
 				}
+				scipTimer = time.NewTimer(scipDebounceDuration)
+				scipTimerChan = scipTimer.C
+			}
+		case <-scipTimerChan:
+			scipTimerChan = nil // 消费完后置空通道
+			if scipTimer != nil {
+				scipTimer.Stop()
+				scipTimer = nil
+			}
+			profile := astramap.BuildProjectProfile(projectRoot, watchFilter, astramap.StageSyntax)
+			if refreshErr := refreshWatchScip(db, projectRoot, watchFilter, profile, langFilter); refreshErr != nil {
+				logWarn("watch SCIP convergence deferred; realtime syntax remains active: %v", refreshErr)
 			}
 		}
 	}
@@ -1627,6 +1646,7 @@ func refreshWatchScip(db *sqlx.DB, projectRoot string, filter *astramap.IndexFil
 	if err := astramap.ImportScipIndexesToAstraMap(db, paths, projectRoot); err != nil {
 		return err
 	}
+	fmt.Printf("watch successfully refreshed map via SCIP index update (%s)\n", time.Now().Format("15:04:05"))
 	filters := make([]string, 0, len(selected))
 	for _, language := range selected {
 		filters = append(filters, language.Lang)

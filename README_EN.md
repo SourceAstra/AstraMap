@@ -1,4 +1,4 @@
-# astra-code-map — Semantic Code Map for AI Coding Agents
+# astra-code-map — High-Precision Semantic Code Map for AI Coding Agents
 
 <p align="center">
   <img src="pic/banner.png" alt="astra-code-map Hero Banner" width="100%">
@@ -14,21 +14,76 @@
 
 > Semantic Code Map · Code Graph · Code Intelligence · MCP Server
 
-astra-code-map is a local-first **semantic code map and code graph engine** for Claude Code, Codex, Cursor, and other MCP-compatible AI coding tools.
+astra-code-map is a local-first, blazing-fast **high-precision semantic code map and code graph engine**, engineered specifically for next-generation AI coding agents (such as Claude Code, Codex, and Cursor) as well as modern development teams. It deep-dives into complex codebases to construct a highly deterministic SQLite-backed symbol topology, eliminating context waste caused by AI agents repeatedly running `grep` or reading huge raw files.
 
-It turns a codebase into queryable symbol nodes and semantic edges, allowing AI agents to locate definitions, trace calls, explore dependencies, and analyze change impact without repeatedly scanning entire files with `grep`.
+Beyond equipping AI agents with a precise cognitive map of your code, the system features a stunning, interactive **Web Dashboard** that visualizes abstract architectures into three intuitive navigation perspectives:
+* 🪐 **Explore View**: A dynamic starfield-like file explorer allowing developers to instantly gauge directory depths and node density.
+* 🕸️ **Dependency Graphs**: Interactive, force-directed graph networks mapping global or local callers/callees relationships and exact code flows.
+* 📖 **Understanding Documents**: Automatically generated, code-paired semantic summaries for modules and source files, providing unmatched clarity for architectural reviews and handovers.
 
-```text
-Source code
-  ├─ Tree-sitter: fast parsing of the current file structure
-  └─ SCIP: cross-file, type-aware final semantics
-          ↓
-      astra-code-map merge engine
-          ↓
- SQLite Semantic Code Graph
-          ↓
- MCP Server · REST API · Web Dashboard
+---
+
+### Core Technology Advantage: SCIP-first Semantics, Tree-sitter-second Syntax
+
+In large-scale or enterprise-grade codebases, relying solely on the syntax layer (like Tree-sitter AST-based parsing) leads to significant relationship inaccuracies. Lacking static type system inference, pure syntax parsers fail to resolve polymorphism, interface implementations, overloaded methods, and complex cross-module dependencies, resulting in a distorted call graph.
+
+To address this fundamental pain point, AstraMap implements a **two-layer hybrid architecture** with compiler-level SCIP semantics at its core, complemented by incremental Tree-sitter syntax updates:
+
+```mermaid
+graph LR
+    A[Source Code] --> B[Tree-sitter Real-time Layer]
+    A --> C[SCIP Semantic Providers]
+    B --> D[astra-code-map Merge Engine]
+    C --> D
+    D --> E[(SQLite Semantic Code Graph)]
+    E --> F[MCP Server]
+    E --> G[REST API]
+    G --> H[Web Dashboard]
+    F --> I[AI Coding Agents]
 ```
+
+* **SCIP (High-Precision Semantic Core - Determines the Ceiling)**: Serves as the primary **semantic backbone**. It leverages compiler pipelines and language toolchains (via LSP/LSIF/SCIP Providers) to run complete type inferences, generating a highly precise graph with **cross-file definition resolution**, **exact polymorphic dispatches**, and **trait/interface mapping**. This represents our core competitive advantage.
+* **Tree-sitter (Real-time Syntax Patch - Determines the Responsiveness)**: Serves as the **incremental patch**. Operating on top of the robust SCIP graph, Tree-sitter parses modified files in milliseconds, adjusting local offsets and additions without requiring expensive compiler runs.
+
+---
+
+### What Problems Does SCIP Solve That Pure Tree-sitter Cannot?
+
+When navigating large or multi-module industrial codebases, relying **solely on Tree-sitter (regex/symbol text match on AST)** introduces massive bottlenecks:
+
+#### 1. Accurate Trait & Interface Implementation Mapping
+* **Tree-sitter Pain Point**: It can only associate by name. If multiple structs/classes implement common methods like `Read` or `Close`, pure Tree-sitter creates chaotic, ambiguous edges, polluting impact analysis maps with false positives.
+* **SCIP Solution**: Utilizing static compiler analysis, AstraMap maps abstract declarations directly to their correct runtime concrete implementations, ensuring every graph edge is compiler-verified.
+
+#### 2. Scope & Signature Disambiguation for Overloaded Symbols
+* **Tree-sitter Pain Point**: When different files define identical identifiers (e.g., `pkgA.Init()` and `pkgB.Init()`), syntax-only maps fail to isolate call paths, collapsing separate namespaces into one messy namespace.
+* **SCIP Solution**: Generates a globally unique Unified Symbol Name (U.S.N.) for each entity. Even with identical spellings, symbols residing in distinct scopes are treated as entirely separate entities.
+
+#### 3. Deep External & Third-Party Library Tracking
+* **Tree-sitter Pain Point**: Syntax parsers cannot trace call chains into closed-source SDKs or dependency libraries outside the workspace files.
+* **SCIP Solution**: Automatically imports external package metadata, bridging dependencies to draw complete boundaries.
+
+#### 4. High-Fidelity Impact Analysis & Deadcode Elimination
+* **Tree-sitter Pain Point**: Ambiguous edges cause dependencies to diffuse rapidly, making change calculations expand to the entire repository and rendering test recommendation engines useless.
+* **SCIP Solution**: Operates on a deterministic call graph to support deep, reliable topological traversals (e.g., "modifying symbol X affects precisely files A, B, and C").
+
+---
+
+| Feature | SCIP (Semantic Backbone) | Tree-sitter (Syntax Patch) |
+|---|---|---|
+| **Role & Position** | **High-precision cross-file semantic core** | **Real-time incremental patch** |
+| **Core Value** | Eliminates polymorphism & namespace ambiguity; provides reliable call graphs and impact tracking. | Guarantees instant agent responsiveness and maintains line alignment. |
+| **Parsing Pipeline** | Collaborates with compiler/build setups for static type inference. | Standalone fast AST parsing; no build requirements or environment constraints. |
+| **Update Interval** | On-demand or scheduled runs (`amap index`); full index during big changes. | Active file watcher (`amap watch`), triggers on save and commits in milliseconds. |
+
+#### Fusion and Resolution Logic
+
+In AstraMap's Merge Engine:
+1. **SCIP establishes the source of truth**: Post-compile, SCIP logs cross-file call boundaries and inheritance trees into SQLite under `scip` provenance.
+2. **Tree-sitter prevents drift**: As the developer codes, Tree-sitter patches offsets, line modifications, and new local definitions in the database under `syntax-package` provenance.
+3. **Graceful Fallback**: If compiler toolchains are absent, the graph degrades cleanly to heuristic symbol matching.
+
+---
 
 ## What astra-code-map Helps Answer
 
@@ -175,40 +230,7 @@ MCP tools:
 | `astra-code-map_status` | Inspect index coverage and provenance |
 | `astra-code-map_files` | Query indexed files by path or pattern |
 
-## Architecture Overview
 
-astra-code-map combines real-time structure with final semantic information.
-
-```mermaid
-graph LR
-    A[Source Code] --> B[Tree-sitter Real-time Layer]
-    A --> C[SCIP Semantic Providers]
-    B --> D[astra-code-map Merge Engine]
-    C --> D
-    D --> E[(SQLite Semantic Code Graph)]
-    E --> F[MCP Server]
-    E --> G[REST API]
-    G --> H[Web Dashboard]
-    F --> I[AI Coding Agents]
-```
-
-### Tree-sitter real-time layer
-
-- Parses the current files quickly
-- Extracts definitions, signatures, comments, and local calls
-- Supports file-level incremental updates
-- Provides a usable baseline when no SCIP Provider is available
-
-### SCIP semantic layer
-
-- Provides cross-file definitions and references
-- Resolves type relationships, implementations, and overloaded symbols
-- Improves determinism for call graphs and impact analysis
-- Is enabled selectively based on language and build environment
-
-### Merge and storage
-
-All nodes and edges retain provenance information and are stored in a local SQLite database. MCP, REST, and the Dashboard share the same data instead of maintaining separate indexes.
 
 ## Supported Languages
 
@@ -337,9 +359,19 @@ Before opening an issue, please include:
 
 Before submitting code, open an Issue describing the problem and the proposed approach. Do not disclose sensitive security details in a public Issue.
 
-## Documentation
+## Changelog
+
+See complete [CHANGELOG.md](CHANGELOG.md).
+
+### [v0.2.0] - 2026-07-30
+- 🚀 **Architecture Alignment**: Standardized on "SCIP-first Semantics, Tree-sitter-second Syntax" dual-layer model.
+- ⚡ **Watch Debouncing**: Prevented rapid SCIP recompiles during file saves; added 2-minute quiet debounce convergence timer.
+- 🎯 **Heuristic Precision**: Added same-package directory filtering, Go `init()` interception, and member selector ambiguity defense.
+
+## Related Documentation
 
 - [Quick Start](QUICKSTART_EN.md)
+- [Changelog](CHANGELOG.md)
 - [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 
 ## License

@@ -1,4 +1,4 @@
-# astra-code-map — 面向 AI 编程代理的语义代码地图
+# astra-code-map — 面向 AI 编程代理的高精度语义代码地图
 
 <p align="center">
   <img src="pic/banner.png" alt="astra-code-map Hero Banner" width="100%">
@@ -14,21 +14,76 @@
 
 > Semantic Code Map · Code Graph · Code Intelligence · MCP Server
 
-astra-code-map 是一个本地优先的**语义代码地图与代码图谱引擎**，面向 Claude Code、Codex、Cursor 以及其他支持 MCP 的 AI 编程工具。
+astra-code-map 是一个本地优先、极速响应的**高精度语义代码地图与代码图谱引擎**，专为 Claude Code、Codex、Cursor 等新一代智能 AI 编程代理与工程团队打造。它能够深度解构复杂代码库，将庞大交错的源文件转化为 SQLite 承载的“高确定性符号拓扑网”，彻底终结 AI 因反复 `grep` 和盲目读取整文件而导致的上下文（Context）浪费。
 
-它把代码库转换为可查询的“符号节点 + 语义关系边”，让 AI 不必依赖反复 `grep` 和整文件读取，就能完成符号定位、调用链追踪、依赖探索和变更影响分析。
+除了为 AI Agent 注入高精度的代码空间感外，系统还内置了一个极具视觉震撼力的 **Web Dashboard**，将抽象的架构提炼为三种极佳的交互式阅读视界：
+* 🪐 **探索视界 (Explore View)**：动态星图级的交互式文件目录，让开发者能够一键洞悉各个模块的层级深度与节点聚合度。
+* 🕸️ **依赖拓扑 (Dependency Graphs)**：支持交互拉伸的全局与局部调用图谱，精准还原任意函数的 callers/callees 调用邻域与路径依赖。
+* 📖 **理解文档 (Understanding Documents)**：自动生成的模块级与文件级语义说明书，结合源码片段与关系脉络，提供无与伦比的架构速读与交接体验。
 
-```text
-源代码
-  ├─ Tree-sitter：快速解析当前文件结构
-  └─ SCIP：提供跨文件、类型感知的最终语义
-          ↓
-      astra-code-map 合并引擎
-          ↓
- SQLite Semantic Code Graph
-          ↓
- MCP Server · REST API · Web Dashboard
+---
+
+### 核心技术优势：以 SCIP 语义为主，Tree-sitter 语法为辅
+
+在大型复杂项目或工业级代码库中，单纯依靠语法层（Tree-sitter 等基于 AST 的文本解析）由于缺乏类型系统支持，在面对多态、接口实现、同名函数重载以及复杂的跨模块依赖时，会产生大量的符号歧义，导致代码地图的关系网严重失真。
+
+为了解决这一本质痛点，AstraMap 确立了以 SCIP 编译器级语义为主导，Tree-sitter 语法级更新为辅助的**双层混合高精度架构**：
+
+```mermaid
+graph LR
+    A[Source Code] --> B[Tree-sitter Real-time Layer]
+    A --> C[SCIP Semantic Providers]
+    B --> D[astra-code-map Merge Engine]
+    C --> D
+    D --> E[(SQLite Semantic Code Graph)]
+    E --> F[MCP Server]
+    E --> G[REST API]
+    G --> H[Web Dashboard]
+    F --> I[AI Coding Agents]
 ```
+
+* **SCIP（高精度语义主导，决定图谱的上限）**：作为系统的**语义核心**。它利用编译器及语言工具链（如 LSP/LSIF/SCIP Provider）对项目进行完整的类型推导，生成**跨文件消歧**、**精准多态跳转**以及**完备接口映射**的高精度代码拓扑图。这是整个项目最核心的竞争优势和价值所在。
+* **Tree-sitter（实时增量辅助，决定图谱的实时性）**：作为系统的**动态补丁**。在 SCIP 确立的高精度骨架之上，Tree-sitter 通过毫秒级的单文件 AST 解析，在文件变更时提供轻量级更新（如行号修正、新定义追加），从而避免了频繁执行全量编译和 SCIP 重建的昂贵开销。
+
+---
+
+### SCIP 解决了哪些纯 Tree-sitter 解决不了的问题？
+
+在大型、多模块及类型系统复杂的工业级代码库中，如果**仅依靠 Tree-sitter（即单纯基于文本 AST 的正则/符号模式匹配）**，代码地图会面临以下不可逾越的痛点：
+
+#### 1. 接口实现（Interface / Trait）的精准跨文件映射
+* **Tree-sitter 痛点**：仅能通过名字做字面关联。如果项目中存在多个结构体/类实现了同一个 `Read` 或 `Close` 方法，纯 Tree-sitter 会导致调用图产生灾难性的多义关联（将调用点指向不相干的实现类），最终使影响面分析（Impact Analysis）爆发出铺天盖地的噪音。
+* **SCIP 解决方案**：基于编译器的类型系统推导，AstraMap 能够精确定位接口声明与实际类型实现之间的绑定关系，调用图中的每条边均具备编译器级的确定性。
+
+#### 2. 同名符号与函数重载的全局消歧
+* **Tree-sitter 痛点**：在不同文件或模块中定义了同名的结构体或公共方法（例如 `pkgA.Init()` 与 `pkgB.Init()`），Tree-sitter 代码地图在分析 `Init()` 的调用者时，往往只能退化为“名字模糊匹配”，混淆调用链路。
+* **SCIP 解决方案**：为每个符号生成全局唯一的全限定命名空间标识（U.N.S.），哪怕拼写完全一致，不同作用域、不同类型的符号也会在 SQLite 节点表中被严格区分开。
+
+#### 3. 跨模块/跨库的深层依赖与第三方 SDK 边界追踪
+* **Tree-sitter 痛点**：无法解析外部导入包、私有 SDK 以及隐藏在工具链中的符号调用链，调用图无法外延。
+* **SCIP 解决方案**：自动加载外部依赖符号元数据，建立与第三方库、框架底座的清晰边界关联。
+
+#### 4. 高确定性的变更影响分析（Impact Analysis）与死代码（Deadcode）检测
+* **Tree-sitter 痛点**：由于充斥着“可能、也许”的启发式模糊连接，其生成的调用拓扑存在大量虚假连线，使得递归计算依赖影响范围时会迅速扩散至全库，失去指导重构或测试推荐的参考价值。
+* **SCIP 解决方案**：以“确定性调用边”为基础构建强连通分量，支持高度可信的深度拓扑递归，能够准确指出“修改符号 X，在物理上传播的精准文件集合是 A、B、C”。
+
+---
+
+| 维度 | SCIP (高精度语义主导层) | Tree-sitter (语法辅助层) |
+|---|---|---|
+| **定位与角色** | **高精度跨文件语义核心** | **实时增量结构补丁** |
+| **价值体现** | 消除多态与重载歧义，提供确定性的调用链、数据流分析及精准影响面评估。 | 保证编辑器/AI Agent 操作时的实时响应，纠正文件编辑后的符号偏移。 |
+| **解析机理** | 结合编译器/构建系统，进行类型推导与符号消歧。 | 纯文本 AST 解析，无需编译，不依赖任何第三方构建工具。 |
+| **更新频率** | 按需触发/定时批量生成（`amap index`），重构或大变更时更新。 | 实时监听（`amap watch` / 每次文件保存），毫秒级增量覆写到 SQLite。 |
+
+#### 融合与消歧逻辑
+
+在 AstraMap 的合并引擎（Merge Engine）中：
+1. **SCIP 注入黄金语义**：SCIP 运行后，将高精度的跨文件调用和接口实现关系写入 SQLite，奠定图谱的精准度根基。
+2. **Tree-sitter 提供实时纠偏**：在两次 SCIP 运行之间，Tree-sitter 通过覆盖层（Syntax Overlay）修正因开发者的编辑操作导致的符号行号漂移、新符号定义缺失等问题，保证图谱“虽有微小滞后但不失真”。
+3. **降级保障**：在没有配置 SCIP 或构建环境不完备的开发边缘场景下，系统才临时退化到以 Tree-sitter 为基础的启发式推演。
+
+---
 
 ## astra-code-map 能解决什么
 
@@ -168,40 +223,7 @@ amap watch 30
 | `astra-code-map_status` | 查看索引覆盖与数据来源 |
 | `astra-code-map_files` | 按目录或模式查询已索引文件 |
 
-## 架构概览
 
-astra-code-map 使用“实时结构 + 最终语义”的双层模型。
-
-```mermaid
-graph LR
-    A[Source Code] --> B[Tree-sitter Real-time Layer]
-    A --> C[SCIP Semantic Providers]
-    B --> D[astra-code-map Merge Engine]
-    C --> D
-    D --> E[(SQLite Semantic Code Graph)]
-    E --> F[MCP Server]
-    E --> G[REST API]
-    G --> H[Web Dashboard]
-    F --> I[AI Coding Agents]
-```
-
-### Tree-sitter 实时层
-
-- 快速解析当前磁盘文件
-- 提取定义、签名、注释和局部调用
-- 支持文件级增量更新
-- 在没有 SCIP Provider 时提供可用的基础代码地图
-
-### SCIP 语义层
-
-- 提供跨文件定义与引用
-- 解析类型关系、实现关系和重载符号
-- 提升调用图与影响分析的确定性
-- 按项目语言和构建环境选择性启用
-
-### 合并与存储
-
-所有节点和关系都会记录来源信息，并统一写入本地 SQLite 数据库。MCP、REST API 和 Dashboard 共享同一份数据，不维护多套互相漂移的索引。
 
 ## 支持语言
 
@@ -330,9 +352,19 @@ astra-code-map 仍在持续演进。公开接口、配置格式和索引数据�
 
 提交代码前，请先通过 Issue 说明问题背景和预期方案。安全问题不要在公开 Issue 中披露敏感细节。
 
+## 更新日志
+
+详情见完整 [CHANGELOG.md](CHANGELOG.md)。
+
+### [v0.2.0] - 2026-07-30
+- 🚀 **架构确立**：确立“SCIP 高精度语义为主，Tree-sitter 实时语法为辅”的双层混合架构。
+- ⚡ **Watch 增量防抖**：`amap watch` 隔离高频 SCIP 编译，增加 2 分钟静默防抖收敛机制。
+- 🎯 **启发式消歧**：引入物理同包路径优先过滤、拦截 Go `init()` 隐式调用、强化 `obj.Method()` 盲连防御。
+
 ## 相关文档
 
 - [快速部署](QUICKSTART.md)
+- [更新日志](CHANGELOG.md)
 - [第三方软件声明](THIRD_PARTY_NOTICES.md)
 
 ## License
