@@ -29,6 +29,16 @@ var (
 	callRe              = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
 	functionPointerInit = regexp.MustCompile(`\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*&?\s*([a-zA-Z_][a-zA-Z0-9_]*)`)
 	macroReturnCallRe   = regexp.MustCompile(`\b[A-Z][A-Z0-9_]*RETURN\s*\(([^,\)]+)`)
+
+	// Cross-language command execution patterns
+	// Go: exec.Command("python3", "path/to/script.py")
+	goExecCommandRe = regexp.MustCompile(`exec\.Command\s*\(\s*["']python3?["']\s*,\s*["']([^"']+\.py)["']`)
+	// Python: subprocess.run(["python3", "script.py"])
+	pySubprocessRunRe = regexp.MustCompile(`subprocess\.(?:run|Popen)\s*\(\s*\[\s*["']python3?["']\s*,\s*["']([^"']+\.py)["']`)
+	// Python: os.system("python3 script.py")
+	pyOsSystemRe = regexp.MustCompile(`os\.system\s*\(\s*["']python3?\s+([^"']+\.py)["']`)
+	// Python: exec(open("file.py").read())
+	pyExecOpenRe = regexp.MustCompile(`exec\s*\(\s*open\s*\(\s*["']([^"']+\.py)["']\s*\)\.read\s*\(\s*\)\s*\)`)
 )
 
 func isKeyword(name string) bool {
@@ -727,4 +737,192 @@ func trailingIdentifier(expr string) string {
 
 func isAmbiguousHeuristicCall(targets []string) bool {
 	return len(targets) > 1
+}
+
+// ===== Cross-Language Command Execution Resolver =====
+//
+// SCIP is a single-language protocol. When Go code calls exec.Command to
+// spawn a Python script, or Python uses subprocess.run to invoke another Python
+// file, no cross-language call edge is emitted by the language servers.
+// This resolver bridges that gap by pattern-matching common command execution
+// APIs and creating synthetic 'calls' edges from the caller function to the
+// target script's entry point.
+
+// crossLangCmdMatch captures one detected cross-language command invocation.
+type crossLangCmdMatch struct {
+	callerID string // USN of the calling function
+	targetID string // USN of the target script's entry function
+	line     int
+	col      int
+}
+
+// ResolveCrossLanguageCalls scans all indexed source files for patterns that
+// invoke external scripts via command execution APIs (exec.Command,
+// subprocess.run, os.system, etc.) and creates synthetic call edges from the
+// enclosing function to the target script's entry point.
+func ResolveCrossLanguageCalls(db *sqlx.DB, projectRoot string) error {
+	filter, err := LoadIndexFilter(projectRoot)
+	if err != nil {
+		return fmt.Errorf("load project filter: %w", err)
+	}
+
+	// Build a lookup of Python file paths -> entry function node ID
+	type entryNode struct {
+		ID        string `db:"id"`
+		FilePath  string `db:"file_path"`
+		StartLine int    `db:"start_line"`
+	}
+	var entries []entryNode
+	// Heuristic: the first function/method in a .py file is treated as the
+	// script entry point. In practice this is often `main()` or the top-level
+	// block, but SCIP indexes functions, not top-level statements.
+	err = db.Select(&entries, `
+		SELECT id, file_path, start_line FROM astramap_nodes
+		WHERE language = 'python' AND kind IN ('function', 'method')
+		GROUP BY file_path
+		HAVING start_line = MIN(start_line)
+	`)
+	if err != nil {
+		return fmt.Errorf("query python entry nodes: %w", err)
+	}
+	pyFileToEntry := make(map[string]string)
+	for _, e := range entries {
+		pyFileToEntry[e.FilePath] = e.ID
+	}
+	if len(pyFileToEntry) == 0 {
+		logInfo("ResolveCrossLanguageCalls: no Python entry points found, skipping")
+		return nil
+	}
+
+	var files []string
+	err = db.Select(&files, "SELECT path FROM astramap_files")
+	if err != nil {
+		return fmt.Errorf("query files: %w", err)
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Remove stale synthetic edges
+	_, _ = tx.Exec("DELETE FROM astramap_edges WHERE provenance = 'cross-lang' AND kind = 'calls'")
+
+	insertStmt, err := tx.Preparex(`
+		INSERT OR IGNORE INTO astramap_edges (source, target, kind, provenance, line, col, metadata)
+		VALUES (?, ?, 'calls', 'cross-lang', ?, ?, '')
+	`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for _, fp := range files {
+		if !filter.Allows(fp, StageSyntax) {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(projectRoot, fp))
+		if readErr != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		var funcs []funcNode
+		if selectErr := db.Select(&funcs,
+			"SELECT id, start_line, end_line FROM astramap_nodes WHERE file_path = ? AND kind IN ('function', 'method')",
+			fp); selectErr != nil {
+			continue
+		}
+
+		for i, line := range lines {
+			lineNum := i + 1
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+
+			// Determine caller function for this line
+			var callerID string
+			callerSpan := 0
+			for _, lf := range funcs {
+				if lineNum >= lf.StartLine && lineNum <= lf.EndLine {
+					span := lf.EndLine - lf.StartLine
+					if callerID == "" || span < callerSpan {
+						callerID = lf.ID
+						callerSpan = span
+					}
+				}
+			}
+			if callerID == "" {
+				continue
+			}
+
+			// Try each pattern
+			for _, m := range extractCrossLanguageTargets(line, pyFileToEntry) {
+				if m.callerID == "" {
+					m.callerID = callerID
+				}
+				if m.callerID == m.targetID {
+					continue
+				}
+				_, _ = insertStmt.Exec(m.callerID, m.targetID, lineNum, m.col)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	var count int
+	_ = db.Get(&count, "SELECT COUNT(*) FROM astramap_edges WHERE provenance = 'cross-lang' AND kind = 'calls'")
+	logInfo("ResolveCrossLanguageCalls: resolved %d cross-language call edges", count)
+	return nil
+}
+
+// extractCrossLanguageTargets applies all cross-language command patterns to a
+// single source line and returns any matches.
+func extractCrossLanguageTargets(line string, pyFileToEntry map[string]string) []crossLangCmdMatch {
+	var matches []crossLangCmdMatch
+
+	// Go: exec.Command("python3", "path/to/script.py")
+	for _, m := range goExecCommandRe.FindAllStringSubmatchIndex(line, -1) {
+		if len(m) >= 4 {
+			scriptPath := line[m[2]:m[3]]
+			if target := pyFileToEntry[scriptPath]; target != "" {
+				matches = append(matches, crossLangCmdMatch{targetID: target, col: m[0] + 1})
+			}
+		}
+	}
+
+	// Python: subprocess.run(["python3", "script.py"])
+	for _, m := range pySubprocessRunRe.FindAllStringSubmatchIndex(line, -1) {
+		if len(m) >= 4 {
+			scriptPath := line[m[2]:m[3]]
+			if target := pyFileToEntry[scriptPath]; target != "" {
+				matches = append(matches, crossLangCmdMatch{targetID: target, col: m[0] + 1})
+			}
+		}
+	}
+
+	// Python: os.system("python3 script.py")
+	for _, m := range pyOsSystemRe.FindAllStringSubmatchIndex(line, -1) {
+		if len(m) >= 4 {
+			scriptPath := line[m[2]:m[3]]
+			if target := pyFileToEntry[scriptPath]; target != "" {
+				matches = append(matches, crossLangCmdMatch{targetID: target, col: m[0] + 1})
+			}
+		}
+	}
+
+	// Python: exec(open("file.py").read())
+	for _, m := range pyExecOpenRe.FindAllStringSubmatchIndex(line, -1) {
+		if len(m) >= 4 {
+			scriptPath := line[m[2]:m[3]]
+			if target := pyFileToEntry[scriptPath]; target != "" {
+				matches = append(matches, crossLangCmdMatch{targetID: target, col: m[0] + 1})
+			}
+		}
+	}
+
+	return matches
 }

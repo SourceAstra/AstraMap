@@ -225,6 +225,16 @@ if [ -n "${VERSION}" ]; then
   git push origin "${VERSION}" || true
 fi
 
+if git remote | grep -q "^gitee$"; then
+  echo "    Pushing branch '${CURRENT_BRANCH}' to gitee..."
+  git push gitee "${CURRENT_BRANCH}" || true
+  
+  if [ -n "${VERSION}" ]; then
+    echo "    Pushing tag '${VERSION}' to gitee..."
+    git push gitee "${VERSION}" || true
+  fi
+fi
+
 # Step 5: Upload release artifacts to GitHub Release
 echo ""
 if [ -d "${PROJECT_ROOT}/dist" ] && ls "${PROJECT_ROOT}/dist"/amap-* >/dev/null 2>&1; then

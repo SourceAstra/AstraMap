@@ -556,6 +556,10 @@ func ImportScipIndexesToAstraMap(db *sqlx.DB, scipPaths []string, projectRoot st
 		logError("ResolveCrossFileCalls failed: %v", err)
 	}
 
+	if err := ResolveCrossLanguageCalls(db, projectRoot); err != nil {
+		logError("ResolveCrossLanguageCalls failed: %v", err)
+	}
+
 	InvalidateOverviewCache()
 	langFiles := make(map[string]int)
 	for _, lang := range fileLanguages {
