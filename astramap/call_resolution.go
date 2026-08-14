@@ -794,10 +794,33 @@ func ResolveCrossLanguageCalls(db *sqlx.DB, projectRoot string) error {
 		return nil
 	}
 
+	// Only host-language files (Go, JavaScript) can invoke Python scripts;
+	// scanning Python files or data files is wasted work.
 	var files []string
-	err = db.Select(&files, "SELECT path FROM astramap_files")
+	err = db.Select(&files, "SELECT path FROM astramap_files WHERE language IN ('go', 'javascript')")
 	if err != nil {
 		return fmt.Errorf("query files: %w", err)
+	}
+	logInfo("ResolveCrossLanguageCalls: scanning %d host-language files for cross-lang calls", len(files))
+
+	// Batch-load function nodes once instead of N+1 queries per file.
+	type funcNodeRow struct {
+		ID        string `db:"id"`
+		FilePath  string `db:"file_path"`
+		StartLine int    `db:"start_line"`
+		EndLine   int    `db:"end_line"`
+	}
+	var allFuncs []funcNodeRow
+	err = db.Select(&allFuncs, `
+		SELECT id, file_path, start_line, end_line FROM astramap_nodes
+		WHERE language IN ('go', 'javascript') AND kind IN ('function', 'method')
+	`)
+	if err != nil {
+		return fmt.Errorf("query function nodes: %w", err)
+	}
+	funcsByFile := make(map[string][]funcNode, len(files))
+	for _, f := range allFuncs {
+		funcsByFile[f.FilePath] = append(funcsByFile[f.FilePath], funcNode{ID: f.ID, StartLine: f.StartLine, EndLine: f.EndLine})
 	}
 
 	tx, err := db.Beginx()
@@ -818,8 +841,13 @@ func ResolveCrossLanguageCalls(db *sqlx.DB, projectRoot string) error {
 	}
 	defer insertStmt.Close()
 
+	scanned := 0
 	for _, fp := range files {
 		if !filter.Allows(fp, StageSyntax) {
+			continue
+		}
+		funcs := funcsByFile[fp]
+		if len(funcs) == 0 {
 			continue
 		}
 		data, readErr := os.ReadFile(filepath.Join(projectRoot, fp))
@@ -827,12 +855,6 @@ func ResolveCrossLanguageCalls(db *sqlx.DB, projectRoot string) error {
 			continue
 		}
 		lines := strings.Split(string(data), "\n")
-		var funcs []funcNode
-		if selectErr := db.Select(&funcs,
-			"SELECT id, start_line, end_line FROM astramap_nodes WHERE file_path = ? AND kind IN ('function', 'method')",
-			fp); selectErr != nil {
-			continue
-		}
 
 		for i, line := range lines {
 			lineNum := i + 1
@@ -867,6 +889,10 @@ func ResolveCrossLanguageCalls(db *sqlx.DB, projectRoot string) error {
 				}
 				_, _ = insertStmt.Exec(m.callerID, m.targetID, lineNum, m.col)
 			}
+		}
+		scanned++
+		if scanned%100 == 0 {
+			logInfo("ResolveCrossLanguageCalls: scanned %d/%d files", scanned, len(files))
 		}
 	}
 
